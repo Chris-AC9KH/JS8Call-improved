@@ -89,17 +89,32 @@ include(VersionCompute)
 # preprocessor.
 #------------------------------------------------------------------------------#
 
-option(WSJT_QDEBUG_TO_FILE     "Redirect Qt debuging messages to a trace file.")
+option(WSJT_QDEBUG_TO_FILE     "Redirect Qt debugging messages to a trace file.")
 option(WSJT_TRACE_CAT          "Debugging option that turns on CAT diagnostics.")
 option(WSJT_TRACE_CAT_POLLS    "Debugging option that turns on CAT diagnostics during polling.")
 option(WSJT_HAMLIB_TRACE       "Debugging option that turns on minimal Hamlib internal diagnostics.")
 option(WSJT_RIG_NONE_CAN_SPLIT "Allow split operation with \"None\" as rig.")
 
-cmake_dependent_option(WSJT_HAMLIB_VERBOSE_TRACE "Debugging option that turns on full Hamlib internal diagnostics." OFF WSJT_HAMLIB_TRACE OFF)
-cmake_dependent_option(WSJT_QDEBUG_IN_RELEASE "Leave Qt debugging statements in Release configuration." OFF
-  "NOT is_debug_build" OFF)
-cmake_dependent_option(WSJT_ENABLE_EXPERIMENTAL_FEATURES "Enable features not fully ready for public releases." ON
-  is_debug_build OFF)
+cmake_dependent_option(
+  WSJT_HAMLIB_VERBOSE_TRACE
+  "Debugging option that turns on full Hamlib internal diagnostics."
+  OFF
+  WSJT_HAMLIB_TRACE
+  OFF)
+
+cmake_dependent_option(
+  WSJT_QDEBUG_IN_RELEASE
+  "Leave Qt debugging statements in Release configuration."
+  OFF
+  "NOT (CMAKE_BUILD_TYPE STREQUAL Debug)"
+  OFF)
+
+cmake_dependent_option(
+  WSJT_ENABLE_EXPERIMENTAL_FEATURES
+  "Enable features not fully ready for public releases."
+  ON
+  "CMAKE_BUILD_TYPE STREQUAL Debug"
+  OFF)
 
 #------------------------------------------------------------------------------#
 # Handle Qt debugging statements in release builds.
@@ -371,7 +386,8 @@ qt_add_resources(
 )
 
 #------------------------------------------------------------------------------#
-# Compiler setup.
+# Compiler setup. OSX will by default choose the correct compiler flags;
+# on other platforms we'll probably need to expand on this by platform.
 #------------------------------------------------------------------------------#
 
 set (CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -Wall -Wextra")
@@ -391,18 +407,22 @@ get_filename_component(QT_BIN_DIR "${QMAKE_EXECUTABLE}" DIRECTORY)
 #------------------------------------------------------------------------------#
 
 if (APPLE)
-  find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${QT_BIN_DIR}")
-  add_custom_command(TARGET ${TARGET} POST_BUILD
-      COMMAND "${MACDEPLOYQT_EXECUTABLE}"
-          "$<TARGET_FILE_DIR:${TARGET}>/../.."
-          -always-overwrite
-      COMMENT "Running macdeployqt..."
+  find_program(MACDEPLOYQT macdeployqt HINTS "${QT_BIN_DIR}")
+  add_custom_command(
+    TARGET ${TARGET}
+    POST_BUILD
+    COMMAND "${MACDEPLOYQT}"
+      "$<TARGET_FILE_DIR:${TARGET}>/../.."
+      -always-overwrite
+    COMMENT "Running macdeployqt..."
   )
 endif (APPLE)
 
 #------------------------------------------------------------------------------#
 # On Windows, we need to add the OmniRig transceiver, which involves COM,
-# and the RC file in order to reference the Windows icon resource.
+# and the RC file in order to reference the Windows icon resource. As of
+# this writing, what follows here is untested and incomplete, but should
+# be a good starting point.
 #------------------------------------------------------------------------------#
 
 if (WIN32)
@@ -411,7 +431,7 @@ if (WIN32)
   find_package(Qt6 REQUIRED COMPONENTS AxContainer AxServer)
 
   # generate the OmniRig COM interface source
-  find_program(DUMPCPP dumpcpp)
+  find_program(DUMPCPP dumpcpp HINTS "${QT_BIN_DIR}")
   if (DUMPCPP-NOTFOUND)
     message(FATAL_ERROR "dumpcpp tool not found")
   endif (DUMPCPP-NOTFOUND)
