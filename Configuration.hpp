@@ -77,8 +77,6 @@ public:
   bool is_active () const;
 
   QDir temp_dir () const;
-  QDir doc_dir () const;
-  QDir data_dir () const;
   QDir writeable_data_dir () const;
 
   QAudioDevice const& audio_input_device () const;
