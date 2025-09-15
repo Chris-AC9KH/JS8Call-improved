@@ -504,8 +504,6 @@ private:
 
   QSettings * settings_;
 
-  QDir doc_dir_;
-  QDir data_dir_;
   QDir temp_dir_;
   QDir writeable_data_dir_;
   QDir default_save_directory_;
@@ -712,8 +710,6 @@ Configuration::~Configuration ()
 {
 }
 
-QDir Configuration::doc_dir () const {return m_->doc_dir_;}
-QDir Configuration::data_dir () const {return m_->data_dir_;}
 QDir Configuration::writeable_data_dir () const {return m_->writeable_data_dir_;}
 QDir Configuration::temp_dir () const {return m_->temp_dir_;}
 
@@ -1126,41 +1122,6 @@ void Configuration::set_dynamic_station_status(QString const& status)
   m_->dynamic_status_ = status.trimmed ();
 }
 
-
-namespace
-{
-#if defined (Q_OS_MAC)
-  const char * const app_root = "/../../../";
-#else
-  const char * const app_root = "/../";
-#endif
-  QString doc_path ()
-  {
-#if CMAKE_BUILD
-    if (QDir::isRelativePath (CMAKE_INSTALL_DOCDIR))
-      {
-	return QApplication::applicationDirPath () + app_root + CMAKE_INSTALL_DOCDIR;
-      }
-    return CMAKE_INSTALL_DOCDIR;
-#else
-    return QApplication::applicationDirPath ();
-#endif
-  }
-
-  QString data_path ()
-  {
-#if CMAKE_BUILD
-    if (QDir::isRelativePath (CMAKE_INSTALL_DATADIR))
-      {
-	return QApplication::applicationDirPath () + app_root + CMAKE_INSTALL_DATADIR + QChar {'/'} + CMAKE_PROJECT_NAME;
-      }
-    return CMAKE_INSTALL_DATADIR;
-#else
-    return QApplication::applicationDirPath ();
-#endif
-  }
-}
-
 template <typename T> void setUppercase(T* t){
     auto f = t->font();
     f.setCapitalization(QFont::AllUppercase);
@@ -1186,8 +1147,6 @@ Configuration::impl::impl (Configuration * self, QDir const& temp_directory,
   , transceiver_thread_ {nullptr}
   , ui_ {new Ui::configuration_dialog}
   , settings_ {settings}
-  , doc_dir_ {doc_path ()}
-  , data_dir_ {data_path ()}
   , temp_dir_ {temp_directory}
   , writeable_data_dir_ {QStandardPaths::writableLocation (QStandardPaths::AppLocalDataLocation)}
   , restart_sound_input_device_ {false}
