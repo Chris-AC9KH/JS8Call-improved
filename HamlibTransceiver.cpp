@@ -226,7 +226,7 @@ HamlibTransceiver::HamlibTransceiver (TransceiverFactory::PTTMethod ptt_type, QS
     case TransceiverFactory::PTT_method_RTS:
       if (!ptt_port.isEmpty ())
         {
-#if defined (WIN32)
+#if defined (Q_OS_WIN)
           set_conf ("ptt_pathname", ("\\\\.\\" + ptt_port).toLatin1 ().data ());
 #else
           set_conf ("ptt_pathname", ptt_port.toLatin1 ().data ());
@@ -393,7 +393,7 @@ HamlibTransceiver::HamlibTransceiver (int model_number, TransceiverFactory::Para
           && params.ptt_port != "None"
           && (is_dummy_ || params.ptt_port != params.serial_port))
         {
-#if defined (WIN32)
+#if defined (Q_OS_WIN)
           set_conf ("ptt_pathname", ("\\\\.\\" + params.ptt_port).toLatin1 ().data ());
 #else
           set_conf ("ptt_pathname", params.ptt_port.toLatin1 ().data ());

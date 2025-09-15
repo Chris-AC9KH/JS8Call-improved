@@ -301,7 +301,7 @@ public:
     // Attempt to load up the eclipse dates. Not a big deal if this fails;
     // just means that we won't bypass the spot cache during eclipse periods.
   
-    if (auto file = QFile(config->data_dir().absoluteFilePath("eclipse.txt"));
+    if (auto file = QFile(":/eclipse.txt");
              file.open(QIODevice::ReadOnly))
     {
       auto text = QTextStream(&file);

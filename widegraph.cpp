@@ -225,21 +225,24 @@ WideGraph::WideGraph(QSettings * settings,
     setFilterEnabled       (m_settings->value("FilterEnabled",      true).toBool());
   }
 
-  int index = 0;
-  for (QString const & file :m_palettes_path.entryList(QDir::NoDotAndDotDot |
-                                                       QDir::System         |
-                                                       QDir::Hidden         |
-                                                       QDir::AllDirs        |
-                                                       QDir::Files,
-                                                       QDir::DirsFirst))
-  {
-    QString t = file.mid(0, file.length() - 4);
-    ui->paletteComboBox->addItem(t);
-    if (t == m_waterfallPalette) ui->paletteComboBox->setCurrentIndex(index);
-    index++;
+  for (auto const & file : m_palettes_path.entryList(QDir::NoDotAndDotDot |
+                                                     QDir::System         |
+                                                     QDir::Hidden         |
+                                                     QDir::AllDirs        |
+                                                     QDir::Files,
+                                                     QDir::DirsFirst)) {
+    auto const item = QFileInfo(file).completeBaseName();
+    ui->paletteComboBox->addItem(item);
+    if (item == m_waterfallPalette) {
+      ui->paletteComboBox->setCurrentIndex(ui->paletteComboBox->count() - 1);
+    }
   }
+
   ui->paletteComboBox->addItem(user_defined);
-  if (user_defined == m_waterfallPalette) ui->paletteComboBox->setCurrentIndex(index);
+  if (user_defined == m_waterfallPalette) {
+    ui->paletteComboBox->setCurrentIndex(ui->paletteComboBox->count() - 1);
+  }
+
   readPalette();
 
   connect(m_drawTimer, &QTimer::timeout, this, [this]
