@@ -64,17 +64,6 @@ if ("${CPACK_GENERATOR}" STREQUAL "PackageMaker")
   set (CPACK_PACKAGING_INSTALL_PREFIX "/")
 endif ()
 
-if ("${CPACK_GENERATOR}" STREQUAL "DragNDrop")
-  set (CPACK_DMG_VOLUME_NAME "@PROJECT_NAME@")
-  set (CPACK_DMG_BACKGROUND_IMAGE "@PROJECT_SOURCE_DIR@/icons/Darwin/DragNDrop Background.png")
-  set (CPACK_DMG_DS_STORE "@PROJECT_SOURCE_DIR@/Darwin/js8call_DMG.DS_Store")
-  set (CPACK_BUNDLE_NAME "@WSJTX_BUNDLE_NAME@")
-  set (CPACK_PACKAGE_ICON "@PROJECT_BINARY_DIR@/js8call.icns")
-  set (CPACK_BUNDLE_ICON "@PROJECT_BINARY_DIR@/js8call.icns")
-  set (CPACK_BUNDLE_STARTUP_COMMAND "@PROJECT_SOURCE_DIR@/Mac-js8call-startup.sh")
-  set (CPACK_PACKAGING_INSTALL_PREFIX "/")
-endif ()
-
 if ("${CPACK_GENERATOR}" STREQUAL "WIX")
   # Reset CPACK_PACKAGE_VERSION to deal with WiX restriction.
   # But the file names still use the full CMake_VERSION value:

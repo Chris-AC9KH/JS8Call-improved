@@ -62,9 +62,6 @@ inkscape -z -e ../icons/Darwin/wsjt.iconset/icon_256x256@2x.png -w 512 -h 512 ic
 inkscape -z -e ../icons/Darwin/wsjt.iconset/icon_512x512.png -w 512 -h 512 icon_1024.svg
 inkscape -z -e ../icons/Darwin/wsjt.iconset/icon_512x512@2x.png -w 1024 -h 1024 icon_1024.svg
 identify -format '%f %p/%n %m %C/%Q %r %G %A %z\n' ../icons/Darwin/wsjt.iconset/*
-#
-inkscape -z -e "../icons/Darwin/DragNDrop Background.png" -w 640 -h 480 -b white "DragNDrop Background.svg"
-identify -format '%f %p/%n %m %C/%Q %r %G %A %z\n' "../icons/Darwin/DragNDrop Background.png"
 
 #
 # KDE & Gnome
