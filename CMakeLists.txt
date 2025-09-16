@@ -466,8 +466,7 @@ if (WIN32)
   add_custom_command(
     TARGET ${TARGET}
     POST_BUILD
-    COMMAND "${WINDEPLOYQT}"
-      "$<TARGET_FILE_DIR:${TARGET}>/../.."
+    COMMAND "${WINDEPLOYQT}" "$<TARGET_FILE_DIR:${TARGET}>"
     COMMENT "Running windeployqt..."
   )
 
