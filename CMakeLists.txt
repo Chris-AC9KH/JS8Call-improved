@@ -462,7 +462,14 @@ if (WIN32)
     Qt::AxServer
   )
 
-  # XXX run windeployqt here, TBD
+  find_program(WINDEPLOYQT windeployqt HINTS "${QT_BIN_DIR}")
+  add_custom_command(
+    TARGET ${TARGET}
+    POST_BUILD
+    COMMAND "${WINDEPLOYQT}"
+      "$<TARGET_FILE_DIR:${TARGET}>/../.."
+    COMMENT "Running windeployqt..."
+  )
 
 endif (WIN32)
 
