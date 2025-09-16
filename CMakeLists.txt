@@ -154,8 +154,8 @@ include_directories(${FFTW3_INCLUDE_DIRS})
 #------------------------------------------------------------------------------#
 
 if (APPLE)
-  set (ICON_FILE ${CMAKE_PROJECT_NAME}.icns)
-  set (ICON_SRCS
+  set(ICON_FILE ${CMAKE_PROJECT_NAME}.icns)
+  set(ICON_SRCS
     icons/Darwin/${CMAKE_PROJECT_NAME}.iconset/icon_16x16.png
     icons/Darwin/${CMAKE_PROJECT_NAME}.iconset/icon_16x16@2x.png
     icons/Darwin/${CMAKE_PROJECT_NAME}.iconset/icon_32x32.png
@@ -167,13 +167,13 @@ if (APPLE)
     icons/Darwin/${CMAKE_PROJECT_NAME}.iconset/icon_512x512.png
     icons/Darwin/${CMAKE_PROJECT_NAME}.iconset/icon_512x512@2x.png
   )
-  add_custom_command (
+  add_custom_command(
     OUTPUT ${ICON_FILE}
     COMMAND iconutil -c icns --output "${CMAKE_BINARY_DIR}/${ICON_FILE}" "${CMAKE_SOURCE_DIR}/icons/Darwin/${CMAKE_PROJECT_NAME}.iconset"
     DEPENDS ${ICON_SRCS}
     COMMENT "Building Icons"
   )
-  set_source_files_properties (${ICON_FILE} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+  set_source_files_properties(${ICON_FILE} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 endif (APPLE)
 
 #------------------------------------------------------------------------------#
@@ -418,58 +418,60 @@ if (APPLE)
 endif (APPLE)
 
 #------------------------------------------------------------------------------#
-# On Windows, we need to add the OmniRig transceiver, which involves COM,
-# and the RC file in order to reference the Windows icon resource. As of
-# this writing, what follows here is untested and incomplete, but should
-# be a good starting point.
+# On Windows, we want to conditionally enable OmniRig, as frankly, it's at
+# present got a foot in the grave and another on a banana peel, we we must
+# be prepared to eliminate the integration if nothing changes for the better.
 #------------------------------------------------------------------------------#
 
 if (WIN32)
 
-  include(QtAxMacros)
-  find_package(Qt6 REQUIRED COMPONENTS AxContainer AxServer)
+  option(ENABLE_OMNIRIG "Enable OmniRig COM integration" OFF)
 
-  # generate the OmniRig COM interface source
-  find_program(DUMPCPP dumpcpp HINTS "${QT_BIN_DIR}")
-  if (DUMPCPP-NOTFOUND)
-    message(FATAL_ERROR "dumpcpp tool not found")
-  endif (DUMPCPP-NOTFOUND)
-  execute_process(
-    COMMAND ${DUMPCPP} -getfile {4FE359C5-A58F-459D-BE95-CA559FB4F270}
-    OUTPUT_VARIABLE AXSERVER
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  string(STRIP "${AXSERVER}" AXSERVER)
-  if (NOT AXSERVER)
-    message(FATAL_ERROR "You need to install OmniRig on this computer")
-  endif (NOT AXSERVER)
-  string(REPLACE "\"" "" AXSERVER ${AXSERVER})
-  file(TO_CMAKE_PATH ${AXSERVER} AXSERVERSRCS)
+  if (ENABLE_OMNIRIG)
+    include(QtAxMacros)
+    find_package(Qt6 REQUIRED COMPONENTS AxContainer AxServer)
+    find_program(DUMPCPP dumpcpp HINTS "${QT_BIN_DIR}")
+    execute_process(
+      COMMAND "${DUMPCPP}" -getfile {4FE359C5-A58F-459D-BE95-CA559FB4F270}
+      OUTPUT_VARIABLE AXSERVER
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    string(STRIP "${AXSERVER}" AXSERVER)
+    if (AXSERVER)
+      string(REPLACE "\"" "" AXSERVER "${AXSERVER}")
+      file(TO_CMAKE_PATH "${AXSERVER}" AXSERVERSRCS)
 
-  # Wrap the AX COM server
+      wrap_ax_server(GENAXSRCS "${AXSERVERSRCS}")
 
-  wrap_ax_server(GENAXSRCS ${AXSERVERSRCS})
+      target_sources(${TARGET} PRIVATE
+        OmniRigTransceiver.cpp
+        ${GENAXSRCS}
+      )
 
-  target_sources(
-    ${TARGET} PRIVATE
-    OmniRigTransceiver.cpp
-    wsjtx.rc
-  )
+      target_link_libraries(${TARGET} PRIVATE
+        Qt::AxContainer
+        Qt::AxServer
+      )
+    else()
+      message(STATUS "OmniRig not installed; skipping OmniRig integration.")
+    endif()
+  endif()
 
-  target_link_libraries(
-    ${TARGET} PRIVATE
-    Qt::AxContainer
-    Qt::AxServer
-  )
+  # Windows icons require an RC file.
 
-  find_program(WINDEPLOYQT windeployqt HINTS "${QT_BIN_DIR}")
+  target_sources(${TARGET} PRIVATE wsjtx.rc)
+
+  # Find the windeployqt command and run it against the generated binary,
+  # which should handle all the gnarly bits.
+
+  find_program(WINDEPLOYQT NAMES windeployqt HINTS "${QT_BIN_DIR}")
   add_custom_command(
     TARGET ${TARGET}
     POST_BUILD
     COMMAND "${WINDEPLOYQT}" "$<TARGET_FILE_DIR:${TARGET}>"
     COMMENT "Running windeployqt..."
   )
-
 endif (WIN32)
 
 #------------------------------------------------------------------------------#
