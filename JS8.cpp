@@ -14,6 +14,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <numbers>
 #include <numeric>
 #include <stdexcept>
 #include <string_view>
@@ -84,9 +85,9 @@ namespace
     constexpr auto
     cos(double x)
     {
-        constexpr auto RAD_360 = M_PI * 2;
-        constexpr auto RAD_180 = M_PI;
-        constexpr auto RAD_90  = M_PI_2;
+        constexpr auto RAD_360 = std::numbers::pi * 2;
+        constexpr auto RAD_180 = std::numbers::pi;
+        constexpr auto RAD_90  = std::numbers::pi / 2;
 
         // Polynomial approximation of cos(x) for x in [0, RAD_90],
         // Accuracy here in theory is 1e-18, but double precision
@@ -186,7 +187,7 @@ namespace
     constexpr int         NSSY     = 4;
     constexpr int         NP       = 3200;
     constexpr int         NP2      = 2812;
-    constexpr float       TAU      = 2.0f * M_PI;
+    constexpr float       TAU      = 2.0f * std::numbers::pi_v<float>;
     constexpr auto        ZERO     = std::complex<float>{0.0f, 0.0f};
 
     // Key for the constants that follow:
@@ -407,7 +408,7 @@ namespace
         // C++20 and above, and presumably it'll be of high quality.
 
         auto           nodes = std::array<double, BASELINE_DEGREE + 1>{};
-        constexpr auto slice = M_PI / (2.0 * nodes.size());
+        constexpr auto slice = std::numbers::pi / (2.0 * nodes.size());
 
         for (std::size_t i = 0; i < nodes.size(); ++i)
         {
@@ -1101,7 +1102,7 @@ namespace
 
             for (size_t i = 0; i <= Mode::NDD; ++i)
             {
-                float const value = 0.5f * (1.0f + cos(i * M_PI / Mode::NDD));
+                float const value = 0.5f * (1.0f + cos(i * std::numbers::pi_v<float> / Mode::NDD));
 
                 taper[1][            i] = value; // TailTaper (original taper)
                 taper[0][Mode::NDD - i] = value; // HeadTaper (reversed taper)
@@ -1209,9 +1210,9 @@ namespace
 
             // Frequency tweaking.
 
-            float               const dphi  = -delfbest * ((2.0f * M_PI) / FS2); // Phase increment
-            std::complex<float> const wstep = std::polar(1.0f, dphi);            // Step for phase rotation
-            std::complex<float>       w     = {1.0f, 0.0f};                      // Cumlative phase
+            float               const dphi  = -delfbest * ((2.0f * std::numbers::pi_v<float>) / FS2); // Phase increment
+            std::complex<float> const wstep = std::polar(1.0f, dphi);                                 // Step for phase rotation
+            std::complex<float>       w     = {1.0f, 0.0f};                                           // Cumlative phase
         
             for (int i = 0; i < NP2; ++i)
             {
@@ -2080,8 +2081,8 @@ namespace
             constexpr float a3 = -0.0106411f;
 
             // Computed Pi constant to match the Fortran version; we could
-            // probably use M_PI here, but for the moment, matching Fortran
-            // exactly.
+            // probably use std::numbers::pi_v<float> here, but for the
+            // moment, matching Fortran exactly.
         
             float const pi  = 4.0f * std::atan(1.0f);
             float       sum = 0.0f;

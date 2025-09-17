@@ -1,6 +1,7 @@
 #include "Modulator.hpp"
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <QDateTime>
 #include <QDebug>
 #include <QtMath>
@@ -14,7 +15,7 @@
 
 namespace
 {
-  constexpr double TAU        = 2 * M_PI;
+  constexpr double TAU        = 2 * std::numbers::pi;
   constexpr auto   FRAME_RATE = 48000;
   constexpr auto   MS_PER_DAY = 86400000;
   constexpr auto   MS_PER_SEC = 1000;
