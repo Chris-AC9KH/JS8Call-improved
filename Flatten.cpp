@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <memory>
+#include <numbers>
 #include <utility>
 #include <vector>
 #include <vendor/Eigen/Dense>
@@ -61,9 +62,9 @@ namespace
 
     constexpr auto cos = [](double x)
     {
-      constexpr auto RAD_360 = M_PI * 2;
-      constexpr auto RAD_180 = M_PI;
-      constexpr auto RAD_90  = M_PI_2;
+      constexpr auto RAD_360 = std::numbers::pi * 2;
+      constexpr auto RAD_180 = std::numbers::pi;
+      constexpr auto RAD_90  = std::numbers::pi / 2;
 
       // Polynomial approximation of cos(x) for x in [0, RAD_90],
       // Accuracy here in theory is 1e-18, but double precision
@@ -126,7 +127,7 @@ namespace
     // C++20 and above, and presumably it'll be of high quality.
 
     auto           nodes = std::array<double, FLATTEN_DEGREE + 1>{};
-    constexpr auto slice = M_PI / (2.0 * nodes.size());
+    constexpr auto slice = std::numbers::pi / (2.0 * nodes.size());
 
     for (std::size_t i = 0; i < nodes.size(); ++i)
     {
