@@ -37,7 +37,7 @@ TransceiverFactory::TransceiverFactory ()
   DXLabSuiteCommanderTransceiver::register_transceivers (&transceivers_, CommanderId);
   HRDTransceiver::register_transceivers (&transceivers_, HRDId);
   
-#if defined (Q_OS_WIN)
+#if defined (Q_OS_WIN) && ENABLE_OMNIRIG
   // OmniRig is ActiveX/COM server so only on Windows
   OmniRigTransceiver::register_transceivers (&transceivers_, OmniRigOneId, OmniRigTwoId);
 #endif
@@ -129,7 +129,7 @@ std::unique_ptr<Transceiver> TransceiverFactory::create (ParameterPack const& pa
       }
       break;
 
-#if defined (Q_OS_WIN)
+#if defined (Q_OS_WIN) && ENABLE_OMNIRIG
     case OmniRigOneId:
       {
         std::unique_ptr<TransceiverBase> basic_transceiver;
