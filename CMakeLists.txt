@@ -444,6 +444,10 @@ if (WIN32)
 
       wrap_ax_server(GENAXSRCS "${AXSERVERSRCS}")
 
+      target_compile_definitions(${TARGET}
+        PRIVATE ENABLE_OMNIRIG=$<BOOL:${ENABLE_OMNIRIG}>
+      )
+
       target_sources(${TARGET} PRIVATE
         OmniRigTransceiver.cpp
         ${GENAXSRCS}

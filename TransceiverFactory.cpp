@@ -7,7 +7,7 @@
 #include "HRDTransceiver.hpp"
 #include "EmulateSplitTransceiver.hpp"
 
-#if defined (Q_OS_WIN)
+#if defined (Q_OS_WIN) && ENABLE_OMNIRIG
 #include "OmniRigTransceiver.hpp"
 #endif
 
