@@ -49,7 +49,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake/Modules ${CMAKE_MODULE_PATH})
 set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0)
 
 #------------------------------------------------------------------------------#
@@ -70,6 +69,12 @@ set(PROJECT_SUMMARY_DESCRIPTION "${PROJECT_NAME} - Digital Modes for Weak Signal
 set(PROJECT_DESCRIPTION "${PROJECT_SUMMARY_DESCRIPTION}
  ${PROJECT_NAME} is a computer program designed to facilitate amateur
  radio communication using very weak signals.")
+
+#------------------------------------------------------------------------------#
+# Add our own CMake modules.
+#------------------------------------------------------------------------------#
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake/Modules")
 
 #------------------------------------------------------------------------------#
 # CMake Script Includes
