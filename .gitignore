@@ -3,3 +3,5 @@ tags
 output
 docker/config/
 js8call.ini
+CMakeLists.txt.user
+build/

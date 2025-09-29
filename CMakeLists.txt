@@ -479,6 +479,8 @@ if (WIN32)
     TARGET ${TARGET}
     POST_BUILD
     COMMAND "${WINDEPLOYQT}" "$<TARGET_FILE_DIR:${TARGET}>"
+    --libdir JS8Call
+    --plugindir JS8Call
     COMMENT "Running windeployqt..."
   )
 endif (WIN32)
