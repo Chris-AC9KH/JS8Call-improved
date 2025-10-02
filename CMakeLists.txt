@@ -149,7 +149,7 @@ endif (WSJT_QDEBUG_IN_RELEASE)
 find_package(Boost 1.77 REQUIRED)
 find_package(FFTW3      REQUIRED COMPONENTS single threads)
 find_package(Hamlib     REQUIRED)
-find_package(Qt6    6.4 REQUIRED COMPONENTS Multimedia Network SerialPort Widgets)
+find_package(Qt6    6.5 REQUIRED COMPONENTS Multimedia Network SerialPort Widgets)
 
 include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${FFTW3_INCLUDE_DIRS})
