@@ -267,6 +267,7 @@ target_sources(
   PollingTransceiver.cpp
   ProcessThread.cpp
   PSKReporter.cpp
+  qDateTimeExperiment.cpp
   qt_helpers.cpp
   Radio.cpp
   RadioMetaType.cpp
@@ -284,6 +285,8 @@ target_sources(
   TransceiverBase.cpp
   TransceiverFactory.cpp
   TransmitTextEdit.cpp
+  TwoPhaseSignal.cpp
+  TxLoop.cpp
   varicode.cpp
   WF.cpp
   widegraph.cpp

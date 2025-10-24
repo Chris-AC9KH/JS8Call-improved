@@ -66,7 +66,7 @@ signals:
   void f11f12(int n);
   void setXIT(int n);
   void qsy(int);
-  void drifted(int, int);
+  void want_new_drift(qint64);
 
 public slots:
   void setDialFreq(float);
@@ -74,8 +74,7 @@ public slots:
   bool timeControlsVisible() const;
   void setControlsVisible(bool, bool = true);
   bool controlsVisible() const;
-  void setDrift(int);
-  int  drift() const;
+  void onDriftChanged(qint64 drift_ms);
   void setPaused(bool paused){ m_paused = paused; }
   void notifyDriftedSignalsDecoded(int);
 

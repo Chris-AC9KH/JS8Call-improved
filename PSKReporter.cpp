@@ -593,7 +593,7 @@ public:
           // insert Length and Export Time
           set_length(message, payload_);
           message.device()->seek(2 * sizeof(quint16));
-          message << static_cast<quint32>(DriftingDateTime::currentDateTime().toSecsSinceEpoch());
+          message << static_cast<quint32>(DriftingDateTime::currentSecsSinceEpoch());
 
           // Send data to PSK Reporter site
           socket_->write (payload_); // TODO: handle errors
@@ -708,7 +708,7 @@ PSKReporter::addRemoteStation(QString           const & call,
                   it == m_->calls_.end()         ||
                   it.value() > CACHE_TIMEOUT     ||
                   freq       > CACHE_BYPASS_FREQ ||
-                  m_->eclipse_active(DriftingDateTime::currentDateTime().toUTC()))
+                  m_->eclipse_active(DriftingDateTime::currentDateTimeUtc()))
     {
       m_->spots_.enqueue({call, grid, snr, freq, mode, DriftingDateTime::currentDateTimeUtc()});
       m_->calls_.insert(call, std::time(nullptr));

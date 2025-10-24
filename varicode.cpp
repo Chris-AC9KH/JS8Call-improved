@@ -18,6 +18,10 @@
  *
  **/
 
+#include <stdexcept>
+
+#include <boost/format.hpp>
+
 #include <QLoggingCategory>
 #include <QMap>
 #include <QSet>
@@ -2239,6 +2243,17 @@ void BuildMessageFramesThread::run(){
 
     auto transmitText = textList.join("");
     emit resultReady(transmitText, results.length());
+}
+
+Varicode::SubmodeType Varicode::intToSubmode(int sm) {
+    switch(sm) {
+        case Varicode::JS8CallNormal: return Varicode::JS8CallNormal;
+        case Varicode::JS8CallFast: return Varicode::JS8CallFast;
+        case Varicode::JS8CallTurbo: return Varicode::JS8CallTurbo;
+        case Varicode::JS8CallSlow: return Varicode::JS8CallSlow;
+        case Varicode::JS8CallUltra: return Varicode::JS8CallUltra;
+    };
+    throw std::invalid_argument{boost::str(boost::format("Unexpected JS8 submode %1%") % sm)};
 }
 
 Q_LOGGING_CATEGORY(varicode_js8, "varicode.js8", QtWarningMsg)

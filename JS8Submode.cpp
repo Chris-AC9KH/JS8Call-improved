@@ -188,7 +188,7 @@ namespace JS8::Submode
               // list_one_mode(Ultra);
           }
       };
-      
+
       static ListDataAsDebugOutput list_data_as_debug_output = ListDataAsDebugOutput{};
   }
 }

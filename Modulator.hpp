@@ -36,29 +36,26 @@ public:
 
   // Inline accessors
 
-  bool   isIdle()    const { return m_state == State::Idle; }
-  bool   isTuning()  const { return m_tuning;               }
-  double frequency() const { return m_frequency;            }
+  bool   isIdle()         const { return m_state == State::Idle; }
+  bool   isTuning()       const { return m_tuning;               }
+  double audioFrequency() const { return m_audioFrequency;       }
 
   // Manipulators
 
   void close() override;
 
-  // Signals
-
-  Q_SIGNAL void stateChanged(State) const;
-
   // Inline slots
 
-  Q_SLOT void setFrequency(double const frequency)
+  Q_SLOT void setAudioFrequency(double const audioFrequency)
   {
-    m_frequency = frequency;
+    m_audioFrequency = audioFrequency;
   }
 
   // Slots
 
-  Q_SLOT void start(double        frequency,
+  Q_SLOT void start(double        audioFrequency,
                     int           submode,
+                    double        tx_delay,
                     SoundOutput * stream,
                     Channel       channel);
   Q_SLOT void stop(bool quick = false);
@@ -92,11 +89,11 @@ private:
   // Data members
 
   QPointer<SoundOutput> m_stream;
-  State                 m_state      = State::Idle;
+  volatile State        m_state      = State::Idle;
   bool                  m_quickClose = false;
   bool                  m_tuning     = false;
-  double                m_frequency;
-  double                m_frequency0;
+  double                m_audioFrequency;
+  double                m_audioFrequency0;
   double                m_toneSpacing;
   double                m_phi;
   double                m_dphi;

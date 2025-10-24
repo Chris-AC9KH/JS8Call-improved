@@ -912,67 +912,57 @@ WideGraph::on_filterOpacitySpinBox_valueChanged(int const n)
 void
 WideGraph::on_driftSpinBox_valueChanged(int const n)
 {
-  if (n != DriftingDateTime::drift()) setDrift(n);
+  if (n != DriftingDateTime::drift())
+      emit want_new_drift(n);
 }
 
 void
 WideGraph::on_driftSyncButton_clicked()
 {
   auto const now = QDateTime::currentDateTimeUtc();
-  int  const pos = m_TRperiod - (now.time().second() % m_TRperiod);
-  int  const neg = (now.time().second() % m_TRperiod) - m_TRperiod;
-  auto const sec = abs(neg) < pos ? neg : pos;
+  qint64 const pos = m_TRperiod - (now.time().second() % m_TRperiod);
+  qint64 const neg = (now.time().second() % m_TRperiod) - m_TRperiod;
+  qint64 const sec = abs(neg) < pos ? neg : pos;
 
-  setDrift(sec * 1000);
+  emit want_new_drift(sec * 1000);
 }
 
 void
 WideGraph::on_driftSyncEndButton_clicked()
 {
   auto const now = QDateTime::currentDateTimeUtc();
-  int  const pos = m_TRperiod - (now.time().second() % m_TRperiod);
-  int  const neg = (now.time().second() % m_TRperiod) - m_TRperiod;
-  auto const sec = abs(neg) < pos ? neg + 2 : pos - 2;
+  qint64  const pos = m_TRperiod - (now.time().second() % m_TRperiod);
+  qint64  const neg = (now.time().second() % m_TRperiod) - m_TRperiod;
+  qint64 const sec = abs(neg) < pos ? neg + 2 : pos - 2;
 
-  setDrift(sec * 1000);
+  emit want_new_drift(sec * 1000);
 }
 
 void
 WideGraph::on_driftSyncMinuteButton_clicked()
 {
   auto const now = QDateTime::currentDateTimeUtc();
-  auto const val = now.time().second();
-  auto const sec = val < 30 ? -val : 60 - val;
+  qint64 const val = now.time().second();
+  qint64 const sec = val < 30 ? -val : 60 - val;
 
-  setDrift(sec * 1000);
+  emit want_new_drift(sec * 1000);
 }
 
 void
 WideGraph::on_driftSyncResetButton_clicked()
 {
-  setDrift(0);
+  emit want_new_drift(0);
 }
 
 void
-WideGraph::setDrift(int const n)
+WideGraph::onDriftChanged(qint64 const n)
 {
-  auto const prev = drift();
-
-  DriftingDateTime::setDrift(n);
-
-  qCDebug(widegraph_js8) << qSetRealNumberPrecision(12) << "Drift milliseconds:" << n;
-  qCDebug(widegraph_js8) << qSetRealNumberPrecision(12) << "Clock time:" << QDateTime::currentDateTimeUtc();
-  qCDebug(widegraph_js8) << qSetRealNumberPrecision(12) << "Drifted time:" << DriftingDateTime::currentDateTimeUtc();
+  qCDebug(widegraph_js8)
+      << "Incoming new drift milliseconds:" << n
+      << ", computer clock time:" << QDateTime::currentDateTimeUtc()
+      << ", drifted time:" << DriftingDateTime::currentDateTimeUtc();
 
   if (ui->driftSpinBox->value() != n) ui->driftSpinBox->setValue(n);
-
-  emit drifted(prev, n);
-}
-
-int
-WideGraph::drift() const
-{
-  return DriftingDateTime::drift();
 }
 
 Q_LOGGING_CATEGORY(widegraph_js8, "widegraph.js8", QtWarningMsg)
