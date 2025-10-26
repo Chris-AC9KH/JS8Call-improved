@@ -9,9 +9,13 @@ CAboutDlg::CAboutDlg(QWidget *parent) :
 {
   ui->setupUi(this);
 
-  ui->labelTxt->setText (QString{"<h2>%1</h2><br />"
-
-                         "JS8Call is a derivative of the WSJT-X application, "
+  ui->labelTxt->setText (QString{"<h2>%1</h2>"
+                         "<h3>Avantgarde Edition</h3>"
+                         "<p>Avantgarde development team includes: <br />Chris AC9KH, Allan W6BAZ, Wyatt KJ4CTD, Andreas DJ3EI</p>"
+                          "<p>The Avangarde Edition lives in "
+                                 "<a href=\"https://github.com/Chris-AC9KH/JS8Call-improved\">https://github.com/Chris-AC9KH/JS8Call-improved</a> .</p>"
+                         "<h3>What is JS8Call?</h3>"
+                         "<p>JS8Call is a derivative of the WSJT-X application, "
                          "restructured and redesigned for message passing. <br/>"
                          "It is not supported by nor endorsed by the WSJT-X "
                          "development group. <br/>JS8Call is "
@@ -37,7 +41,7 @@ CAboutDlg::CAboutDlg(QWidget *parent) :
                          "VK1MIC, "
                          "W0FW, "
                          "W6BAZ,</strong><br/><br/>and the many other amateur radio operators who have helped<br/>"
-                         "bring JS8Call into the world."}.arg(program_version()));
+                         "bring JS8Call into the world.</p>"}.arg(program_version()));
 }
 
 CAboutDlg::~CAboutDlg()
