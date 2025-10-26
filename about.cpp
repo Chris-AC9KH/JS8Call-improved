@@ -11,7 +11,7 @@ CAboutDlg::CAboutDlg(QWidget *parent) :
 
   ui->labelTxt->setText (QString{"<h2>%1</h2>"
                          "<h3>Avantgarde Edition</h3>"
-                         "<p>Avantgarde development team includes: <br />Chris AC9KH, Allan W6BAZ, Wyatt KJ4CTD, Andreas DJ3EI</p>"
+                         "<p>Avantgarde development team includes: <br />Chris AC9KH, Allan W6BAZ, Wyatt KJ4CTD, Joe K0OG, Andreas DJ3EI</p>"
                           "<p>The Avangarde Edition lives in "
                                  "<a href=\"https://github.com/Chris-AC9KH/JS8Call-improved\">https://github.com/Chris-AC9KH/JS8Call-improved</a> .</p>"
                          "<h3>What is JS8Call?</h3>"
