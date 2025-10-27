@@ -71,7 +71,7 @@ jobs:
         tar zxf v1.0.29.tar.gz
         cd libusb-1.0.29
         ./bootstrap.sh
-        ./configure --prefix=${{ GITHUB_WORKSPACE }}/local/libusb
+        ./configure --prefix=${GITHUB_WORKSPACE}/local/libusb
         make
         make install
 
