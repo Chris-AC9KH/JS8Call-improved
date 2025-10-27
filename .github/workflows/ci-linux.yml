@@ -58,7 +58,7 @@ jobs:
       id: cache-usb
       uses: actions/cache@v4
       with:
-        path: /home/runner/work/js8call/js8call/local/libusb
+        path: ${GITHUB_WORKSPACE}/local/libusb
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb
 
     - name: Install libusb 1.0.29
@@ -71,7 +71,7 @@ jobs:
         tar zxf v1.0.29.tar.gz
         cd libusb-1.0.29
         ./bootstrap.sh
-        ./configure --prefix=/home/runner/work/js8call/js8call/local/libusb
+        ./configure --prefix=${GITHUB_WORKSPACE}/local/libusb
         make
         make install
 
@@ -80,7 +80,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb
-        path: /home/runner/work/js8call/js8call/local/libusb
+        path: ${GITHUB_WORKSPACE}/local/libusb
         
 ## ffmpeg
     - name: Cache Check ffmpeg 7.1.1
@@ -101,7 +101,6 @@ jobs:
           --enable-network --enable-gpl --enable-nonfree --enable-libass --enable-libfreetype --enable-libmp3lame \
           --enable-libx264 --enable-libvorbis
         make -j install
-        ls -lR ${GITHUB_WORKSPACE}/local
         
 # Check if we need to actually explictly call the save
 #    - name: Save ffmpeg cache
@@ -109,14 +108,14 @@ jobs:
 #      uses: actions/cache/save@v4
 #      with:
 #        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg
-#        path: /home/runner/work/js8call/js8call/local/ffmpeg
+#        path: ${GITHUB_WORKSPACE}/local/ffmpeg
 
 ## hamlib
     - name: Cache Check Hamlib 4.6.4
       id: cache-hamlib
       uses: actions/cache@v4
       with:
-        path: /home/runner/work/js8call/js8call/local/hamlib
+        path: ${GITHUB_WORKSPACE}/local/hamlib
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib
 
     - name: Install Hamlib 4.6.4
@@ -137,14 +136,14 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib
-        path: /home/runner/work/js8call/js8call/local/hamlib
+        path: ${GITHUB_WORKSPACE}/local/hamlib
           
  ## fftw
     - name: Cache Check fftw 3.3.10
       id: cache-fftw
       uses: actions/cache@v4
       with:
-        path: /home/runner/work/js8call/js8call/local/fftw
+        path: ${GITHUB_WORKSPACE}/local/fftw
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw
 
     - name: Install fftw 3.3.10
@@ -163,14 +162,14 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw
-        path: /home/runner/work/js8call/js8call/local/fftw
+        path: ${GITHUB_WORKSPACE}/local/fftw
         
 ## boost
     - name: Cache Check Boost 1.88
       id: cache-boost
       uses: actions/cache@v4
       with:
-        path: /home/runner/work/js8call/js8call/local/boost
+        path: ${GITHUB_WORKSPACE}/local/boost
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost
 
     - name: Install Boost 1.88
@@ -188,7 +187,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost
-        path: /home/runner/work/js8call/js8call/local/boost
+        path: ${GITHUB_WORKSPACE}/local/boost
         
 ## QT to change between 6.8.3 and 6.9.3 just change the 8 to a 9 everywhere here and at the bottom
     - name: Cache Check QT 6.9.3
