@@ -58,7 +58,7 @@ jobs:
       id: cache-usb
       uses: actions/cache@v4
       with:
-        path: ${{ GITHUB_WORKSPACE }}/local/libusb
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb
 
     - name: Install libusb 1.0.29
@@ -71,7 +71,7 @@ jobs:
         tar zxf v1.0.29.tar.gz
         cd libusb-1.0.29
         ./bootstrap.sh
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/libusb
+        ./configure --prefix=/home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
         make
         make install
 
@@ -80,14 +80,14 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb
-        path: ${{ GITHUB_WORKSPACE }}/local/libusb
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
         
 ## ffmpeg
     - name: Cache Check ffmpeg 7.1.1
       id: cache-ffmpeg
       uses: actions/cache@v4
       with:
-        path: ${GITHUB_WORKSPACE}/local/ffmpeg
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg
 
     - name: Install ffmpeg 7.1.1
@@ -97,7 +97,7 @@ jobs:
         git clone --branch n7.1.1 https://git.ffmpeg.org/ffmpeg.git ffmpeg
         mkdir -p ffmpeg/build
         cd ffmpeg/build
-        ../configure --prefix=${GITHUB_WORKSPACE}/local/ffmpeg --disable-shared --enable-static --disable-doc \
+        ../configure --prefix=/home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg --disable-shared --enable-static --disable-doc \
           --enable-network --enable-gpl --enable-nonfree --enable-libass --enable-libfreetype --enable-libmp3lame \
           --enable-libx264 --enable-libvorbis
         make -j install
@@ -108,14 +108,14 @@ jobs:
 #      uses: actions/cache/save@v4
 #      with:
 #        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg
-#        path: ${GITHUB_WORKSPACE}/local/ffmpeg
+#        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
 
 ## hamlib
     - name: Cache Check Hamlib 4.6.4
       id: cache-hamlib
       uses: actions/cache@v4
       with:
-        path: ${GITHUB_WORKSPACE}/local/hamlib
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib
 
     - name: Install Hamlib 4.6.4
@@ -126,7 +126,7 @@ jobs:
         cd ~/hamlib
         git checkout 4.6.4
         ./bootstrap
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/hamlib
+        ./configure --prefix=/home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
         make -j 4
         sudo make install-strip
         sudo ldconfig
@@ -136,14 +136,14 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib
-        path: ${GITHUB_WORKSPACE}/local/hamlib
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
           
  ## fftw
     - name: Cache Check fftw 3.3.10
       id: cache-fftw
       uses: actions/cache@v4
       with:
-        path: ${GITHUB_WORKSPACE}/local/fftw
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw
 
     - name: Install fftw 3.3.10
@@ -153,7 +153,7 @@ jobs:
         curl --location --output ./fftw-3.3.10.tar.gz https://www.fftw.org/fftw-3.3.10.tar.gz
         tar zxf fftw-3.3.10.tar.gz
         cd fftw-3.3.10
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/fftw --enable-threads --enable-shared --enable-sse2 --enable-avx --enable-avx2 --enable-float
+        ./configure --prefix=/home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw --enable-threads --enable-shared --enable-sse2 --enable-avx --enable-avx2 --enable-float
         make
         sudo make install
 
@@ -162,14 +162,14 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw
-        path: ${GITHUB_WORKSPACE}/local/fftw
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw
         
 ## boost
     - name: Cache Check Boost 1.88
       id: cache-boost
       uses: actions/cache@v4
       with:
-        path: ${GITHUB_WORKSPACE}/local/boost
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost
 
     - name: Install Boost 1.88
@@ -179,7 +179,7 @@ jobs:
         curl --location --output ./boost-1.88.0.tar.gz https://archives.boost.io/release/1.88.0/source/boost_1_88_0.tar.gz
         tar zxf boost-1.88.0.tar.gz
         cd boost_1_88_0
-        ./bootstrap.sh --prefix=${GITHUB_WORKSPACE}/local/boost
+        ./bootstrap.sh --prefix=/home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
         sudo ./b2 install
 
     - name: Save Boost 1.88 cache
@@ -187,14 +187,14 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost
-        path: ${GITHUB_WORKSPACE}/local/boost
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
         
 ## QT to change between 6.8.3 and 6.9.3 just change the 8 to a 9 everywhere here and at the bottom
     - name: Cache Check QT 6.9.3
       id: cache-qt
       uses: actions/cache@v4
       with:
-        path: ${GITHUB_WORKSPACE}/local/qt693-install
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-qt693
 
     # Takes about 1 hour and then will be cached
@@ -208,7 +208,7 @@ jobs:
         mkdir -p qt6/build
         cd qt6/build
         ls -l ..
-        ${GITHUB_WORKSPACE}/qt6/configure -DCMAKE_FIND_DEBUG_MODE=1 -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/local/ffmpeg" --prefix=${GITHUB_WORKSPACE}/local/qt693-install -init-submodules -submodules qtmultimedia,qtserialport -ffmpeg-dir ${GITHUB_WORKSPACE}/local/ffmpeg
+        ${GITHUB_WORKSPACE}/qt6/configure -DCMAKE_FIND_DEBUG_MODE=1 -DCMAKE_PREFIX_PATH="/home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg" --prefix=${GITHUB_WORKSPACE}/local/qt693-install -init-submodules -submodules qtmultimedia,qtserialport -ffmpeg-dir /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
         cmake --build . --parallel
         cmake --install .
 
@@ -217,11 +217,11 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-qt693
-        path: ${GITHUB_WORKSPACE}/local/qt693-install
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install
         
     - name: QT 6.9.3 Summary
       if: steps.cache-qt.outputs.cache-hit != 'true'
-      run: cat ${GITHUB_WORKSPACE}/qt6/qt6/build/config.summary
+      run: cat /home/runner/work/JS8Call-improved/JS8Call-improved/qt6/qt6/build/config.summary
       
     - name: Build JS8Call 
       run: |
