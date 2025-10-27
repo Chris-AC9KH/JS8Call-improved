@@ -58,7 +58,7 @@ jobs:
       id: cache-usb
       uses: actions/cache@v4
       with:
-        path: ${GITHUB_WORKSPACE}/local/libusb
+        path: ${{ GITHUB_WORKSPACE }}/local/libusb
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb
 
     - name: Install libusb 1.0.29
@@ -71,7 +71,7 @@ jobs:
         tar zxf v1.0.29.tar.gz
         cd libusb-1.0.29
         ./bootstrap.sh
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/libusb
+        ./configure --prefix=${{ GITHUB_WORKSPACE }}/local/libusb
         make
         make install
 
@@ -80,7 +80,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb
-        path: ${GITHUB_WORKSPACE}/local/libusb
+        path: ${{ GITHUB_WORKSPACE }}/local/libusb
         
 ## ffmpeg
     - name: Cache Check ffmpeg 7.1.1
