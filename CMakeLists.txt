@@ -56,14 +56,14 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0)
 #------------------------------------------------------------------------------#
 
 project(
-  JS8Call
-  VERSION   2.3.1
+  JS8Call-improved
+  VERSION   2.4.0
   LANGUAGES C CXX
 )
 
 set(PROJECT_VENDOR "Jordan Sherer, KN4CRD")
 set(PROJECT_CONTACT "Jordan Sherer <kn4crd@gmail.com>")
-set(PROJECT_COPYRIGHT "Copyright (C) 2001-2018 by Joe Taylor, K1JT, (C) 2018 by Jordan Sherer, KN4CRD")
+set(PROJECT_COPYRIGHT "Copyright (C) 2001-2018 by Joe Taylor, K1JT, (C) 2018 by Jordan Sherer, KN4CRD, (C) of contributed work is owned by individual contributors")
 set(PROJECT_HOMEPAGE https://groups.io/g/js8call)
 set(PROJECT_SUMMARY_DESCRIPTION "${PROJECT_NAME} - Digital Modes for Weak Signal Communications in Amateur Radio.")
 set(PROJECT_DESCRIPTION "${PROJECT_SUMMARY_DESCRIPTION}
