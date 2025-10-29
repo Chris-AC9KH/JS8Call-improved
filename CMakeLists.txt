@@ -56,8 +56,8 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0)
 #------------------------------------------------------------------------------#
 
 project(
-  JS8Call
-  VERSION   2.3.1
+  JS8Call-improved
+  VERSION   2.4.0
   LANGUAGES C CXX
 )
 
