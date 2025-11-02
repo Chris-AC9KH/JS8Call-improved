@@ -8,10 +8,14 @@ CAboutDlg::CAboutDlg(QWidget *parent) :
   ui(new Ui::CAboutDlg)
 {
   ui->setupUi(this);
-
-  ui->labelTxt->setText (QString{"<h2>%1</h2><br />"
-
-                         "JS8Call is a derivative of the WSJT-X application, "
+  setWindowTitle("About JS8Call-improved");
+  ui->labelTxt->setText (QString{"<h2>%1</h2>"
+                         "<h3>What is JS8Call-improved?</h3>"
+                         "<p>It is the result of a team that took JS8Call and added further improvements<br />(hopefully to be integrated into JS8Call proper later).<br />This team includes: <br />Chris AC9KH, Allan W6BAZ, Wyatt KJ4CTD, Joe K0OG, Andreas DJ3EI.</p>"
+                          "<p>The JS8Call-improved code lives in "
+                                 "<a href=\"https://github.com/Chris-AC9KH/JS8Call-improved\">https://github.com/Chris-AC9KH/JS8Call-improved</a> .</p>"
+                         "<h3>What is JS8Call?</h3>"
+                         "<p>JS8Call is a derivative of the WSJT-X application, "
                          "restructured and redesigned for message passing. <br/>"
                          "It is not supported by nor endorsed by the WSJT-X "
                          "development group. <br/>JS8Call is "
@@ -37,7 +41,7 @@ CAboutDlg::CAboutDlg(QWidget *parent) :
                          "VK1MIC, "
                          "W0FW, "
                          "W6BAZ,</strong><br/><br/>and the many other amateur radio operators who have helped<br/>"
-                         "bring JS8Call into the world."}.arg(program_version()));
+                         "bring JS8Call into the world.</p>"}.arg(program_title()));
 }
 
 CAboutDlg::~CAboutDlg()
