@@ -11129,25 +11129,23 @@ MainWindow::pskReporterError(QString const & message)
 
 void MainWindow::setRig (Frequency f)
 {
-  if (f)
-  {
-      m_freqNominal = f;
-      m_freqTxNominal = m_freqNominal;
-  }
+	if (f)
+	{
+		m_freqNominal = f;
+		m_freqTxNominal = m_freqNominal + m_XIT;
+	}
 
-  if(m_transmitting && !m_config.tx_qsy_allowed ()) return;
+	if(m_transmitting && !m_config.tx_qsy_allowed ()) return;
 
-  if ((m_monitoring || m_transmitting) && m_config.transceiver_online ())
-    {
-      if (m_transmitting && m_config.split_mode ())
-        {
-          Q_EMIT m_config.transceiver_tx_frequency (m_freqTxNominal);
-        }
-      else
-        {
-          Q_EMIT m_config.transceiver_frequency (m_freqNominal);
-        }
-    }
+	if ((m_monitoring || m_transmitting) && m_config.transceiver_online ())
+	{
+		if (m_config.split_mode ())
+		{
+			Q_EMIT m_config.transceiver_tx_frequency (m_freqTxNominal);
+		}
+
+		Q_EMIT m_config.transceiver_frequency (m_freqNominal);
+	}
 }
 
 void MainWindow::statusUpdate ()
