@@ -4532,12 +4532,13 @@ void MainWindow::spotAprsGrid(int dial, int offset, int snr, QString callsign, Q
 }
 
 void
-MainWindow::pskLogReport(QString const & mode,
-                         int     const   dial,
-                         int     const   offset,
-                         int     const   snr,
-                         QString const & callsign,
-                         QString const & grid)
+MainWindow::pskLogReport(QString 	const & mode,
+                         int     	const   dial,
+                         int     	const   offset,
+                         int     	const   snr,
+                         QString 	const & callsign,
+                         QString 	const & grid,
+						 QDateTime	const & utcTimestamp)
 {
   if (!m_config.spot_to_reporting_networks() ||
       (m_config.spot_blacklist().contains(callsign) ||
@@ -4547,7 +4548,8 @@ MainWindow::pskLogReport(QString const & mode,
                                       grid,
                                       dial + offset,
                                       mode,
-                                      snr);
+                                      snr,
+									  utcTimestamp);
 }
 
 void MainWindow::refuseToSendIn30mWSPRBand() {
@@ -9866,7 +9868,7 @@ void MainWindow::processSpots() {
         qCDebug(mainwindow_js8) << "spotting call to reporting networks" << d.call << d.snr << d.dial << d.offset;
 
         spotReport(d.submode, d.dial, d.offset, d.snr, d.call, d.grid);
-        pskLogReport("JS8", d.dial, d.offset, d.snr, d.call, d.grid);
+        pskLogReport("JS8", d.dial, d.offset, d.snr, d.call, d.grid, d.utcTimestamp);
 
         if(canSendNetworkMessage()){
             sendNetworkMessage("RX.SPOT", "", {

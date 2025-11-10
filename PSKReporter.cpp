@@ -46,7 +46,7 @@ namespace
 
   constexpr auto             HOST               = "report.pskreporter.info"_L1;
   constexpr quint16          PORT               = 4739; // 14739 for test
-  constexpr int              MIN_SEND_INTERVAL  = 120;  // in seconds
+  constexpr int              MIN_SEND_INTERVAL  = 600;  // in seconds
   constexpr int              JITTER_MAX  		= 5;    // in seconds
   constexpr int              FLUSH_INTERVAL     = 125;  // in send intervals
   constexpr qsizetype        MAX_STRING_LENGTH  = 254;  // PSK reporter spec
@@ -693,7 +693,8 @@ PSKReporter::addRemoteStation(QString           const & call,
                                QString          const & grid,
                                Radio::Frequency const   freq,
                                QString          const & mode,
-                               int              const   snr)
+                               int              const   snr,
+							   QDateTime 		const & utcTimestamp)
 {
   m_->check_connection();
 
@@ -704,32 +705,54 @@ PSKReporter::addRemoteStation(QString           const & call,
       reconnect();
     }
 
-    // If this call is not already in the cache, or it's there but expired, or an eclipse is active,
+    // If this call+band combination is not already in the cache, or it's there but expired, or an eclipse is active,
     // (we allow all spots through +/- 6 hours around an eclipse for the HamSCI group) then we're going to send
     // the spot; cache the fact that we've done so, either by adding a new cache
     // entry or updating an existing one with an updated time value.
 
 	// Get the frequency band name and concatenate it with the callsign to create the cache key
 	// so we can spot cached calls if they switch bands
-	auto const& band = m_->config_->bands()->find(freq);
-	auto const& cache_key = call + "_" + band;
+	auto const band = m_->config_->bands()->find(freq);
+	auto const cache_key = call + "_" + band;
+
+    const std::time_t now = std::time(nullptr);
 
 	// Determine cache expiration time by subtracting CACHE_TIMEOUT from the current time
-	const std::time_t cache_expiration_time = std::time(nullptr) - CACHE_TIMEOUT;
+	const std::time_t cache_expiration_time = now - CACHE_TIMEOUT;
 
-    if (auto const it  = m_->calls_.find(cache_key);
-                  it == m_->calls_.end()         		|| // No cache entry found
-                  it.value() < cache_expiration_time    || // Cache entry expired
-                  m_->eclipse_active(DriftingDateTime::currentDateTimeUtc())) // An eclipse is active
-    {
-      m_->spots_.enqueue({call, grid, snr, freq, mode, DriftingDateTime::currentDateTimeUtc()});
-      m_->calls_.insert(cache_key, std::time(nullptr));
-    }
+	auto const it = m_->calls_.find(cache_key);
+
+	bool notFound     = (it == m_->calls_.end());
+	bool expired      = (!notFound && it.value() < cache_expiration_time);
+	bool eclipse      = m_->eclipse_active(utcTimestamp);
+
+	if (notFound || expired || eclipse)
+	{
+	  m_->spots_.enqueue({call, grid, snr, freq, mode, utcTimestamp});
+	  m_->calls_.insert(cache_key, now);
+	}
+	else // cache exists AND not expired AND no eclipse active
+	{
+	  // Iterate through the queued spots from last to first, if we find one with a matching call and band (we should), replace it with
+	  // a new spot with updated details and bump the cache time
+	  for (qsizetype i = m_->spots_.size(); i-- > 0;)
+	  {
+		auto const& cachedSpot		= m_->spots_[i];
+		auto const cachedSpotBand	= m_->config_->bands()->find(cachedSpot.freq_);
+
+		if (cachedSpot.call_ == call && cachedSpotBand == band)
+		{
+		  m_->spots_[i] = {call, grid, snr, freq, mode, utcTimestamp};
+		  m_->calls_.insert(cache_key, now);
+		  break;
+		}
+	  }
+	}
 
     // Perform cache cleanup; anything that's been around for more than twice the cache
     // timeout period can go.
 
-    m_->calls_.removeIf([now = std::time(nullptr)](auto const it)
+    m_->calls_.removeIf([now](auto const it)
     {
       return now - it.value() > (CACHE_TIMEOUT * 2);
     });
