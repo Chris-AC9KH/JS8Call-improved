@@ -1,0 +1,34 @@
+name: Build and Deploy Docs
+# Trigger only if we have labeled the PR, a Release has been published or a manual trigger
+on: 
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+jobs:
+  build_and_deploy_docs:
+    if: (contains(github.event.pull_request.labels.*.name, 'documentation') ||
+      (contains(github.event_name, 'workflow_dispatch')) ||
+      (contains(github.event_name, 'release')) )
+    concurrency: ci-${{ github.ref }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get doxygen and graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Build docs
+        run: doxygen
+
+      - name: Deploy to gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: docs/html
