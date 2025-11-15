@@ -572,6 +572,7 @@ MainWindow::MainWindow(QString  const & program_info,
   });
 
   setWindowTitle (program_title ());
+  buildColumnLabelMap();
 
   // Hook up working frequencies.
 
@@ -5122,7 +5123,7 @@ void MainWindow::createGroupCallsignTableRows(QTableWidget *table, QString const
         count++;
     }
 
-    table->horizontalHeaderItem(startCol)->setText(count == 0 ? "Callsigns" : QString("Callsigns (%1)").arg(count));
+    table->horizontalHeaderItem(startCol)->setText(count == 0 ? columnLabel("Callsigns") : QString(columnLabel("Callsigns (%1)")).arg(count));
 
     if(!m_config.avoid_allcall()){
         table->insertRow(table->rowCount());
@@ -6603,6 +6604,19 @@ bool MainWindow::showColumn(QString tableKey, QString columnKey, bool default_){
     return m_showColumnsCache.value(tableKey + columnKey, QVariant(default_)).toBool();
 }
 
+QString MainWindow::columnLabel(QString defaultLabel){
+	bool minimalLabels = showColumn("all", "minimal_labels", false);
+
+	// If we are not rendering minimal labels, return the default
+	if(!minimalLabels)
+	{
+		return defaultLabel;
+	}
+
+	// If there is an entry, send it, if not, return default
+	return m_columnLabelMap.value(defaultLabel, defaultLabel);
+}
+
 void MainWindow::buildShowColumnsMenu(QMenu *menu, QString tableKey){
     QList<QPair<QString, QString>> columnKeys = {
         {"Frequency Offset", "offset"},
@@ -6617,7 +6631,8 @@ void MainWindow::buildShowColumnsMenu(QMenu *menu, QString tableKey){
         {"tdrift", false},
         {"grid", false},
         {"distance", false},
-        {"azimuth", false}
+        {"azimuth", false},
+        {"minimal_labels", false}
     };
 
     if(tableKey == "call"){
@@ -6632,9 +6647,11 @@ void MainWindow::buildShowColumnsMenu(QMenu *menu, QString tableKey){
         });
     }
 
+	columnKeys.prepend({"Minimal Column Labels", "minimal_labels"});
     columnKeys.prepend({"Show Column Labels", "labels"});
 
-    bool first = true;
+    int columnIndex = 0;
+	QString origTableKey = tableKey;
     foreach(auto p, columnKeys){
         auto columnLabel = p.first;
         auto columnKey = p.second;
@@ -6642,6 +6659,12 @@ void MainWindow::buildShowColumnsMenu(QMenu *menu, QString tableKey){
         auto a = menu->addAction(columnLabel);
         a->setCheckable(true);
 
+		// Add separator after second item
+		// If this is the second item, it is the minimal labels item, so set the table key to all
+		if(++columnIndex == 2){
+			tableKey = "all";
+			menu->addSeparator();
+		}
 
         bool showByDefault = true;
         if(defaultOverride.contains(columnKey)){
@@ -6653,10 +6676,11 @@ void MainWindow::buildShowColumnsMenu(QMenu *menu, QString tableKey){
             setShowColumn(tableKey, columnKey, a->isChecked());
         });
 
-        if(first){
-            menu->addSeparator();
-            first = false;
-        }
+		// If we have switched to a custom table key in this iteration, reset to the original key
+		if(tableKey != origTableKey)
+		{
+			tableKey = origTableKey;
+		}
     }
 }
 
@@ -7208,6 +7232,42 @@ QMap<QString, QString> MainWindow::buildMacroValues(){
     values["<MYREPLY>"] = replaceMacros(values["<MYREPLY>"], values, false);
 
     return values;
+}
+
+void MainWindow::buildColumnLabelMap()
+{
+	// This is the map of full-length strings to shortened versions
+	// Add new minimal labels here as needed
+	m_columnLabelMap = {
+		{"Callsigns", "Call"},
+		{"Callsigns (%1)", "Call(%1)"},
+		{"Offset", "Off"},
+		{"SNR", "SN"},
+		{"Time Delta", "TD"},
+		{"Speed", "Sp"},
+		{"Distance", "Dist"},
+		{"Azimuth", "Az"},
+		{"%1 ms", "%1"},
+		{"%1 dB", "%1"},
+		{"%1 Hz", "%1"}
+	};
+
+	// Populate original header maps
+	int cols = ui->tableWidgetRXAll->columnCount();
+	for (int c = 0; c < cols; ++c)
+	{
+		QString label = ui->tableWidgetRXAll->horizontalHeaderItem(c)->text();
+
+		m_origRxHeaderLabelMap[c] = label;
+	}
+
+	cols = ui->tableWidgetCalls->columnCount();
+	for (int c = 0; c < cols; ++c)
+	{
+		QString label = ui->tableWidgetCalls->horizontalHeaderItem(c)->text();
+
+		m_origCallActivityHeaderLabelMap[c] = label;
+	}
 }
 
 void MainWindow::buildSuggestionsMenu(QMenu *menu, QTextEdit *edit, const QPoint &point){
@@ -9967,6 +10027,13 @@ void MainWindow::displayActivity(bool force) {
 void MainWindow::displayBandActivity() {
     auto now = DriftingDateTime::currentDateTimeUtc();
 
+	// Reset the header label text to accommodate minimal label setting
+	int cols = ui->tableWidgetRXAll->columnCount();
+	for (int c = 0; c < cols; ++c)
+	{
+		ui->tableWidgetRXAll->horizontalHeaderItem(c)->setText(columnLabel(m_origRxHeaderLabelMap[c]));
+	}
+
     ui->tableWidgetRXAll->setFont(m_config.table_font());
 
     // Selected Offset
@@ -10177,7 +10244,7 @@ void MainWindow::displayBandActivity() {
                 int row = ui->tableWidgetRXAll->rowCount() - 1;
                 int col = 0;
 
-                auto offsetItem = new QTableWidgetItem(QString("%1 Hz").arg(offset));
+                auto offsetItem = new QTableWidgetItem(QString(columnLabel("%1 Hz")).arg(offset));
                 offsetItem->setData(Qt::UserRole, QVariant(offset));
                 offsetItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
                 ui->tableWidgetRXAll->setItem(row, col++, offsetItem);
@@ -10188,11 +10255,11 @@ void MainWindow::displayBandActivity() {
                 ui->tableWidgetRXAll->setItem(row, col++, ageItem);
 
                 auto snrText = Varicode::formatSNR(snr);
-                auto snrItem = new QTableWidgetItem(snrText.isEmpty() ? "" : QString("%1 dB").arg(snrText));
+                auto snrItem = new QTableWidgetItem(snrText.isEmpty() ? "" : QString(columnLabel("%1 dB")).arg(snrText));
                 snrItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
                 ui->tableWidgetRXAll->setItem(row, col++, snrItem);
 
-                auto tdriftItem = new QTableWidgetItem(QString("%1 ms").arg((int)(1000*tdrift)));
+                auto tdriftItem = new QTableWidgetItem(QString(columnLabel("%1 ms")).arg((int)(1000*tdrift)));
                 tdriftItem->setData(Qt::UserRole, QVariant(tdrift));
                 tdriftItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
                 ui->tableWidgetRXAll->setItem(row, col++, tdriftItem);
@@ -10317,6 +10384,13 @@ void MainWindow::displayBandActivity() {
 // updateCallActivity
 void MainWindow::displayCallActivity() {
     auto now = DriftingDateTime::currentDateTimeUtc();
+
+	// Reset the header label text to accommodate minimal label setting
+	int cols = ui->tableWidgetCalls->columnCount();
+	for (int c = 0; c < cols; ++c)
+	{
+		ui->tableWidgetCalls->horizontalHeaderItem(c)->setText(columnLabel(m_origCallActivityHeaderLabelMap[c]));
+	}
 
     ui->tableWidgetCalls->setFont(m_config.table_font());
 
@@ -10533,16 +10607,16 @@ void MainWindow::displayCallActivity() {
                 ui->tableWidgetCalls->setItem(row, col++, ageItem);
 
                 auto snrText = Varicode::formatSNR(d.snr);
-                auto snrItem = new QTableWidgetItem(snrText.isEmpty() ? "" : QString("%1 dB").arg(snrText));
+                auto snrItem = new QTableWidgetItem(snrText.isEmpty() ? "" : QString(columnLabel("%1 dB")).arg(snrText));
                 snrItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
                 ui->tableWidgetCalls->setItem(row, col++, snrItem);
 
-                auto offsetItem = new QTableWidgetItem(QString("%1 Hz").arg(d.offset));
+                auto offsetItem = new QTableWidgetItem(QString(columnLabel("%1 Hz")).arg(d.offset));
                 offsetItem->setData(Qt::UserRole, QVariant(d.offset));
                 offsetItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
                 ui->tableWidgetCalls->setItem(row, col++, offsetItem);
 
-                auto tdriftItem = new QTableWidgetItem(QString("%1 ms").arg((int)(1000*d.tdrift)));
+                auto tdriftItem = new QTableWidgetItem(QString(columnLabel("%1 ms")).arg((int)(1000*d.tdrift)));
                 tdriftItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
                 ui->tableWidgetCalls->setItem(row, col++, tdriftItem);
 

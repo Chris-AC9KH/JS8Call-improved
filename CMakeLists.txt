@@ -462,6 +462,7 @@ if (WIN32)
     COMMAND "${WINDEPLOYQT}" "$<TARGET_FILE_DIR:${TARGET}>"
     --libdir JS8Call
     --plugindir JS8Call
+    --no-translations
     COMMENT "Running windeployqt..."
   )
 endif (WIN32)

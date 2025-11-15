@@ -292,6 +292,7 @@ private slots:
   void buildCallActivitySortByMenu(QMenu * menu);
   void buildQueryMenu(QMenu *, QString callsign);
   QMap<QString, QString> buildMacroValues();
+  void buildColumnLabelMap();
   void buildSuggestionsMenu(QMenu *menu, QTextEdit *edit, const QPoint &point);
   void buildSavedMessagesMenu(QMenu *menu);
   void buildRelayMenu(QMenu *menu);
@@ -701,6 +702,10 @@ private:
   int m_lastClosedMessageBufferOffset;
   QMap<QString, CallDetail> m_callActivity; // call -> (last freq, last timestamp)
 
+  QMap<int, QString> m_origRxHeaderLabelMap; // colIndex, label
+  QMap<int, QString> m_origCallActivityHeaderLabelMap; // colIndex, label
+  QMap<QString, QString> m_columnLabelMap; // full, minimal
+
   QMap<QString, QSet<QString>> m_heardGraphOutgoing; // callsign -> [stations who've this callsign has heard]
   QMap<QString, QSet<QString>> m_heardGraphIncoming; // callsign -> [stations who've heard this callsign]
 
@@ -828,6 +833,7 @@ private:
   void add_child_to_event_filter (QObject *);
   void remove_child_from_event_filter (QObject *);
   void setup_status_bar ();
+  QString columnLabel(QString defaultLabel);
 
   void resetIdleTimer();
   void incrementIdleTimer();
