@@ -1,23 +1,25 @@
 name: Build and Deploy Docs
 # Trigger only if we have labeled the PR, a Release has been published or a manual trigger
 on: 
-  workflow_dispatch:
+  workflow_dispatch: 
   pull_request:
-    types: [labeled]
+    types: [labeled] 
   release:
     types: [published]
 
 permissions:
   contents: write
+  id-token: write
+  pages: write
 jobs:
-  build_and_deploy_docs:
+  build_docs:
     if: (contains(github.event.pull_request.labels.*.name, 'documentation') ||
       (contains(github.event_name, 'workflow_dispatch')) ||
       (contains(github.event_name, 'release')) )
     concurrency: ci-${{ github.ref }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout 
         uses: actions/checkout@v4
 
       - name: Get doxygen and graphviz
@@ -28,7 +30,19 @@ jobs:
       - name: Build docs
         run: doxygen
 
-      - name: Deploy to gh-pages
-        uses: JamesIves/github-pages-deploy-action@v4
+      - name: Upload static files as artifact
+        id: deployment
+        uses: actions/upload-pages-artifact@v3
         with:
-          folder: docs/html
+          path: docs/html
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build_docs
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
