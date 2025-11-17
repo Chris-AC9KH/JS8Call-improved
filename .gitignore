@@ -14,10 +14,19 @@ Xcode/
 **/xcshareddata/WorkspaceSettings.xcsettings
 xcuserdata/
 .DS_Store
-js8call.entitlements
-JS8Call.entitlements
+*.entitlements
 ## end Xcode patch ##
 #### Qt Creator patch ####
+.qtcreator/
 build/
 CMakeLists.txt.user
 ## end Qt Creator patch ##
+## Docs ##
+## Doxygen ##
+docs/html/
+## Translation
+*.pot
+*.po
+*.qph
+*.ts
+*.qm

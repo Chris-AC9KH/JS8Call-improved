@@ -998,9 +998,9 @@ QPushButton:checked {
           <pointsize>12</pointsize>
          </font>
         </property>
-        <property name="toolTip">
+        <!--property name="toolTip">
          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Received band activity is displayed with time since last heard, SNR, and the text received for each frequency offset in the passband.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-        </property>
+        </property-->
         <property name="sizeAdjustPolicy">
          <enum>QAbstractScrollArea::SizeAdjustPolicy::AdjustToContentsOnFirstShow</enum>
         </property>
@@ -1191,9 +1191,9 @@ QTextEdit[transmitting=&quot;true&quot;] {
            <pointsize>12</pointsize>
           </font>
          </property>
-         <property name="toolTip">
+         <!--property name="toolTip">
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Received callsigns are displayed with time since last heard, SNR, and grid locator (if reported).&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
+         </property-->
          <property name="autoScroll">
           <bool>false</bool>
          </property>

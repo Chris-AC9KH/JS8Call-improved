@@ -25,23 +25,32 @@ namespace
 void
 Modulator::start(double        const frequency,
                  int           const submode,
+                 double        const txDelay,
                  SoundOutput * const stream,
                  Channel       const channel)
 {
   Q_ASSERT (stream);
 
-  if (m_state != State::Idle) stop();
+  if (isIdle()) {
+      qCDebug(modulator_js8)
+          << "Modulator does not find itself in state idle, but"
+          << (m_state.load() == State::Active ? "Active" :
+              m_state.load() == State::Synchronizing ? "Synchronizing" :
+              m_state.load() == State::Idle ? "Idle" : "??What??")
+          << "so calling stop()";
+      stop();
+  }
 
-  m_quickClose   = false;
-  m_frequency    = frequency;
-  m_nsps         = JS8::Submode::symbolSamples(submode);
-  m_toneSpacing  = JS8::Submode::toneSpacing(submode);
-  m_isym0        = std::numeric_limits<unsigned>::max();
-  m_amp          = std::numeric_limits<qint16>::max();
-  m_frequency0   = 0.0;
-  m_phi          = 0.0;
-  m_silentFrames = 0;
-  m_ic           = 0;
+  m_quickClose      = false;
+  m_audioFrequency  = frequency;
+  m_nsps            = JS8::Submode::samplesForOneSymbol(submode);
+  m_toneSpacing     = JS8::Submode::toneSpacing(submode);
+  m_isym0           = std::numeric_limits<unsigned>::max();
+  m_amp             = std::numeric_limits<qint16>::max();
+  m_audioFrequency0 = 0.0;
+  m_phi             = 0.0;
+  m_silentFrames    = 0;
+  m_ic              = 0;
 
   // If we're not tuning, then we'll need to figure out exactly when we
   // should start transmitting; this will depend on the submode in play.
@@ -51,28 +60,42 @@ Modulator::start(double        const frequency,
     // Get the nominal transmit start time for this submode, and determine
     // which millisecond of the current transmit period we're currently at.
 
+    qint64   const nowMS = DriftingDateTime::currentMSecsSinceEpoch();
+    unsigned const periodMS = JS8::Submode::period(submode) * MS_PER_SEC;
     auto     const startDelayMS = JS8::Submode::startDelayMS(submode);
-    unsigned const periodOffset = (DriftingDateTime::currentMSecsSinceEpoch() % MS_PER_DAY) %
-                                  (JS8::Submode::period(submode)              * MS_PER_SEC);
+    unsigned const periodOffsetMS =  nowMS % periodMS;
 
     // If we haven't yet hit the nominal start time for the period, then we
     // will need to inject some silence into the transmission; determine the
-    // number of silent frames required to start audio at the correct amount
+    // number of silent audio samples required to start audio at the correct amount
     // of delay into the period.
     //
     // If we have hit the nominal start time for the period, adjust for late
     // start if we're not exactly at the nominal start time.
 
-    if (startDelayMS > periodOffset) m_silentFrames = (startDelayMS - periodOffset) * FRAME_RATE / MS_PER_SEC;
-    else                             m_ic           = (periodOffset - startDelayMS) * FRAME_RATE / MS_PER_SEC;
+    bool const inTxDelayBeforePeriodStart = periodMS <= periodOffsetMS + txDelay * MS_PER_SEC;
+    if (inTxDelayBeforePeriodStart) {
+        unsigned const additionalMSNeededForTxDelay = periodMS - periodOffsetMS;
+        qCDebug(modulator_js8) << "Sending" << additionalMSNeededForTxDelay
+                               << "ms silence for TX delay.";
+        m_silentFrames = (startDelayMS + additionalMSNeededForTxDelay) * FRAME_RATE / MS_PER_SEC;
+    } else if (startDelayMS > periodOffsetMS) {
+        qCDebug(modulator_js8) << "Starting" << periodOffsetMS
+                               << "ms late into transmission, removing some of the"
+                               << startDelayMS << "ms start delay";
+        m_silentFrames = (startDelayMS - periodOffsetMS) * FRAME_RATE / MS_PER_SEC;
+    } else {
+        qCWarning(modulator_js8) << "Starting" << periodOffsetMS
+                                 << "ms late into transmission, cutting away initial symbol(s).";
+        m_ic = (periodOffsetMS - startDelayMS) * FRAME_RATE / MS_PER_SEC;
+    }
+  } else {
+      qCDebug(modulator_js8) << "Modulator finds it is tuning.";
   }
 
   initialize(QIODevice::ReadOnly, channel);
 
-  Q_EMIT stateChanged ((m_state = m_silentFrames
-                                ? State::Synchronizing
-                                : State::Active));
-
+  m_state.store(0 < m_silentFrames ? State::Synchronizing : State::Active);
   m_stream = stream;
 
   if (m_stream)
@@ -108,11 +131,7 @@ Modulator::close()
     else              m_stream->stop();
   }
 
-  if (m_state != State::Idle)
-  {
-    Q_EMIT stateChanged ((m_state = State::Idle));
-  }
-
+  m_state.store(State::Idle);
   AudioDevice::close();
 }
 
@@ -130,7 +149,7 @@ Modulator::readData(char * const data,
   qint16       *       samples         = reinterpret_cast<qint16 *>(data);
   qint16 const * const samplesEnd      = samples + maxFrames * (bytesPerFrame() / sizeof(qint16));
 
-  switch (m_state)
+  switch (m_state.load())
   {
     case State::Synchronizing:
     {
@@ -148,7 +167,7 @@ Modulator::readData(char * const data,
 
         if (!m_silentFrames)
         {
-          Q_EMIT stateChanged ((m_state = State::Active));
+          m_state.store(State::Active);
         }
       }
     }
@@ -165,13 +184,13 @@ Modulator::readData(char * const data,
       {
         unsigned int const isym = m_tuning ? 0 : m_ic / (4.0 * m_nsps);
 
-        if (isym != m_isym0 || m_frequency != m_frequency0)
+        if (isym != m_isym0 || m_audioFrequency != m_audioFrequency0)
         {
-          double const toneFrequency = m_frequency + itone[isym] * m_toneSpacing;
+          double const toneFrequency = m_audioFrequency + itone[isym] * m_toneSpacing;
 
           m_dphi       = TAU * toneFrequency / FRAME_RATE;
           m_isym0      = isym;
-          m_frequency0 = m_frequency;
+          m_audioFrequency0 = m_audioFrequency;
         }
 
         m_phi += m_dphi;
@@ -188,12 +207,12 @@ Modulator::readData(char * const data,
 
       if (m_amp == 0.0)
       {
-        Q_EMIT stateChanged ((m_state = State::Idle));
+        m_state.store(State::Idle);
         return framesGenerated * bytesPerFrame();
         m_phi = 0.0;
       }
 
-      m_frequency0 = m_frequency;
+      m_audioFrequency0 = m_audioFrequency;
 
       // Done for this chunk; continue on the next call. Pad the
       // block with silence.
@@ -212,7 +231,7 @@ Modulator::readData(char * const data,
     break;
   }
 
-  Q_ASSERT (State::Idle == m_state);
+  Q_ASSERT (isIdle());
   return 0;
 }
 

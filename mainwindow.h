@@ -50,6 +50,7 @@
 #include "MessageClient.hpp"
 #include "MessageServer.h"
 #include "TCPClient.h"
+#include "TxLoop.h"
 #include "SpotClient.h"
 #include "APRSISClient.h"
 #include "NotificationAudio.h"
@@ -112,15 +113,34 @@ private:
     bool    reverse;
   };
 
+  /**
+   * Sometimes, buttons are triggered by code and this refers
+   * to a momentary situation only.  Sometimes, the trigger
+   * pertains to the long term processing, that is, it should
+   * influence (shut off, mostly) the automatic transmit loops
+   * for HB and CQ.
+   *
+   * In an ugly klugde, we try to distinguish these cases
+   * via these three *IsLongterm variables.
+   */
+  bool m_stopTxButtonIsLongterm;
+  bool m_hbButtonIsLongterm;
+  bool m_cqButtonIsLongterm;
+
 public slots:
   void showSoundInError(const QString& errorMsg);
   void showSoundOutError(const QString& errorMsg);
   void showStatusMessage(const QString& statusMsg);
   void dataSink(qint64 frames);
+  /**
+   * The name `guiUpdate` suggests updating of the views from the models
+   * (in MVC terms, but we don't do MVC in this project), animations and stuff.
+   * While it indeed does that, this also contains controller code.
+   */
   void guiUpdate();
   void setXIT(int n);
   void qsy(int hzDelta);
-  void drifted(int prev, int cur);
+  void onDriftChanged(qint64 new_drift_ms);
   void setFreqOffsetForRestore(int freq, bool shouldRestore);
   bool tryRestoreFreqOffset();
   void changeFreq(int);
@@ -164,6 +184,9 @@ public slots:
   QPair<QString, int> popMessageFrame();
   void tryNotify(const QString &key);
   void processDecodeEvent(JS8::Event::Variant const &);
+
+  void updateCQButtonDisplay();
+  void updateHBButtonDisplay();
 
 protected:
   void keyPressEvent (QKeyEvent *) override;
@@ -241,14 +264,13 @@ private slots:
   void on_actionErase_ALL_TXT_triggered();
   void on_actionErase_js8call_log_adi_triggered();
   void startTx();
-  void startTx2();
   void stopTx();
   void stopTx2();
   void buildFrequencyMenu(QMenu *menu);
   void buildHeartbeatMenu(QMenu *menu);
   void buildCQMenu(QMenu *menu);
   void buildRepeatMenu(QMenu *menu, QPushButton * button, bool isLowInterval, int * interval);
-  void sendHeartbeat();
+  void sendHB();
   void sendHeartbeatAck(QString to, int snr, QString extra);
   void on_hbMacroButton_toggled(bool checked);
   void on_hbMacroButton_clicked();
@@ -270,6 +292,7 @@ private slots:
   void buildCallActivitySortByMenu(QMenu * menu);
   void buildQueryMenu(QMenu *, QString callsign);
   QMap<QString, QString> buildMacroValues();
+  void buildColumnLabelMap();
   void buildSuggestionsMenu(QMenu *menu, QTextEdit *edit, const QPoint &point);
   void buildSavedMessagesMenu(QMenu *menu);
   void buildRelayMenu(QMenu *menu);
@@ -287,7 +310,6 @@ private slots:
   bool prepareNextMessageFrame();
   bool isFreqOffsetFree(int f, int bw);
   int findFreeFreqOffset(int fmin, int fmax, int bw);
-  void checkRepeat();
   void setDrift(int n);
   void on_tuneButton_clicked (bool);
   void acceptQSO (QDateTime const&, QString const& call, QString const& grid
@@ -345,7 +367,7 @@ private:
 
   Q_SIGNAL void pskReporterSendReport(bool);
   Q_SIGNAL void pskReporterSetLocalStation(QString, QString, QString);
-  Q_SIGNAL void pskReporterAddRemoteStation(QString, QString, Radio::Frequency, QString, int);
+  Q_SIGNAL void pskReporterAddRemoteStation(QString, QString, Radio::Frequency, QString, int, QDateTime);
 
   Q_SIGNAL void spotClientSetLocalStation(QString, QString, QString);
   Q_SIGNAL void spotClientEnqueueCmd(QString, QString, QString, QString, QString, QString, QString, int, int, int, int);
@@ -367,9 +389,10 @@ private:
   Q_SIGNAL void transmitFrequency (double) const;
   Q_SIGNAL void endTransmitMessage (bool quick = false) const;
   Q_SIGNAL void tune (bool = true) const;
-  Q_SIGNAL void sendMessage (double frequency, int submode, SoundOutput *, AudioDevice::Channel) const;
+  Q_SIGNAL void sendMessage (double frequency, int submode, double txDelay, SoundOutput *, AudioDevice::Channel) const;
   Q_SIGNAL void outAttenuationChanged (qreal) const;
   Q_SIGNAL void toggleShorthand () const;
+  Q_SIGNAL void submodeChanged (Varicode::SubmodeType) const;
 
 private:
 
@@ -385,7 +408,17 @@ private:
 
   int freq() const { return m_freq; }
 
+  /** Sabotage transmission if frequency would result in WSPR band. */
+  void refuseToSendIn30mWSPRBand();
+
+  void prepareSending(qint64 nowMS);
+
+  /** Update the clock shown. */
+  void updateClockUI(const QDateTime&);
+
   void setFreq(int);
+  void transmit();
+
 
   QString m_nextFreeTextMsg;
 
@@ -419,6 +452,13 @@ private:
   SoundOutput * m_soundOutput;
   NotificationAudio * m_notification;
 
+  // Configuration might one day offer to send a txDelayChanged signal.
+  // As long as it doesn't, we poll and compare with the previous value.
+  double m_TxDelay; // in seconds.
+
+  TxLoop * m_cq_loop;
+  TxLoop * m_hb_loop;
+
   QThread m_networkThread;
   QThread m_audioThread;
   QThread m_notificationAudioThread;
@@ -435,6 +475,7 @@ private:
   qint32  m_sec0;
   qint32  m_RxLog;
   qint32  m_nutc0;
+  // The period of the current submode, in seconds. (15 for normal, 10 for fast, ...)
   qint32  m_TRperiod;
   qint32  m_inGain;
   qint32  m_idleMinutes;
@@ -457,7 +498,7 @@ private:
   int     m_lastMessageType;
   QString m_lastMessageSent;
   bool    m_tuneup;
-  bool    m_bTxTime;
+  bool    m_isTimeToSend;
 
   int			m_ihsym;
   float		m_px;
@@ -483,15 +524,13 @@ private:
   //QPointer<QProcess> proc_js8;
 
   QTimer m_guiTimer;
-  QTimer ptt1Timer;                 //StartTx delay
-  QTimer ptt0Timer;                 //StopTx delay
+  // Timer to switch off PTT after end of transmission.
+  QTimer pttReleaseTimer;
   QTimer logQSOTimer;
   QTimer tuneButtonTimer;
   QTimer tuneATU_Timer;
   QTimer TxAgainTimer;
   QTimer minuteTimer;
-  QTimer repeatTimer;
-
   QString m_baseCall;
   QString m_hisCall;
   QString m_hisGrid;
@@ -663,6 +702,10 @@ private:
   int m_lastClosedMessageBufferOffset;
   QMap<QString, CallDetail> m_callActivity; // call -> (last freq, last timestamp)
 
+  QMap<int, QString> m_origRxHeaderLabelMap; // colIndex, label
+  QMap<int, QString> m_origCallActivityHeaderLabelMap; // colIndex, label
+  QMap<QString, QString> m_columnLabelMap; // full, minimal
+
   QMap<QString, QSet<QString>> m_heardGraphOutgoing; // callsign -> [stations who've this callsign has heard]
   QMap<QString, QSet<QString>> m_heardGraphIncoming; // callsign -> [stations who've heard this callsign]
 
@@ -681,11 +724,14 @@ private:
   bool m_bandHopped;
   Frequency m_bandHoppedFreq;
 
+  /** Repeat period of HBs, in seconds. */
   int m_hbInterval;
+  /** Repeat period of CQ calls, in seconds. */
   int m_cqInterval;
+
+  /** Whether to resume HBs at the next opportunity. */
   bool m_hbPaused;
-  QDateTime m_nextHeartbeat;
-  QDateTime m_nextCQ;
+
   QDateTime m_dateTimeQSOOn;
   QDateTime m_dateTimeLastTX;
 
@@ -698,10 +744,9 @@ private:
   QThread::Priority m_networkThreadPriority;
   bool m_splitMode;
   bool m_monitoring;
-  bool m_tx_when_ready;
+  bool m_generateAudioWhenPttConfirmedByTX;
   bool m_transmitting;
   bool m_tune;
-  bool m_deadAirTone;
   bool m_tx_watchdog;           // true when watchdog triggered
   bool m_block_pwr_tooltip;
   bool m_PwrBandSetOK;
@@ -723,7 +768,6 @@ private:
   void writeSettings();
   void createStatusBar();
   void statusChanged();
-  void transmit();
   void rigFailure (QString const& reason);
   void spotSetLocal();
   void pskSetLocal ();
@@ -731,7 +775,7 @@ private:
   void spotReport(int submode, int dial, int offset, int snr, QString const & callsign, QString const & grid);
   void spotCmd(CommandDetail const & cmd);
   void spotAprsCmd(CommandDetail const & cmd);
-  void pskLogReport(QString const & mode, int dial, int offset, int snr, QString const & callsign, QString const & grid);
+  void pskLogReport(QString const & mode, int dial, int offset, int snr, QString const & callsign, QString const & grid, QDateTime const & utcTimestamp);
   void spotAprsGrid(int dial, int offset, int snr, QString callsign, QString grid);
   Radio::Frequency dialFrequency();
   void setSubmode(int submode);
@@ -742,7 +786,6 @@ private:
   void displayTransmit();
   void updateModeButtonText();
   void updateButtonDisplay();
-  void updateRepeatButtonDisplay();
   void updateTextDisplay();
   void updateTextWordCheckerDisplay();
   void updateTextStatsDisplay(QString text, int count);
@@ -784,15 +827,13 @@ private:
   void enable_DXCC_entity (bool on);
   void setRig (Frequency = 0);  // zero frequency means no change
   QDateTime nextTransmitCycle();
-  void resetAutomaticIntervalTransmissions(bool stopCQ, bool stopHB);
-  void resetCQTimer(bool stop);
-  void resetHeartbeatTimer(bool stop);
   void statusUpdate ();
   void on_the_minute ();
   void tryBandHop();
   void add_child_to_event_filter (QObject *);
   void remove_child_from_event_filter (QObject *);
   void setup_status_bar ();
+  QString columnLabel(QString defaultLabel);
 
   void resetIdleTimer();
   void incrementIdleTimer();

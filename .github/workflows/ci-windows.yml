@@ -1,0 +1,69 @@
+name: Build for Windows 10+ x64
+
+on: [workflow_dispatch, pull_request]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build_windows-2025:
+    runs-on: windows-2025
+    permissions: write-all
+
+    steps:
+    - run: git config --global core.autocrlf input
+    - uses: actions/checkout@v5
+    - uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        cache: true
+        install: >-
+          git python base-devel make unzip zip tar
+        pacboy: >-
+          toolchain:p
+          autotools:p
+          cmake:p
+          ninja:p
+          libusb:p
+          wget:p
+          boost:p
+          fftw:p
+          sqlite3:p
+          nsis:p
+          python:p
+
+    - name: Setup build directory
+      shell: msys2 {0}
+      run: mkdir -p build
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.9.3'
+        target: 'desktop'
+        arch: 'win64_mingw'
+        modules: 'qtmultimedia qtserialport'
+        cache: true
+        dir: 'D:/a/JS8Call-improved/JS8Call-improved/local/qt693'
+
+    - name: Release download for hamlib
+      uses: robinraju/release-downloader@v1.12
+      with:
+        repository: 'wmiler/js8call'
+        fileName: 'hamlib-windows-msys2-binaries*.zip'
+        tag: 'hamlib-v4.6.4-ci'
+        extract: true
+        out-file-path: 'D:/a/JS8Call-improved/JS8Call-improved/local/hamlib464'
+
+    - name: Configure JS8Call
+      shell: msys2 {0}
+      run: |
+        cd ./build
+        cmake -DCMAKE_PREFIX_PATH='D:/a/JS8Call-improved/JS8Call-improved/local/hamlib464;D:/a/JS8Call-improved/JS8Call-improved/local/qt693/Qt/6.9.3/mingw_64' ..
+
+    - name: Build JS8Call
+      shell: msys2 {0}
+      run: |
+        cd ./build
+        cmake --build . --config Release

@@ -78,6 +78,8 @@ public:
 
     //Varicode();
 
+    static SubmodeType intToSubmode(int sm);
+
     static QString extendedChars();
 
     static QString escape(const QString &text);

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <mutex>
 
-// NSPS, the number of samples per second (at a sample rate of 1200
+// NSPS, the number of samples per second (at a sample rate of 12000
 // samples per second) is a constant, chosen so as to be a number
 // with no prime factor greater than 7.
 
@@ -56,7 +56,7 @@ extern struct dec_data
     bool newdat;                // true ==> new data, must do long FFT
     int nfa;                    // Low decode limit (Hz) (filter min)
     int nfb;                    // High decode limit (Hz) (filter max)
-    bool syncStats;              // only compute sync candidates
+    bool syncStats;             // only compute sync candidates
     int kin;                    // number of frames written to d2
     int kposA;                  // starting position of decode for submode A
     int kposB;                  // starting position of decode for submode B

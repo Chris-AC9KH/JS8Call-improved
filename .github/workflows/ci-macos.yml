@@ -1,0 +1,39 @@
+permissions:
+  contents: read
+
+name: CI Build for MacOS 15 Arm64 (M1 and higher)
+
+on: [workflow_dispatch, pull_request]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build_macos-latest:
+    runs-on: macos-15
+    permissions: write-all
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Work around for /usr/local perms and grab arch/os info
+      run: |
+        sudo chown runner:admin /usr/local
+        arch
+        sw_vers
+
+    - name: Release AC9KH package
+      uses: robinraju/release-downloader@v1.12
+      with:
+        repository: 'Chris-AC9KH/js8lib'
+        fileName: 'js8lib-2.3_Darwin_arm64_Qt6.9.3.tar.gz'
+        latest: true
+        extract: true
+        out-file-path: '/usr/local/'
+
+    - name: Build JS8Call
+      run: |
+        mkdir -p ./build && cd ./build
+        cmake -DCMAKE_PREFIX_PATH="/usr/local/js8lib" ..
+        make

@@ -7,6 +7,7 @@
 
 class QString;
 class Configuration;
+class Bands;
 
 class PSKReporter final : public QObject
 {
@@ -31,7 +32,8 @@ public:
                         QString const  & grid,
                         Radio::Frequency freq,
                         QString const  & mode,
-                        int              snr);
+                        int              snr,
+						QDateTime 		const & utcTimestamp);
 
   //
   // Flush any pending spots to PSK Reporter

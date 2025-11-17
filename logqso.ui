@@ -164,8 +164,8 @@
                <verstretch>0</verstretch>
               </sizepolicy>
              </property>
-             <property name="TimeSpec">
-              <enum>Qt::UTC</enum>
+             <property name="timeZone">
+              <enum>QTimeZone::UTC</enum>
              </property>
              <property name="displayFormat">
               <string>yyyy-MM-dd HH:mm:ss</string>
@@ -222,8 +222,8 @@
                <verstretch>0</verstretch>
               </sizepolicy>
              </property>
-             <property name="TimeSpec">
-              <enum>Qt::UTC</enum>
+             <property name="timeZone">
+              <enum>QTimeZone::UTC</enum>
              </property>
              <property name="displayFormat">
               <string>yyyy-MM-dd HH:mm:ss</string>

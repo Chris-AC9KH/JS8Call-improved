@@ -1,0 +1,259 @@
+permissions:
+  contents: read
+
+name: CI Build for Linux Ubuntu
+
+on: [workflow_dispatch, pull_request]
+
+# The package arrays below are mainly for building the libs, one could add fedora_build_package to include the
+# packages fedora requires, for instance.
+env:
+  BUILD_TYPE: Release
+  build_package: build-essential git cmake libusb-1.0-0-dev libxkbcommon-dev libudev-dev yasm libva-dev libpulse-dev
+  opengl_package1: libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libgl1-mesa-dev libxkbcommon-x11-dev 
+  opengl_package2: libxcb-keysyms1-dev libxcb-image0-dev libxcb-icccm4-dev libxcb-render-util0-dev 
+  opengl_package3: libxcb-xfixes0-dev libxcb-sync-dev libxcb-randr0-dev libxrender-dev
+  ffmpeg_build: libass-dev libfreetype6-dev libgnutls28-dev libmp3lame-dev libsdl2-dev libva-dev libvdpau-dev libvorbis-dev libx264-dev
+
+# If we want to check on other variants of linux, just add it to the maxtix/include section
+# with the OS required libs for that platform. Some additional changes (like apt to dnf) will 
+# need to occur elsewhere in this workflow. ie via the steps.which-os.outputs.thisos == 'some other linux OS'
+# Be aware, the global env package vars do not get expanded in the matrix.
+jobs:
+  ci_ubuntu_linux:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-22.04, arch: X64, packages: build-essential autoconf curl git cmake libtool libxkbcommon-dev libudev-dev yasm libva-dev libpulse-dev libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libgl1-mesa-dev libxkbcommon-x11-dev}
+          - {os: ubuntu-22.04-arm, arch: ARM64, packages: build-essential autoconf curl git cmake libtool libxkbcommon-dev libudev-dev yasm libva-dev libpulse-dev libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libgl1-mesa-dev libxkbcommon-x11-dev}
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Create our own var with the ImageOS value for cache use
+      id: which-os
+      run: |
+        export ImageOS=$(grep -E '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"')$(grep -E '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
+        echo "thisos=$ImageOS" >> $GITHUB_OUTPUT
+      shell: bash
+
+# Move all of our cache checks here, so we know if we need to free bunches of disk space
+    - name: Cache Check libusb 1.0.29
+      id: cache-usb
+      uses: actions/cache/restore@v4
+      with:
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb1029
+
+    - name: Cache Check ffmpeg 7.1.1
+      id: cache-ffmpeg
+      uses: actions/cache/restore@v4
+      with:
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg711
+
+    - name: Cache Check Hamlib 4.6.4
+      id: cache-hamlib
+      uses: actions/cache/restore@v4
+      with:
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib464
+
+    - name: Cache Check fftw 3.3.10
+      id: cache-fftw
+      uses: actions/cache/restore@v4
+      with:
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw3310
+
+    - name: Cache Check Boost 1.88
+      id: cache-boost
+      uses: actions/cache/restore@v4
+      with:
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost188
+
+    - name: Cache Check QT 6.9.3
+      id: cache-qt
+      uses: actions/cache/restore@v4
+      with:
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-qt693
+# End cache checks
+
+# We have to empty the runners to build QT as they are only 50G and upto 78% full
+# This does NOT work with container builds
+    - name: Free Disk Space (Ubuntu)
+      if: steps.cache-qt.outputs.cache-hit != 'true' && steps.which-os.outputs.thisos == 'ubuntu22.04'
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Install minimum required dependencies (Ubuntu)
+      if: ${{ steps.which-os.outputs.thisos == 'ubuntu22.04' }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ${{ matrix.packages }}
+
+    - name: Install dependencies needed to build libs (Ubuntu)
+      if: |
+        (steps.cache-usb.outputs.cache-hit != 'true' ||
+        steps.cache-ffmpeg.outputs.cache-hit != 'true' ||
+        steps.cache-hamlib.outputs.cache-hit != 'true' ||
+        steps.cache-fftw.outputs.cache-hit != 'true' ||
+        steps.cache-boost.outputs.cache-hit != 'true' ||
+        steps.cache-qt.outputs.cache-hit != 'true') &&
+        steps.which-os.outputs.thisos == 'ubuntu22.04'
+      run: |
+        sudo apt-get install -y ${{ env.ffmpeg_build }} ${{ env.opengl_package2 }} ${{ env.opengl_package3 }}
+        sudo apt-get clean
+
+## libusb
+    - name: Install libusb 1.0.29
+      if: steps.cache-usb.outputs.cache-hit != 'true'
+      id: install-usb
+      run: |
+        curl --location --output /tmp/v1.0.29.tar.gz https://github.com/libusb/libusb/archive/refs/tags/v1.0.29.tar.gz
+        cd /tmp
+        tar zxf v1.0.29.tar.gz
+        cd libusb-1.0.29
+        ./bootstrap.sh
+        ./configure --prefix=${GITHUB_WORKSPACE}/local/libusb
+        make
+        make install
+
+    - name: Save libusb cache
+      if: steps.cache-usb.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb1029
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
+
+## ffmpeg
+    - name: Install ffmpeg 7.1.1
+      if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+      id: install-ffmpeg
+      run: |
+        git clone --depth=1 --branch n7.1.1 https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg
+        mkdir -p /tmp/ffmpeg/build
+        cd /tmp/ffmpeg/build
+        ../configure --prefix=${GITHUB_WORKSPACE}/local/ffmpeg --disable-shared --enable-static --disable-doc \
+          --enable-network --enable-gpl --enable-nonfree --enable-libass --enable-libfreetype --enable-libmp3lame \
+          --enable-libvorbis
+        make -j install
+
+    - name: Save ffmpeg cache
+      if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg711
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
+
+## hamlib
+    - name: Install Hamlib 4.6.4
+      if: steps.cache-hamlib.outputs.cache-hit != 'true'
+      id: install-hamlib
+      run: |
+        git clone --depth=1 --branch=4.6.4 https://github.com/Hamlib/Hamlib.git /tmp/hamlib
+        cd /tmp/hamlib
+        ./bootstrap
+        ./configure --prefix=${GITHUB_WORKSPACE}/local/hamlib
+        make -j 4
+        make install-strip
+        sudo ldconfig
+
+    - name: Save Hamlib cache
+      if: steps.cache-hamlib.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib464
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
+
+ ## fftw
+    - name: Install fftw 3.3.10
+      if: (steps.cache-fftw.outputs.cache-hit != 'true' && runner.arch == 'X64')
+      id: install-fftw
+      run: |
+        cd /tmp
+        curl --location --output /tmp/fftw-3.3.10.tar.gz https://www.fftw.org/fftw-3.3.10.tar.gz
+        tar zxf fftw-3.3.10.tar.gz
+        cd fftw-3.3.10
+        ./configure --prefix=${GITHUB_WORKSPACE}/local/fftw --enable-threads --enable-shared --enable-sse2 --enable-avx --enable-avx2 --enable-float
+        make
+        make install
+
+    - name: Install fftw 3.3.10 (arm64)
+      if: (steps.cache-fftw.outputs.cache-hit != 'true' && runner.arch == 'ARM64')
+      id: install-fftw-arm64
+      run: |
+        cd /tmp
+        curl --location --output /tmp/fftw-3.3.10.tar.gz https://www.fftw.org/fftw-3.3.10.tar.gz
+        tar zxf fftw-3.3.10.tar.gz
+        cd fftw-3.3.10
+        ./configure --prefix=${GITHUB_WORKSPACE}/local/fftw --enable-threads --enable-shared --enable-neon --enable-float
+        make
+        make install
+
+    - name: Save fftw 3.3.10 cache
+      if: steps.cache-fftw.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw3310
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw
+
+## boost
+    - name: Install Boost 1.88
+      if: steps.cache-boost.outputs.cache-hit != 'true'
+      id: install-boost
+      run: |
+        cd /tmp
+        curl --location --output /tmp/boost-1.88.0.tar.gz https://archives.boost.io/release/1.88.0/source/boost_1_88_0.tar.gz
+        tar zxf boost-1.88.0.tar.gz
+        cd boost_1_88_0
+        ./bootstrap.sh --prefix=${GITHUB_WORKSPACE}/local/boost
+        ./b2 install
+
+    - name: Save Boost 1.88 cache
+      if: steps.cache-boost.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost188
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
+
+    # Takes about 1 hour if not cached
+    - name: Install QT 6.9.3
+      if: steps.cache-qt.outputs.cache-hit != 'true'
+      id: install-qt693
+      run: |
+        git clone --depth=1 --branch=6.9.3 https://github.com/qt/qt5.git /tmp/qt6
+        mkdir -p /tmp/qt6/build
+        cd /tmp/qt6/build
+        /tmp/qt6/configure -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/local/ffmpeg" --prefix=${GITHUB_WORKSPACE}/local/qt693-install -init-submodules -submodules qtmultimedia,qtserialport -ffmpeg-dir /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
+        cmake --build . --parallel
+        cmake --install .
+
+    - name: Save QT 6.9.3 cache
+      if: steps.cache-qt.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-qt693
+        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install
+
+    - name: QT 6.9.3 Summary
+      if: steps.cache-qt.outputs.cache-hit != 'true'
+      run: cat /tmp/qt6/build/config.summary
+
+    - name: Build JS8Call
+      run: |
+        mkdir -p build && cd build
+        cmake -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/local/qt693-install;${GITHUB_WORKSPACE}/local/hamlib;${GITHUB_WORKSPACE}/local/fftw;${GITHUB_WORKSPACE}/local/boost;${GITHUB_WORKSPACE}/local/libusb" ..
+        make -j 4

@@ -267,6 +267,7 @@ target_sources(
   PollingTransceiver.cpp
   ProcessThread.cpp
   PSKReporter.cpp
+  qDateTimeExperiment.cpp
   qt_helpers.cpp
   Radio.cpp
   RadioMetaType.cpp
@@ -284,6 +285,8 @@ target_sources(
   TransceiverBase.cpp
   TransceiverFactory.cpp
   TransmitTextEdit.cpp
+  TwoPhaseSignal.cpp
+  TxLoop.cpp
   varicode.cpp
   WF.cpp
   widegraph.cpp
@@ -457,8 +460,9 @@ if (WIN32)
     TARGET ${TARGET}
     POST_BUILD
     COMMAND "${WINDEPLOYQT}" "$<TARGET_FILE_DIR:${TARGET}>"
-    --libdir JS8Call
-    --plugindir JS8Call
+    --libdir JS8Call-improved
+    --plugindir JS8Call-improved
+    --no-translations
     COMMENT "Running windeployqt..."
   )
 endif (WIN32)
