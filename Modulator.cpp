@@ -31,12 +31,13 @@ Modulator::start(double        const frequency,
 {
   Q_ASSERT (stream);
 
-  if (isIdle()) {
+  const State current_state = m_state.load();
+  if (current_state != State::Idle) {
       qCDebug(modulator_js8)
           << "Modulator does not find itself in state idle, but"
-          << (m_state.load() == State::Active ? "Active" :
-              m_state.load() == State::Synchronizing ? "Synchronizing" :
-              m_state.load() == State::Idle ? "Idle" : "??What??")
+          << (current_state == State::Active ? "Active" :
+              current_state == State::Synchronizing ? "Synchronizing" :
+              current_state == State::Idle ? "Idle" : "??What??")
           << "so calling stop()";
       stop();
   }
@@ -81,7 +82,7 @@ Modulator::start(double        const frequency,
         m_silentFrames = (startDelayMS + additionalMSNeededForTxDelay) * FRAME_RATE / MS_PER_SEC;
     } else if (startDelayMS > periodOffsetMS) {
         qCDebug(modulator_js8) << "Starting" << periodOffsetMS
-                               << "ms late into transmission, removing some of the"
+                               << "ms late into transmission, skipping some of the"
                                << startDelayMS << "ms start delay";
         m_silentFrames = (startDelayMS - periodOffsetMS) * FRAME_RATE / MS_PER_SEC;
     } else {
@@ -95,9 +96,18 @@ Modulator::start(double        const frequency,
 
   initialize(QIODevice::ReadOnly, channel);
 
-  m_state.store(0 < m_silentFrames ? State::Synchronizing : State::Active);
-  m_stream = stream;
+  if (0 < m_silentFrames) {
+      m_state.store(State::Synchronizing);
+      qCDebug(modulator_js8)
+          << "Symbol transmission to start after"
+          << ((float) m_silentFrames) / FRAME_RATE * MS_PER_SEC
+          << "ms of silence.";
+  } else {
+      m_state.store(State::Active);
+      qCDebug(modulator_js8) << "Symbol transmission to start immediately.";
+  }
 
+  m_stream = stream;
   if (m_stream)
   {
     m_stream->restart(this);
