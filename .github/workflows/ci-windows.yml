@@ -1,4 +1,4 @@
-name: Build for Windows 10+ x64
+name: CI Build for Windows 10+ x64
 
 on: [workflow_dispatch, pull_request]
 
