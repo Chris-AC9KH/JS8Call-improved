@@ -116,17 +116,17 @@ jobs:
     - name: Get secrets
       shell: pwsh
       env:
-        CODE_SIGNING_PFX_BASE64: ${{ secrets.TEST_CODE_SIGNING_PFX_BASE64 }}
-        PFX_CERTIFICATE_PASSWORD: ${{ secrets.TEST_PFX_CERTIFICATE_PASSWORD }}
+        CODE_SIGNING_PFX_BASE64: ${{ secrets.CI_CODE_SIGNING_PFX_BASE64 }}
+        PFX_CERTIFICATE_PASSWORD: ${{ secrets.CI_PFX_CERTIFICATE_PASSWORD }}
       run: |
-        echo "${{ secrets.TEST_CODE_SIGNING_PFX_BASE64 }}" > 'D:/a/JS8Call-improved/cert.base64'
+        echo "${{ secrets.CI_CODE_SIGNING_PFX_BASE64 }}" > 'D:/a/JS8Call-improved/cert.base64'
         certutil -decode 'D:/a/JS8Call-improved/cert.base64' 'D:/a/JS8Call-improved/certificate.pfx'
       continue-on-error: true
 
     - name: Sign JS8Call
       shell: pwsh
       env: 
-        PFX_CERTIFICATE_PASSWORD: ${{ secrets.TEST_PFX_CERTIFICATE_PASSWORD }}
+        PFX_CERTIFICATE_PASSWORD: ${{ secrets.CI_PFX_CERTIFICATE_PASSWORD }}
       run: |
         cd ./build/JS8Call/
         & 'C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/signtool.exe' sign /fd SHA256 /v /f 'D:/a/JS8Call-improved/certificate.pfx' /p "$env:PFX_CERTIFICATE_PASSWORD" *.exe
@@ -150,7 +150,7 @@ jobs:
 
     - name: Installer signtool run
       env:
-        PFX_CERTIFICATE_PASSWORD: ${{ secrets.TEST_PFX_CERTIFICATE_PASSWORD }}
+        PFX_CERTIFICATE_PASSWORD: ${{ secrets.CI_PFX_CERTIFICATE_PASSWORD }}
       run: |
         cd ./build/JS8Call/
         & 'C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/signtool.exe' sign /fd SHA256 /v /f 'D:/a/JS8Call-improved/certificate.pfx' /p "$env:PFX_CERTIFICATE_PASSWORD" JS8Call-installer-*.exe
