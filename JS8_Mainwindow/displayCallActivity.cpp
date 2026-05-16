@@ -214,6 +214,10 @@ void UI_Constructor::displayCallActivity() {
                 d.utcTimestamp.secsTo(now) / 60 >= callsignAging) {
                 continue;
             }
+            
+            bool isBlocked = m_config.rx_callsign_blocklist().contains(d.call) ||
+                                         m_config.rx_callsign_blocklist().contains(
+                                             Radio::base_callsign(d.call));
 
             ui->tableWidgetCalls->insertRow(ui->tableWidgetCalls->rowCount());
             int row = ui->tableWidgetCalls->rowCount() - 1;
@@ -229,14 +233,19 @@ void UI_Constructor::displayCallActivity() {
 #endif
             bool hasThrough = !d.through.isEmpty();
 
-            auto iconItem = new QTableWidgetItem(hasMessage   ? "\u2691"
+            auto iconItem = new QTableWidgetItem(isBlocked    ? "\u2715"
+                                                 : hasMessage ? "\u2691"
                                                  : hasACK     ? "\u2605"
                                                  : hasCQ      ? "\u260E"
                                                  : hasThrough ? "\u269F"
                                                               : "");
+            
+            if (isBlocked) {iconItem->setForeground(QColor(Qt::red));}
+
             iconItem->setData(Qt::UserRole, QVariant(d.call));
             iconItem->setToolTip(
-                hasMessage ? "Message Available"
+                isBlocked  ? "Blocked Station"
+                : hasMessage ? "Message Available"
                 : hasACK   ? QString("Hearing Your Station (%1)")
                                .arg(since(d.ackTimestamp))
                 : hasCQ ? QString("Calling CQ (%1)").arg(since(d.cqTimestamp))
@@ -245,7 +254,7 @@ void UI_Constructor::displayCallActivity() {
                     : "");
             iconItem->setTextAlignment(Qt::AlignCenter);
             ui->tableWidgetCalls->setItem(row, col++, iconItem);
-            if (hasMessage || hasACK || hasCQ || hasThrough) {
+            if (hasMessage || hasACK || hasCQ || hasThrough || isBlocked) {
                 showIconColumn = true;
             }
 

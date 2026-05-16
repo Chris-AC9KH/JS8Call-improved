@@ -282,6 +282,9 @@ class Configuration final : public QObject {
     // Set the dynamic station status message which is only used if
     // configuration setting is enabled.
     void set_dynamic_station_status(QString const &status);
+    
+    // context menu item to block a callsign
+    void add_to_rx_callsign_blocklist(const QString &callsign);
 
     // This method queries if a CAT and PTT connection is operational.
     bool is_transceiver_online() const;

@@ -1114,6 +1114,20 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
         displayActivity(true);
     });
+          
+    auto blockStation =
+        new QAction(QString("Block This Station"), ui->tableWidgetCalls);
+    connect(blockStation, &QAction::triggered, this, [this]() {
+        QString selectedCall = callsignSelected();
+        if (selectedCall.isEmpty() || selectedCall.startsWith("@")) {
+            return;
+        }
+
+        m_config.add_to_rx_callsign_blocklist(selectedCall);
+
+        m_rxBlockedOffsets.clear();
+        displayActivity(true);
+    });
 
     connect(ui->actionShow_Message_Inbox, &QAction::toggled, this,
             [this](bool checked) {
@@ -1207,9 +1221,10 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     ui->tableWidgetCalls->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(
-        ui->tableWidgetCalls, &QTableWidget::customContextMenuRequested, this,
-        [this, logAction, historyAction, localMessageAction, clearAction4,
-         clearActionAll, addStation, removeStation](QPoint const &point) {
+            ui->tableWidgetCalls, &QTableWidget::customContextMenuRequested, this,
+            [this, logAction, historyAction, localMessageAction, clearAction4,
+             clearActionAll, addStation, removeStation, blockStation](QPoint const &point) {
+                
             QMenu *menu = new QMenu(ui->tableWidgetCalls);
 
             // clear the selection of the call widget on right click
@@ -1308,6 +1323,11 @@ UI_Constructor::UI_Constructor(QString const &program_info,
                                        ? "Remove This Group"
                                        : "Remove This Station");
             menu->addAction(removeStation);
+            
+            blockStation->setDisabled(missingCallsign || isAllCall ||
+                                      selectedCall.startsWith("@"));
+
+            menu->addAction(blockStation);
 
             menu->addSeparator();
             menu->addAction(clearAction4);

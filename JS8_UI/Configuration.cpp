@@ -1230,6 +1230,13 @@ void Configuration::addToHbBlacklist(const QString &callsign) {
     }
 }
 
+void Configuration::add_to_rx_callsign_blocklist(const QString &callsign) {
+    if (!m_->rx_callsign_blocklist_.contains(callsign)) {
+        m_->rx_callsign_blocklist_.append(callsign);
+        m_->write_settings();
+    }
+}
+
 QSet<QString> Configuration::hb_blacklist() const {
     return QSet<QString>(m_->hb_blacklist_.begin(), m_->hb_blacklist_.end());
 }
