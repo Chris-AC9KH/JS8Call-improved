@@ -445,20 +445,13 @@ jobs:
       continue-on-error: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Generate sha256 hash
-      run: |
-        ls -l ${GITHUB_WORKSPACE}/AppImage/
-        shasum -a 256 ${GITHUB_WORKSPACE}/AppImage/js8call-improved*.tar.gz > ${GITHUB_WORKSPACE}/AppImage/sha256hash
-      continue-on-error: true
       
     - name: Attestation (Release Only)
       if: ${{ (inputs.environment == 'Release') && (inputs.release-ver) }}
       uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
       with:
         subject-path: ${{ github.workspace }}/AppImage/*.AppImage*
-        subject-checksums: ${GITHUB_WORKSPACE}/AppImage/sha256hash
-
+        
     - name: Upload Artifact (Release build)
       if: ${{ (inputs.environment == 'Release') && (inputs.release-ver) }}
       uses: actions/upload-artifact@v6
