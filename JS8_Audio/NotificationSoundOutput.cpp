@@ -60,6 +60,26 @@ void NotificationSoundOutput::setAttenuation(qreal const a)
 void NotificationSoundOutput::play(QByteArray const &data,
                                    QAudioFormat const &format)
 {
+#ifdef Q_OS_LINUX
+    /**
+     * @details
+     * Linux-only debounce to mitigate issues with third-party FFmpeg-backed
+     * Qt audio plugins that create invalid QAudioSink instances and never
+     * close them when play() is invoked in quick succession. By rate-limiting
+     * sink creation to at most once per 1000 ms, we avoid entering the buggy
+     * path in those backends.
+     *
+     * This is intentionally scoped to Linux to avoid surprising behavior on
+     * platforms where the official Qt audio backends adhere to the expected
+     * threading/state contract.
+     */
+    if (m_sink && m_sink->state() == QAudio::ActiveState)
+        return;
+    
+    if (m_lastPlayed.isValid() && m_lastPlayed.elapsed() < 1000)
+        return;
+#endif
+    
     if (m_sink) {
         disconnect(m_sink.get(), nullptr, this, nullptr);
         m_sink->stop();
@@ -116,10 +136,29 @@ void NotificationSoundOutput::play(QByteArray const &data,
             this, &NotificationSoundOutput::handleStateChanged);
 
     m_sink->start(m_buffer.get());
+#ifdef Q_OS_LINUX
+    /**
+     * @brief Mark the timestamp of the last successful play attempt.
+     *
+     * Used by the Linux-only debounce to avoid re-entering known-buggy paths
+     * in certain FFmpeg-backed audio plugins when play() is called frequently.
+     */
+    m_lastPlayed.restart();
+#endif
 
     if (m_sink->error() != QAudio::NoError) {
         Q_EMIT error(tr("Failed to start audio output."));
         m_sink->stop();
+#ifdef Q_OS_LINUX
+        /**
+         * @brief Invalidate the debounce timer on failed start.
+         *
+         * If starting the sink failed, clear the last-play timestamp so that
+         * a subsequent attempt isn't incorrectly throttled by the Linux-only
+         * debounce logic.
+         */
+        m_lastPlayed.invalidate();
+#endif
         if (m_buffer) {
             m_buffer->close();
             m_buffer.reset();
@@ -165,6 +204,7 @@ void NotificationSoundOutput::handleStateChanged(QAudio::State const newState)
         break;
 
     case QAudio::IdleState:
+    
     case QAudio::StoppedState:
         if (m_buffer) {
             m_buffer->close();
