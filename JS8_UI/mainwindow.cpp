@@ -506,6 +506,10 @@ void UI_Constructor::readSettings() {
         m_config.reset_activity()
             ? ""
             : m_settings->value("RXActivity", "").toString());
+    QTimer::singleShot(0, this, [this](){
+        ui->textEditRX->verticalScrollBar()->setValue(
+            ui->textEditRX->verticalScrollBar()->maximum());
+    });
     ui->actionShow_Band_Heartbeats_and_ACKs->setChecked(
         m_settings->value("BandHBActivityVisible", true).toBool());
     m_settings->endGroup();
@@ -1012,6 +1016,11 @@ void UI_Constructor::on_actionSettings_triggered() { openSettings(); }
 
 void UI_Constructor::openSettings(int tab) {
     m_config.select_tab(tab);
+    
+    // Save scroll position before opening settings
+    QScrollBar *bar = ui->textEditRX->verticalScrollBar();
+    const bool wasAtBottom = (bar->value() == bar->maximum());
+    const int savedPos = bar->value();
 
     // things that might change that we need know about
     auto callsign = m_config.my_callsign();
@@ -1072,6 +1081,16 @@ void UI_Constructor::openSettings(int tab) {
 
         m_opCall = m_config.opCall();
     }
+    
+    // Restore scroll position after settings dialog
+    QTimer::singleShot(0, this, [this, wasAtBottom, savedPos](){
+        QScrollBar *bar = ui->textEditRX->verticalScrollBar();
+        if (wasAtBottom) {
+            bar->setValue(bar->maximum());
+        } else {
+            bar->setValue(savedPos);
+        }
+    });
 }
 
 void UI_Constructor::prepareApi() {
