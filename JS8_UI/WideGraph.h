@@ -3,7 +3,7 @@
 #define WIDEGRAPH_H
 
 #include "JS8_Include/commons.h"
-#include "JS8_Main/WF.h"
+#include "JS8_UI/WF.h"
 
 #include <QColor>
 #include <QDir>

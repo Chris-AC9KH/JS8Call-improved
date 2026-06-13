@@ -9,8 +9,8 @@
 #define PLOTTER_H
 
 #include "JS8_Main/Flatten.h"
+#include "JS8_UI/WF.h"
 #include "RDP.h"
-#include "WF.h"
 
 #include <QColor>
 #include <QPixmap>

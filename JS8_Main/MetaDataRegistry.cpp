@@ -11,9 +11,9 @@
 #include "JS8_Transceiver/Transceiver.h"
 #include "JS8_Transceiver/TransceiverFactory.h"
 #include "JS8_UI/Configuration.h"
+#include "JS8_UI/WF.h"
 #include "Radio.h"
 #include "StationList.h"
-#include "WF.h"
 
 #include <QItemEditorFactory>
 #include <QMetaType>
