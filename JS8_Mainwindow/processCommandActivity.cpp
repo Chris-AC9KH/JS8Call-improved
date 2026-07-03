@@ -216,29 +216,25 @@ void UI_Constructor::processCommandActivity() {
             // ACKs and SNRs are the most likely source of items to be
             // overwritten (multiple responses at once)... so don't overwrite
             // those (i.e., print each on a new line)
-            bool shouldOverwrite =
-                (!d.cmd.contains(" ACK") &&
-                 !d.cmd.contains(" SNR")); /* && isRecentOffset(d.freq);*/
+            bool shouldOverwrite = (!d.cmd.contains(" ACK") && !d.cmd.contains(" SNR"));
 
             if (shouldOverwrite &&
-                ui->textEditRX->find(d.utcTimestamp.time().toString(),
-                                     QTextDocument::FindBackward)) {
-                // ... maybe we could delete the last line that had this message
-                // on this frequency...
-                c = ui->textEditRX->textCursor();
-                c.movePosition(QTextCursor::StartOfBlock);
-                c.movePosition(QTextCursor::EndOfBlock,
-                               QTextCursor::KeepAnchor);
-                qCDebug(mainwindow_js8) << "should display directed message, "
-                                           "erasing last rx activity line..."
-                                        << c.selectedText().toUpper();
-                c.removeSelectedText();
-                c.deletePreviousChar();
-                c.deletePreviousChar();
-                /*
-                c.deleteChar();
-                c.deleteChar();
-                */
+                ui->textEditRX->find(d.utcTimestamp.time().toString(), QTextDocument::FindBackward)) {
+                auto candidate = ui->textEditRX->textCursor();
+                candidate.select(QTextCursor::BlockUnderCursor);
+                QString selectedText = candidate.selectedText();
+
+                // Only treat this as "the same message being redrawn" if it's
+                // actually from the same sender - otherwise it's a distinct
+                // reply that happens to share a rendered timestamp.
+                if (selectedText.contains(QString("%1:").arg(d.from))) {
+                    c = ui->textEditRX->textCursor();
+                    c.movePosition(QTextCursor::StartOfBlock);
+                    c.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+                    c.removeSelectedText();
+                    c.deletePreviousChar();
+                    c.deletePreviousChar();
+                }
             }
 
             // log it to the display!

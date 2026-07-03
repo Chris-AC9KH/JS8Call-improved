@@ -25,17 +25,18 @@ void UI_Constructor::processBufferedActivity() {
         if (!buffer.msgs.isEmpty()) {
             dt = qMax(dt, buffer.msgs.last().utcTimestamp);
         }
+        
+        int ageSecs = dt.secsTo(DriftingDateTime::currentDateTimeUtc());
 
         // if the buffer has messages older than 1 minute, and we still haven't
         // closed it, let's mark it as the last frame
-        if (dt.secsTo(DriftingDateTime::currentDateTimeUtc()) > 60 &&
-            !buffer.msgs.isEmpty()) {
+        if (ageSecs > 60 && !buffer.msgs.isEmpty()) {
             buffer.msgs.last().bits |= Varicode::JS8CallLast;
         }
 
         // but, if the buffer is older than 1.5 minutes, and we still haven't
         // closed it, just remove it and skip
-        if (dt.secsTo(DriftingDateTime::currentDateTimeUtc()) > 90) {
+        if (ageSecs > 90) {
             m_messageBuffer.remove(freq);
             continue;
         }
