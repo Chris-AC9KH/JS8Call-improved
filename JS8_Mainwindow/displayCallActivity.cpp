@@ -377,12 +377,12 @@ void UI_Constructor::displayCallActivity() {
                 }
 
                 auto logNameItem = new QTableWidgetItem(logDetailName);
-                logNameItem->setTextAlignment(Qt::AlignCenter);
+                logNameItem->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
                 logNameItem->setToolTip(logDetailName);
                 ui->tableWidgetCalls->setItem(row, col++, logNameItem);
 
                 auto logCommentItem = new QTableWidgetItem(logDetailComment);
-                logCommentItem->setTextAlignment(Qt::AlignCenter);
+                logCommentItem->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
                 logCommentItem->setToolTip(logDetailComment);
                 ui->tableWidgetCalls->setItem(row, col++, logCommentItem);
 
