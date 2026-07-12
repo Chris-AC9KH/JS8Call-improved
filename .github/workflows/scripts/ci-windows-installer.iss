@@ -1,15 +1,17 @@
 #define MyAppName "JS8Call"
-#define MyAppVersion "3.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
+#pragma message "AppVersion is: " + MyAppVersion
 #define MyAppPublisher "JS8Call-improved"
-#define MyAppURL "https://www.js8call-improved.com/"
+#define MyAppURL "https://www.js8call.com/"
 #define MyAppExeName "JS8Call.exe"
 
 [Setup]
-; NOTE: The value of AppId uniquely identifies this application. Do not use the same AppId value in installers for other applications.
 AppId={{B5281957-28FD-4BAE-8D06-FC59898D850E}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-;AppVerName={#MyAppName} {#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -37,7 +39,7 @@ SetupIconFile=D:\a\JS8Call-improved\JS8Call-improved\icons\windows-icons\js8call
 UninstallDisplayIcon=D:\a\JS8Call-improved\JS8Call-improved\icons\windows-icons\js8call.ico
 SolidCompression=yes
 ; WizardStyle introduced in 6.6.0, Github has 6.5.4
-;WizardStyle=modern dynamic
+; WizardStyle=modern dynamic
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -47,34 +49,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\generic\*"; DestDir: "{app}\generic"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\iconengines\*"; DestDir: "{app}\iconengines"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\imageformats\*"; DestDir: "{app}\imageformats"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\multimedia\*"; DestDir: "{app}\multimedia"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\networkinformation\*"; DestDir: "{app}\networkinformation"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\avcodec-61.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\avformat-61.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\avutil-59.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\D3Dcompiler_47.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\libfftw3f-3.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\libgcc_s_seh-1.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\libhamlib-4.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\libstdc++-6.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\libusb-1.0.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\libwinpthread-1.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\opengl32sw.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6Core.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6Gui.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6Multimedia.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6Network.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6SerialPort.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6Svg.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\Qt6Widgets.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\swresample-5.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\swscale-8.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "D:\a\JS8Call-improved\JS8Call-improved\build\JS8Call\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\a\JS8Call-improved\JS8Call-improved\icons\windows-icons\js8call.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
@@ -84,3 +59,4 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+

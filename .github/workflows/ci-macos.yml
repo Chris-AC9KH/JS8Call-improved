@@ -1,81 +1,79 @@
-permissions:
-  contents: read
-  attestations: write
-  id-token: write
-  
-name: CI Build for MacOS 26 Arm64 (M1 and higher)
-run-name: ${{ (github.event.inputs.environment) || (github.event.pull_request.title) || 'CI' }} Build for MacOS M1
+name: CI Build for MacOS Apple silicon
+run-name: ${{ github.event.pull_request.title || github.ref_name }} CI Build for MacOS
 
-on: 
-  workflow_dispatch: 
+on:
+  push:
   pull_request:
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      build-type:
-        description: 'Build type (Debug/Release)'
+      environment:
+        description: 'Environment to run in'
+        type: environment
+        default: CI
         required: false
-        type: string
-        default: 'Release'
-      release-ver:
-        description: 'Release Version (v3.0.0)'
-        required: false
-        type: string      
-        default: 'v3.0.0'
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
 
 jobs:
-  build_macos-latest:
-    runs-on: macOS-26
-    permissions: write-all
+  build_macos-26:
+    runs-on: macos-26
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
 
     steps:
-    - uses: actions/checkout@v6
+    - name: Configure Git line endings
+      run: git config --global core.autocrlf input
 
-    - name: Create our own var with the ImageOS value for cache use
-      id: which-os
-      run: |
-        export ImageOS=$(sw_vers -productVersion)
-        echo "thisos=$ImageOS" >> $GITHUB_OUTPUT
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
 
-    - name: Grab build dependeneces
+    - name: Grab build dependencies
       run: |
-        curl --location --output /tmp/js8lib3.0-MacOS_AppleSilicon_Qt.tar.gz https://github.com/JS8Call-improved/js8lib/releases/download/lib%2F3.0/js8lib3.0-MacOS_AppleSilicon_Qt.tar.gz
+        curl --location --output /tmp/js8lib3.0-MacOS_with_Qt.tar.gz https://github.com/JS8Call-improved/js8lib/releases/download/lib%2F3.0/js8lib3.0-MacOS_with_Qt.tar.gz
         cd /tmp
-        tar zxf /tmp/js8lib3.0-MacOS_AppleSilicon_Qt.tar.gz
+        tar zxf /tmp/js8lib3.0-MacOS_with_Qt.tar.gz
         sudo mv /tmp/js8lib /usr/local/js8lib
 
         curl --location --output /tmp/ffmpeg_MacOS_arm64.tar.gz https://github.com/JS8Call-improved/js8lib/releases/download/lib%2F3.0/ffmpeg_MacOS_arm64.tar.gz
         tar zxf /tmp/ffmpeg_MacOS_arm64.tar.gz
         sudo mv /tmp/ffmpeg /usr/local/ffmpeg
-      
-    - name: Build JS8Call
+
+    - name: Configure JS8Call
       run: |
         mkdir -p ./build && cd ./build
-        cmake -DCMAKE_PREFIX_PATH="/usr/local/js8lib" ..
-        make
+        cmake -G Xcode -DCMAKE_PREFIX_PATH="/usr/local/js8lib" ..
+
+    - name: Extract version
+      run: |
+        ver=$(grep "CMAKE_PROJECT_VERSION:STATIC=" build/CMakeCache.txt | cut -d'=' -f2 | tr -d '[:space:]')
+        gitHash=$(git rev-parse --short HEAD)
+
+        if [ "$ver" = "0.0.0" ]; then
+          safeVer=$gitHash
+        else
+          safeVer=$ver
+        fi
+
+        echo "JS8_SAFE_VER=$safeVer" >> $GITHUB_ENV
+        echo "SAFE_VER=$safeVer"
+
+    - name: Build JS8Call
+      run: |
+        cd ./build
+        xcodebuild -scheme JS8Call -configuration Release
 
     - name: Create DMG
-      run: hdiutil create -volname "JS8Call-improved.dmg" -srcfolder "build/JS8Call.app" -format UDZO "JS8Call-improved.dmg"
-      
-    - name: Attestation (Release Only)
-      if: ${{ inputs.release-ver }}
-      uses: actions/attest-build-provenance@v4
-      with:
-        subject-path: '${{ github.workspace }}/JS8Call-improved.dmg'
-        
-    - name: Upload Artifact (Release build)
-      if: ${{ inputs.release-ver }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: "JS8call-improved_${{ inputs.release-ver }}_${{ runner.arch }}_macos26.dmg"
-        path: /Users/runner/work/JS8Call-improved/JS8Call-improved/JS8Call-improved.dmg
+      run: |
+        echo "DMG version: ${{ env.JS8_SAFE_VER }}"
+        hdiutil create -volname "JS8Call" -srcfolder "build/Release/JS8Call.app" -format UDZO "JS8Call_${{ env.JS8_SAFE_VER }}.dmg"
 
-    - name: Upload Artifact (CI build)
-      if: ${{ !inputs.release-ver }}
+    - name: Upload Artifact
       uses: actions/upload-artifact@v7
       with:
-        name: "JS8call-improved_devel_${{ runner.arch }}_macos26.dmg"
-        path: /Users/runner/work/JS8Call-improved/JS8Call-improved/JS8Call-improved.dmg
+        name: "JS8Call_${{ env.JS8_SAFE_VER }}"
+        path: '${{ github.workspace }}/JS8Call_${{ env.JS8_SAFE_VER }}.dmg'
+        archive: false

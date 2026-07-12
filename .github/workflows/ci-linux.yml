@@ -3,22 +3,13 @@ permissions:
   attestations: write
   id-token: write
 
-name: CI Build for Linux Ubuntu
-run-name: ${{ (github.event.inputs.environment) || (github.event.pull_request.title) || 'CI' }} Build for Linux Ubuntu
+name: CI Build for Linux amd64/aarch64
+run-name: ${{ github.event.pull_request.title || github.ref_name }} CI Build for Linux
 
 on:
-  workflow_dispatch: 
+  push:
+  workflow_dispatch:
     inputs:
-      build-type:
-        description: 'Build type (Debug/Release)'
-        required: false
-        type: string
-        default: 'Release'
-      release-ver:
-        description: 'Release Version (v3.0.0)'
-        required: false
-        type: string
-        default: 'v3.0.0'
       environment:
         description: 'Environment to run in'
         type: environment
@@ -27,441 +18,63 @@ on:
   pull_request:
   workflow_call:
     inputs:
-      build-type:
-        description: 'Build type (Debug/Release)'
+      environment:
+        description: 'Environment to run in'
         required: false
         type: string
-        default: 'Debug'
-      release-ver:
-        description: 'Release Version (v3.0.0)'
-        required: false
-        type: string      
-        default: 'v3.0.0'        
+        default: CI
 
-# The package arrays below are mainly for building the libs, one could add fedora_build_package to include the
-# packages fedora requires, for instance.
-env:
-  BUILD_TYPE: Release
-  build_package: build-essential git cmake libusb-1.0-0-dev libxkbcommon-dev libudev-dev yasm libva-dev libpulse-dev
-  opengl_package1: libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libgl1-mesa-dev libxkbcommon-x11-dev 
-  opengl_package2: libxcb-keysyms1-dev libxcb-image0-dev libxcb-icccm4-dev libxcb-render-util0-dev 
-  opengl_package3: libxcb-xfixes0-dev libxcb-sync-dev libxcb-randr0-dev libxrender-dev libxcb*
-  ffmpeg_build: libgnutls28-dev libsdl2-dev libva-dev
-
-# If we want to check on other variants of linux, just add it to the maxtix/include section
-# with the OS required libs for that platform. Some additional changes (like apt to dnf) will 
-# need to occur elsewhere in this workflow. ie via the steps.which-os.outputs.thisos == 'some other linux OS'
-# Be aware, the global env package vars do not get expanded in the matrix.
 jobs:
-  ci_ubuntu_linux:
-    name: ${{ matrix.os }}
+  build:
+    name: ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     environment: ${{ inputs.environment || 'CI' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-22.04, arch: X64, packages: build-essential autoconf curl git cmake pkg-config appstream libtool libxkbcommon-dev libudev-dev yasm libva-dev libpulse-dev libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libgl1-mesa-dev libxkbcommon-x11-dev}
-          - {os: ubuntu-22.04-arm, arch: ARM64, packages: build-essential autoconf curl git cmake pkg-config appstream libtool libxkbcommon-dev libudev-dev yasm libva-dev libpulse-dev libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libgl1-mesa-dev libxkbcommon-x11-dev}
+          - { os: ubuntu-24.04,     arch: x86_64  }
+          - { os: ubuntu-24.04-arm, arch: aarch64 }
 
     steps:
-    - uses: actions/checkout@v6
-
-    - name: Create our own var with the ImageOS value for cache use
-      id: which-os
-      run: |
-        export ImageOS=$(grep -E '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"')$(grep -E '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"')
-        echo "thisos=$ImageOS" >> $GITHUB_OUTPUT
-      shell: bash
-
-# Move all of our cache checks here, so we know if we need to free bunches of disk space
-    - name: Cache Check libusb 1.0.29
-      id: cache-usb
-      uses: actions/cache/restore@v5
+    - uses: actions/checkout@v5
       with:
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb1029
+        fetch-depth: 0
 
-    - name: Cache Check ffmpeg 7.1.3
-      id: cache-ffmpeg
-      uses: actions/cache/restore@v5
-      with:
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg713
+    - name: Build AppImage
+      run: bash .github/workflows/scripts/JS8Call-Build-AppImage.sh
 
-    - name: Cache Check Hamlib 4.7.1
-      id: cache-hamlib
-      uses: actions/cache/restore@v5
-      with:
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib471
-
-    - name: Cache Check fftw 3.3.10
-      id: cache-fftw
-      uses: actions/cache/restore@v5
-      with:
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw3310
-
-    - name: Cache Check Boost 1.88
-      id: cache-boost
-      uses: actions/cache/restore@v5
-      with:
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost188
-
-    - name: Cache Check QT 6.9.3
-      id: cache-qt
-      uses: actions/cache/restore@v5
-      with:
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-wayland-qt693
-# End cache checks
-
-    - name: Clean up runner
-      if: steps.cache-qt.outputs.cache-hit != 'true' && steps.which-os.outputs.thisos == 'ubuntu22.04'
+    - name: Import signing key (Release only)
+      if: ${{ inputs.environment == 'Release' }}
       run: |
-        df -h
-        sudo rm -rf /usr/share/dotnet || true
-        sudo rm -rf /opt/ghc || true
-        sudo rm -rf /usr/local/.ghcup || true
-        sudo apt-get remove -y '^aspnetcore-.*' || echo "::warning::The command [sudo apt-get remove -y '^aspnetcore-.*'] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y '^dotnet-.*' --fix-missing || echo "::warning::The command [sudo apt-get remove -y '^dotnet-.*' --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y '^llvm-.*' --fix-missing || echo "::warning::The command [sudo apt-get remove -y '^llvm-.*' --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y 'php.*' --fix-missing || echo "::warning::The command [sudo apt-get remove -y 'php.*' --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y '^mongodb-.*' --fix-missing || echo "::warning::The command [sudo apt-get remove -y '^mongodb-.*' --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y '^mysql-.*' --fix-missing || echo "::warning::The command [sudo apt-get remove -y '^mysql-.*' --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri --fix-missing || echo "::warning::The command [sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y google-cloud-sdk --fix-missing || echo "::debug::The command [sudo apt-get remove -y google-cloud-sdk --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get remove -y google-cloud-cli --fix-missing || echo "::debug::The command [sudo apt-get remove -y google-cloud-cli --fix-missing] failed to complete successfully. Proceeding..."
-        sudo apt-get autoremove -y || echo "::warning::The command [sudo apt-get autoremove -y] failed to complete successfully. Proceeding..."
-        sudo apt-get clean || echo "::warning::The command [sudo apt-get clean] failed to complete successfully. Proceeding..."
-        sudo docker image prune --all --force || true
-        sudo swapoff -a || true
-        sudo rm -f /mnt/swapfile || true
-        df -h
-        free -h
-
-    - name: Install minimum required dependencies (Ubuntu)
-      if: ${{ steps.which-os.outputs.thisos == 'ubuntu22.04' }}
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ${{ matrix.packages }}
-
-    - name: GCC 12
-      run: |
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 120
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 120
-
-    - name: Install dependencies needed to build libs (Ubuntu)
-      if: |
-        (steps.cache-usb.outputs.cache-hit != 'true' ||
-        steps.cache-ffmpeg.outputs.cache-hit != 'true' ||
-        steps.cache-hamlib.outputs.cache-hit != 'true' ||
-        steps.cache-fftw.outputs.cache-hit != 'true' ||
-        steps.cache-boost.outputs.cache-hit != 'true' ||
-        steps.cache-qt.outputs.cache-hit != 'true') &&
-        steps.which-os.outputs.thisos == 'ubuntu22.04'
-      run: |
-        sudo apt-get install -y ${{ env.ffmpeg_build }} ${{ env.opengl_package2 }} ${{ env.opengl_package3 }}
-        sudo apt-get clean
-
-    - name: AppImage tools (x86_64)
-      if: (runner.arch == 'X64')
-      run: |
-        curl --location --output /tmp/linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-        chmod +x /tmp/linuxdeploy-x86_64.AppImage
-        curl --location --output /tmp/linuxdeploy-plugin-qt-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-        chmod +x /tmp/linuxdeploy-plugin-qt-x86_64.AppImage
-        curl --location --output /tmp/appimagelint-x86_64.AppImage https://github.com/TheAssassin/appimagelint/releases/download/continuous/appimagelint-x86_64.AppImage
-        chmod +x /tmp/appimagelint-x86_64.AppImage
-        sudo apt-get install -y ${{ env.ffmpeg_build }} ${{ env.opengl_package1 }} ${{ env.opengl_package2 }} ${{ env.opengl_package3 }}
-        
-    - name: AppImage tools (arm64)
-      if: (runner.arch == 'ARM64')
-      run: |
-        curl --location --output /tmp/linuxdeploy-aarch64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage
-        chmod a+x /tmp/linuxdeploy-aarch64.AppImage
-        curl --location --output /tmp/linuxdeploy-plugin-qt-aarch64.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-aarch64.AppImage
-        chmod a+x /tmp/linuxdeploy-plugin-qt-aarch64.AppImage
-        sudo apt-get install -y ${{ env.ffmpeg_build }} ${{ env.opengl_package1 }} ${{ env.opengl_package2 }} ${{ env.opengl_package3 }}
-
-## libusb
-    - name: Install libusb 1.0.29
-      if: steps.cache-usb.outputs.cache-hit != 'true'
-      id: install-usb
-      run: |
-        curl --location --output /tmp/v1.0.29.tar.gz https://github.com/libusb/libusb/archive/refs/tags/v1.0.29.tar.gz
-        cd /tmp
-        tar zxf v1.0.29.tar.gz
-        cd libusb-1.0.29
-        ./bootstrap.sh
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/libusb
-        make
-        make install
-
-    - name: Save libusb cache
-      if: steps.cache-usb.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
-      with:
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-libusb1029
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/libusb
-
-## ffmpeg
-    - name: Install ffmpeg 7.1.3
-      if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-      id: install-ffmpeg
-      run: |
-        git clone --depth=1 --branch n7.1.3 https://git.ffmpeg.org/ffmpeg.git /tmp/ffmpeg
-        mkdir -p /tmp/ffmpeg/build
-        cd /tmp/ffmpeg/build
-        ../configure --prefix=${GITHUB_WORKSPACE}/local/ffmpeg --enable-shared --disable-doc --enable-network
-        make -j install
-
-    - name: Save ffmpeg cache
-      if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
-      with:
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-ffmpeg713
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
-
-    - name: Build Hamlib 4.7.1 with debug flags
-      if: steps.cache-hamlib.outputs.cache-hit != 'true'
-      run: |
-        curl --location --output /tmp/hamlib-4.7.1.tar.gz https://github.com/Hamlib/Hamlib/releases/download/4.7.1/hamlib-4.7.1.tar.gz
-        cd /tmp
-        tar zxf hamlib-4.7.1.tar.gz
-        cd /tmp/hamlib-4.7.1/
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/hamlib --no-create --no-recursion CFLAGS="-g -O0 -fPIC"
-        ./config.status
-        make -j
-        sudo make install
-
-    - name: Save Hamlib cache
-      if: steps.cache-hamlib.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
-      with:
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-hamlib471
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/hamlib
-
- ## fftw
-    - name: Install fftw 3.3.10
-      if: (steps.cache-fftw.outputs.cache-hit != 'true' && runner.arch == 'X64')
-      id: install-fftw
-      run: |
-        cd /tmp
-        curl --location --output /tmp/fftw-3.3.10.tar.gz https://www.fftw.org/fftw-3.3.10.tar.gz
-        tar zxf fftw-3.3.10.tar.gz
-        cd fftw-3.3.10
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/fftw --enable-threads --enable-shared --enable-sse2 --enable-avx --enable-avx2 --enable-float
-        make
-        make install
-
-    - name: Install fftw 3.3.10 (arm64)
-      if: (steps.cache-fftw.outputs.cache-hit != 'true' && runner.arch == 'ARM64')
-      id: install-fftw-arm64
-      run: |
-        cd /tmp
-        curl --location --output /tmp/fftw-3.3.10.tar.gz https://www.fftw.org/fftw-3.3.10.tar.gz
-        tar zxf fftw-3.3.10.tar.gz
-        cd fftw-3.3.10
-        ./configure --prefix=${GITHUB_WORKSPACE}/local/fftw --enable-threads --enable-shared --enable-neon --enable-float
-        make
-        make install
-
-    - name: Save fftw 3.3.10 cache
-      if: steps.cache-fftw.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
-      with:
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-fftw3310
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/fftw
-
-## boost
-    - name: Install Boost 1.88
-      if: steps.cache-boost.outputs.cache-hit != 'true'
-      id: install-boost
-      run: |
-        cd /tmp
-        curl --location --output /tmp/boost-1.88.0.tar.gz https://archives.boost.io/release/1.88.0/source/boost_1_88_0.tar.gz
-        tar zxf boost-1.88.0.tar.gz
-        cd boost_1_88_0
-        ./bootstrap.sh --prefix=${GITHUB_WORKSPACE}/local/boost
-        ./b2 install
-
-    - name: Save Boost 1.88 cache
-      if: steps.cache-boost.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
-      with:
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-boost188
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/boost
-
-# QT6.9.3
-    # Takes about 1 hour if not cached
-    - name: Install QT 6.9.3
-      if: steps.cache-qt.outputs.cache-hit != 'true'
-      id: install-qt693
-      run: |
-        git clone --depth=1 --branch=6.9.3 https://github.com/qt/qt5.git /tmp/qt6
-        mkdir -p /tmp/qt6/build
-        cd /tmp/qt6/build
-        /tmp/qt6/configure -DWITH_PIPEWIRE=ON -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/local/ffmpeg" --prefix=${GITHUB_WORKSPACE}/local/qt693-install -init-submodules -submodules qtmultimedia,qtserialport,qtwayland -ffmpeg-dir /home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg
-        cmake --build . --parallel
-        cmake --install .
-
-    - name: Save QT 6.9.3 cache
-      if: steps.cache-qt.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
-      with:
-        key: ${{ runner.os }}-${{ steps.which-os.outputs.thisos }}-${{ runner.arch }}-wayland-qt693
-        path: /home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install
-
-    - name: QT 6.9.3 Summary
-      if: steps.cache-qt.outputs.cache-hit != 'true'
-      run: cat /tmp/qt6/build/config.summary
-
-    - name: Build JS8Call
-      run: |
-        mkdir -p build && cd build
-        cmake -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/local/qt693-install;${GITHUB_WORKSPACE}/local/hamlib;${GITHUB_WORKSPACE}/local/fftw;${GITHUB_WORKSPACE}/local/boost;${GITHUB_WORKSPACE}/local/libusb" ..
-        make -j 4
-
-# AppImage
-    - name: AppImage Directory Setup and File Copy
-      run: |
-        mkdir -p ${GITHUB_WORKSPACE}/AppImage/AppDir/usr/share/icons/hicolor/128x128/apps/
-        mkdir -p ${GITHUB_WORKSPACE}/AppImage/AppDir/usr/share/metainfo/
-        cp icons/Unix/js8call_icon.png ${GITHUB_WORKSPACE}/AppImage/AppDir/usr/share/icons/hicolor/128x128/apps/
-        cp .github/workflows/misc/JS8Call.appdata.xml ${GITHUB_WORKSPACE}/AppImage/AppDir/usr/share/metainfo/io.github.JS8Call_improved.JS8Call.appdata.xml
-
-# Secrets
-    - name: Get secrets (CI)
-      if: ${{ !(inputs.environment) || (inputs.environment == 'CI') }}
-      run: |
-        echo "${{ secrets.CI_APPIMAGE_SIGNING_KEY }}" >/tmp/js8call.key.asc
-        ls -l /tmp/js8call.key.asc
-        echo "${{ secrets.CI_APPIMAGE_SIGNING_PASS }}" | gpg --batch --yes --always-trust --passphrase-fd 0 --pinentry-mode loopback --import /tmp/js8call.key.asc
-      continue-on-error: true
+        echo "${{ secrets.RELEASE_APPIMAGE_SIGNING_KEY }}" > /tmp/js8call.key.asc
+        echo "${{ secrets.RELEASE_APPIMAGE_SIGNING_PASS }}" | \
+          gpg --batch --yes --always-trust \
+              --passphrase-fd 0 \
+              --pinentry-mode loopback \
+              --import /tmp/js8call.key.asc
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Get secrets (Release)
-      if: ${{ (inputs.environment == 'Release') && (inputs.release-ver) }}
+    - name: Sign AppImage (Release only)
+      if: ${{ inputs.environment == 'Release' }}
       run: |
-        echo "${{ secrets.RELEASE_APPIMAGE_SIGNING_KEY }}" >/tmp/js8call.key.asc
-        ls -l /tmp/js8call.key.asc
-        echo "${{ secrets.RELEASE_APPIMAGE_SIGNING_PASS }}" | gpg --batch --yes --always-trust --passphrase-fd 0 --pinentry-mode loopback --import /tmp/js8call.key.asc
-      continue-on-error: false
+        gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "${{ secrets.RELEASE_APPIMAGE_SIGNING_PASS }}" \
+            --detach-sign --armor \
+            ~/JS8Call-*.AppImage
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: List keys
-      run: gpg --list-secret-keys --keyid-format LONG
-      continue-on-error: true
-
-    - name: AppImage linuxdeploy Sign and Package (x86_64 Release Build)
-      if: ${{ (runner.arch == 'X64') && (inputs.release-ver) && (inputs.environment == 'Release') }}
-      run: |
-        export LINUXDEPLOY_OUTPUT_VERSION=${{ inputs.release-ver }}
-        export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so;libqoffscreen.so;libqeglfs.so;libqlinuxfb.so;libqminimalegl.so;libqminimal.so"
-        export EXTRA_QT_MODULES="waylandcompositor"
-        export LD_LIBRARY_PATH=/home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg/lib
-
-        cd ${GITHUB_WORKSPACE}/AppImage/
-        APPIMAGETOOL_SIGN_PASSPHRASE="${{ secrets.RELEASE_APPIMAGE_SIGNING_PASS }}" DISABLE_COPYRIGHT_FILES_DEPLOYMENT=1 \
-          LDAI_SIGN=1 QMAKE=/home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install/bin/qmake \
-          /tmp/linuxdeploy-x86_64.AppImage \
-          --appdir=AppDir \
-          --desktop-file=${GITHUB_WORKSPACE}/.github/workflows/misc/JS8Call.desktop \
-          --executable=${GITHUB_WORKSPACE}/build/JS8Call \
-          --plugin=qt \
-          --output appimage \
-          --verbosity=1
-      continue-on-error: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: AppImage linuxdeploy Sign and Package (x86_64 CI Build)
-      if: ((runner.arch == 'X64') && !(inputs.release-ver) && (!(inputs.environment) || (inputs.environment == 'CI')))
-      run: |
-        export LINUXDEPLOY_OUTPUT_VERSION=devel
-        export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so;libqoffscreen.so;libqeglfs.so;libqlinuxfb.so;libqminimalegl.so;libqminimal.so"
-        export EXTRA_QT_MODULES="waylandcompositor"
-        export LD_LIBRARY_PATH=/home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg/lib
-
-        cd ${GITHUB_WORKSPACE}/AppImage/
-        APPIMAGETOOL_SIGN_PASSPHRASE="${{ secrets.CI_APPIMAGE_SIGNING_PASS }}" DISABLE_COPYRIGHT_FILES_DEPLOYMENT=1 \
-          LDAI_SIGN=1 QMAKE=/home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install/bin/qmake \
-          /tmp/linuxdeploy-x86_64.AppImage \
-          --appdir=AppDir \
-          --desktop-file=${GITHUB_WORKSPACE}/.github/workflows/misc/JS8Call.desktop \
-          --executable=${GITHUB_WORKSPACE}/build/JS8Call \
-          --plugin=qt \
-          --output appimage \
-          --verbosity=1
-      continue-on-error: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: AppImage linuxdeploy Sign and Package (ARM64 CI Build)
-      if: ((runner.arch == 'ARM64') && !(inputs.release-ver) && (!(inputs.environment) || (inputs.environment == 'CI')))
-      run: |
-        export LINUXDEPLOY_OUTPUT_VERSION=devel
-        export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so;libqoffscreen.so;libqeglfs.so;libqlinuxfb.so;libqminimalegl.so;libqminimal.so"
-        export EXTRA_QT_MODULES="waylandcompositor"
-        export LD_LIBRARY_PATH=/home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg/lib
-
-        cd ${GITHUB_WORKSPACE}/AppImage/
-        APPIMAGETOOL_SIGN_PASSPHRASE="${{ secrets.CI_APPIMAGE_SIGNING_PASS }}" DISABLE_COPYRIGHT_FILES_DEPLOYMENT=1 \
-          LDAI_SIGN=1 QMAKE=/home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install/bin/qmake \
-          /tmp/linuxdeploy-aarch64.AppImage \
-          --appdir=AppDir \
-          --desktop-file=${GITHUB_WORKSPACE}/.github/workflows/misc/JS8Call.desktop \
-          --executable=${GITHUB_WORKSPACE}/build/JS8Call \
-          --plugin=qt \
-          --output appimage \
-          --verbosity=1
-      continue-on-error: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: AppImage linuxdeploy Sign and Package (arm64 Release Build)
-      if: ${{ (runner.arch == 'ARM64') && (inputs.release-ver) && (inputs.environment == 'Release') }}
-      run: |
-        export LINUXDEPLOY_OUTPUT_VERSION=${{ inputs.release-ver }}
-        export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so;libqoffscreen.so;libqeglfs.so;libqlinuxfb.so;libqminimalegl.so;libqminimal.so"
-        export EXTRA_QT_MODULES="waylandcompositor"
-        export LD_LIBRARY_PATH=/home/runner/work/JS8Call-improved/JS8Call-improved/local/ffmpeg/lib
-
-        cd ${GITHUB_WORKSPACE}/AppImage/
-        APPIMAGETOOL_SIGN_PASSPHRASE="${{ secrets.RELEASE_APPIMAGE_SIGNING_PASS }}" DISABLE_COPYRIGHT_FILES_DEPLOYMENT=1 \
-          LDAI_SIGN=1 QMAKE=/home/runner/work/JS8Call-improved/JS8Call-improved/local/qt693-install/bin/qmake \
-          /tmp/linuxdeploy-aarch64.AppImage \
-          --appdir=AppDir \
-          --desktop-file=${GITHUB_WORKSPACE}/.github/workflows/misc/JS8Call.desktop \
-          --executable=${GITHUB_WORKSPACE}/build/JS8Call \
-          --plugin=qt \
-          --output appimage \
-          --verbosity=1
-      continue-on-error: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-    - name: Attestation (Release Only)
-      if: ${{ (inputs.environment == 'Release') && (inputs.release-ver) }}
+    - name: Attest (Release only)
+      if: ${{ inputs.environment == 'Release' }}
       uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
       with:
-        subject-path: ${{ github.workspace }}/AppImage/*.AppImage*
-        
-    - name: Upload Artifact (Release build)
-      if: ${{ (inputs.environment == 'Release') && (inputs.release-ver) }}
-      uses: actions/upload-artifact@v6
-      with:
-        name: js8call-improved-${{ matrix.os }}
-        path: ./AppImage/*.AppImage*
+        subject-path: ~/JS8Call-*.AppImage
 
-    - name: Upload Artifact (CI Build)
-      if: ${{ !inputs.release-ver }}
-      uses: actions/upload-artifact@v6
+    - name: Upload artifact
+      uses: actions/upload-artifact@v7
       with:
-        name: js8call-improved-${{ matrix.os }}
-        path: ./AppImage/
+        name: JS8Call-${{ matrix.arch }}
+        path: ~/JS8Call-*.AppImage
+        archive: false
