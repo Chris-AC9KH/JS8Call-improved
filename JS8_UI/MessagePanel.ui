@@ -218,7 +218,7 @@
        </spacer>
       </item>
       <item>
-       <widget class="QPushButton" name="replyPushButton">
+       <widget class="QToolButton" name="replyPushButton">
         <property name="minimumSize">
          <size>
           <width>0</width>
@@ -227,6 +227,12 @@
         </property>
         <property name="text">
          <string>Reply</string>
+        </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonStyle::ToolButtonTextOnly</enum>
+        </property>
+        <property name="autoRaise">
+         <bool>false</bool>
         </property>
        </widget>
       </item>

@@ -1,12 +1,15 @@
 #include "MessagePanel.h"
 #include "JS8_Include/EventFilter.h"
 #include "JS8_Main/Radio.h"
+#include "JS8_Main/Varicode.h"
 #include "JS8_Widgets/DateTableWidgetItem.h"
 #include "JS8_Widgets/SemiSortableHeader.h"
 #include "ui_MessagePanel.h"
 
+#include <QAction>
 #include <QDateTime>
 #include <QMenu>
+#include <QRegularExpression>
 #include <QTimeZone>
 
 #include <algorithm>
@@ -27,6 +30,16 @@ MessagePanel::MessagePanel(QString inboxPath, QWidget *parent)
   inbox->open();
 
   ui->setupUi(this);
+
+  replyMenu = new QMenu(ui->replyPushButton);
+  replyToPathAction = replyMenu->addAction(QString());
+  replyToOriginalViaPathAction = replyMenu->addAction(QString());
+
+  ui->replyPushButton->setPopupMode(QToolButton::MenuButtonPopup);
+  ui->replyPushButton->setDefaultAction(replyToPathAction);
+  connect(replyToPathAction, &QAction::triggered, this, [this]() { emitReplyAction(replyToPathAction); });
+  connect(replyToOriginalViaPathAction, &QAction::triggered, this, [this]() { emitReplyAction(replyToOriginalViaPathAction); });
+  resetReplyButton();
 
   // connect selection model changed
   connect(ui->messageTableWidget->selectionModel(), &QItemSelectionModel::selectionChanged, this,
@@ -277,9 +290,71 @@ QString MessagePanel::prepareReplyMessage(QString path, QString text) {
   return QString("%1 MSG %2").arg(path).arg(text);
 }
 
+QString MessagePanel::prepareStoreForwardReplyMessage(QString path,
+                                                      QString recipient,
+                                                      QString text) {
+  return QString("%1 MSG TO:%2 %3").arg(path).arg(recipient).arg(text);
+}
+
+void MessagePanel::resetReplyButton() {
+  ui->replyPushButton->setMenu(nullptr);
+
+  replyToPathAction->setText(tr("Reply"));
+  replyToPathAction->setData(QVariant());
+  replyToPathAction->setEnabled(false);
+
+  replyToOriginalViaPathAction->setText(QString());
+  replyToOriginalViaPathAction->setData(QVariant());
+  replyToOriginalViaPathAction->setEnabled(false);
+}
+
+void MessagePanel::configureReplyButton(int row, const QString &messageText) {
+
+  auto *pathItem = ui->messageTableWidget->item(
+      row, ui->messageTableWidget->columnCount() - 5);
+  if (!pathItem) {
+    return;
+  }
+
+  const auto path = pathItem->data(Qt::UserRole).toString().trimmed();
+  if (path.isEmpty()) {
+    return;
+  }
+
+  const auto placeholder = QStringLiteral("[MESSAGE]");
+  replyToPathAction->setText(tr("Reply to %1").arg(path));
+  replyToPathAction->setData(prepareReplyMessage(path, placeholder));
+  replyToPathAction->setEnabled(true);
+
+  static const QRegularExpression fromSignature(R"((?:^| )FROM (?<callsign>\S+)$)");
+  const auto match = fromSignature.match(messageText);
+  if (!match.hasMatch()) {
+    return;
+  }
+
+  const auto originalSender = match.captured("callsign");
+  if (originalSender.startsWith('@') || !Varicode::isValidCallsign(originalSender, nullptr)) {
+    return;
+  }
+
+  replyToOriginalViaPathAction->setText(tr("Reply to %1 via %2").arg(originalSender, path));
+  replyToOriginalViaPathAction->setData(prepareStoreForwardReplyMessage(path, originalSender, placeholder));
+  replyToOriginalViaPathAction->setEnabled(true);
+  ui->replyPushButton->setMenu(replyMenu);
+}
+
+void MessagePanel::emitReplyAction(QAction *action) {
+  const auto message = action->data().toString();
+  if (!message.isEmpty()) {
+    emit replyMessage(message);
+  }
+}
+
 void MessagePanel::messageTableSelectionChanged(
     const QItemSelection &selected,
     const QItemSelection &/*deselected*/) {
+
+  resetReplyButton();
 
   auto items = ui->messageTableWidget->selectedItems();
   if (items.isEmpty() || items.size() > ui->messageTableWidget->columnCount()) {
@@ -300,6 +375,7 @@ void MessagePanel::messageTableSelectionChanged(
 
   auto text = item->data(Qt::UserRole).toString();
   ui->messageTextEdit->setPlainText(text);
+  configureReplyButton(row, text);
 
   // Mark deselected as read in table
   auto selectedItemIndexes = selected.indexes();
@@ -327,21 +403,4 @@ void MessagePanel::messageTableSelectionChanged(
   }
 
   markMessageRead(mid);
-}
-
-void MessagePanel::on_replyPushButton_clicked() {
-  auto row = ui->messageTableWidget->currentRow();
-
-  // from column
-  auto item = ui->messageTableWidget->item(
-      row, ui->messageTableWidget->columnCount() - 5);
-  if (!item) {
-    return;
-  }
-
-  auto path = item->data(Qt::UserRole).toString();
-  auto text = "[MESSAGE]";
-  auto message = prepareReplyMessage(path, text);
-
-  emit replyMessage(message);
 }

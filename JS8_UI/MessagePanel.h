@@ -7,7 +7,12 @@
 #include <QPair>
 #include <QWidget>
 
-namespace Ui { class MessagePanel; }
+class QAction;
+class QMenu;
+
+namespace Ui {
+class MessagePanel;
+}
 
 class MessagePanel : public QWidget {
   Q_OBJECT
@@ -29,14 +34,21 @@ public slots:
 private slots:
   void messageTableSelectionChanged(const QItemSelection & /*selected*/,
                                     const QItemSelection & /*deselected*/);
-  void on_replyPushButton_clicked();
 
 private:
+  void configureReplyButton(int row, const QString &messageText);
+  void resetReplyButton();
+  void emitReplyAction(QAction *action);
+  QString prepareStoreForwardReplyMessage(QString path, QString recipient,
+                                          QString text);
   void deleteSelectedMessages(); // shared by context menu + Delete key
   void deleteMessage(int id);
   void markMessageRead(int id);
   Ui::MessagePanel *ui;
   Inbox *inbox;
+  QMenu *replyMenu;
+  QAction *replyToPathAction;
+  QAction *replyToOriginalViaPathAction;
   QString call;
 };
 #endif // JS8CALL_MESSAGEPANEL_H
