@@ -233,7 +233,9 @@ void MessagePanel::deleteMessage(int id) {
     return;
   }
 
-  inbox->del(id);
+  if (inbox->del(id)) {
+    emit messageDeleted(id);
+  }
 }
 
 void MessagePanel::markMessageRead(int id) {

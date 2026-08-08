@@ -687,6 +687,7 @@ class UI_Constructor : public QMainWindow {
     QTimer tuneATU_Timer;
     QTimer TxAgainTimer;
     QTimer minuteTimer;
+    QTimer m_msgNotifyTimer;
     QString m_baseCall;
     QString m_hisCall;
     QString m_hisGrid;
@@ -1038,6 +1039,9 @@ class UI_Constructor : public QMainWindow {
     void processHeartbeatRateLimit(const QString &callsign); // JS8_Mainwindow/processHeartbeatRateLimit.cpp
     QString inboxPath();
     QString hbBlockingPath() const;
+    void processStoredMessageNotifications(); // JS8_Mainwindow/processStoredMessageNotifications.cpp
+    QString msgNotifyPath() const;
+    void removeStoredMessageNotification(int msgId);
     void refreshInboxCounts();
     bool hasMessageHistory(QString call);
     int addCommandToMyInbox(CommandDetail d);

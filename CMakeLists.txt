@@ -289,6 +289,7 @@ target_sources(
   JS8_Main/fileutils.cpp
   JS8_Main/main.cpp
   JS8_Main/Modes.cpp
+  JS8_Main/MsgNotifyDB.cpp
   JS8_Main/PillRenderer.cpp
   JS8_Main/ProcessThread.cpp
   JS8_Main/qt_helpers.cpp
@@ -315,6 +316,7 @@ target_sources(
   JS8_Mainwindow/processCommandActivity.cpp
   JS8_Mainwindow/processDecodeEvent.cpp
   JS8_Mainwindow/processHeartbeatRateLimit.cpp
+  JS8_Mainwindow/processStoredMessageNotifications.cpp
   JS8_Mainwindow/processRxActivity.cpp
   JS8_Mainwindow/UI_Constructor.cpp
   JS8_Mainwindow/confirmThenEnqueueMessage.cpp

@@ -3448,6 +3448,14 @@ QString UI_Constructor::hbBlockingPath() const {
         m_config.writeable_data_dir().absoluteFilePath("hb_blocking.db3"));
 }
 
+// stored-message notification tracking, creates and queries a
+// sqlite3 database that keeps track of when we last notified a station of
+// a message waiting for them (see processStoredMessageNotifications.cpp).
+QString UI_Constructor::msgNotifyPath() const {
+    return QDir::toNativeSeparators(
+        m_config.writeable_data_dir().absoluteFilePath("msg_notify.db3"));
+}
+
 void UI_Constructor::restoreMessage() {
     if (m_lastTxMessage.isEmpty()) {
         return;

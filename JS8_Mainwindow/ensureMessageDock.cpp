@@ -180,4 +180,8 @@ void UI_Constructor::ensureMessageDock()
             refreshInboxCounts();
             displayCallActivity();
         });
+
+    // A manually-deleted stored message should stop generating notifications.
+    connect(messagePanel_, &MessagePanel::messageDeleted, this,
+            [this](int id) { removeStoredMessageNotification(id); });
 }

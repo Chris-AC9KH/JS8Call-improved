@@ -4,6 +4,7 @@
  *   constructs and connects UI elements to the JS8 "engine"
  */
 
+#include "JS8_Main/MsgNotifyDB.h"
 #include "JS8_UI/mainwindow.h"
 #include "JS8_UI/styles.h"
 
@@ -688,6 +689,11 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             &UI_Constructor::on_the_minute);
     minuteTimer.setSingleShot(true);
     minuteTimer.start(ms_minute_error() + 60 * 1000);
+
+    connect(&m_msgNotifyTimer, &QTimer::timeout, this,
+            &UI_Constructor::processStoredMessageNotifications);
+    m_msgNotifyTimer.setSingleShot(false);
+    m_msgNotifyTimer.start(15 * 60 * 1000);
 
     QTimer::singleShot(0, this, &UI_Constructor::checkStartupWarnings);
 
@@ -1487,6 +1493,7 @@ bool UI_Constructor::markMsgDelivered(int mid, Message msg) {
     bool ok = inbox.set(mid, msg);
     if (ok) {
         emit messageAdded(mid);
+        removeStoredMessageNotification(mid);
     }
     return ok;
 }
@@ -1500,6 +1507,31 @@ bool UI_Constructor::markGroupMsgDeliveredForCallsign(int msgId, QString callsig
     bool ok = inbox.markGroupMsgDeliveredForCallsign(msgId, callsign);
     if (ok) {
         emit messageAdded(msgId);
+        // NOTE: group messages aren't tracked by processStoredMessageNotifications()
+        // today (see the `to.startsWith("@")` skip there), but this call is
+        // harmless - it's a no-op DELETE if no row exists - and keeps this
+        // function future-proof if group notification support is added later.
+        removeStoredMessageNotification(msgId);
     }
     return ok;
+}
+
+/**
+ * @brief Retires any pending notification tracking for a stored message
+ *        so we stop re-notifying for it.
+ *
+ * Called once a message has been delivered (QUERY MSG retrieval, see
+ * markMsgDelivered() / markGroupMsgDeliveredForCallsign()) or manually
+ * deleted from the inbox (see MessagePanel::messageDeleted, connected in
+ * ensureMessageDock()).
+ */
+void UI_Constructor::removeStoredMessageNotification(int msgId) {
+    MsgNotifyDB notifyDb(msgNotifyPath());
+    if (!notifyDb.open()) {
+        qCDebug(mainwindow_js8)
+            << "MsgNotifyDB failed to open:" << notifyDb.error();
+        return;
+    }
+
+    notifyDb.deleteByMsgId(msgId);
 }

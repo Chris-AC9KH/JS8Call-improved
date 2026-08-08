@@ -19,6 +19,7 @@ signals:
   void countsUpdated();
   void requestFloat();
   void requestDock();
+  void messageDeleted(int id);
 
 public slots:
   void setCall(const QString &call);
