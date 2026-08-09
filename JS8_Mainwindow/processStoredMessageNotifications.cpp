@@ -85,7 +85,7 @@ void UI_Constructor::processStoredMessageNotifications() {
             continue;
         }
 
-        // Throttle: don't re-notify inside the 24h window.
+        // Throttle: don't re-notify inside the 12h window.
         auto const lastSent = notifyDb.getLastSent(msgId);
         if (lastSent.isValid() &&
             lastSent.secsTo(now) < RENOTIFY_WINDOW_SECS) {

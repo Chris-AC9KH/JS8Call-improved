@@ -10,7 +10,7 @@
  * Stores the last time we proactively sent a directed "<CALL> ACK MSG ID <mid>"
  * notification for a given stored message, in a dedicated SQLite database
  * (msg_notify.db3). This lets processStoredMessageNotifications() throttle
- * re-notification to no more than once every 24 hours per message, and
+ * re-notification to no more than once every 12 hours per message, and
  * persists across program restarts
  *
  * The row for a message id is removed once the message is delivered
