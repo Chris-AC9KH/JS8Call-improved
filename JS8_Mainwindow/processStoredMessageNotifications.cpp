@@ -11,9 +11,9 @@
 #include "JS8_UI/mainwindow.h"
 
 namespace {
-constexpr int RECENCY_WINDOW_SECS  = 15 * 60;        // "seen" window
-constexpr int RENOTIFY_WINDOW_SECS = 24 * 60 * 60;   // re-notify throttle
-constexpr int MAX_PENDING_SCANNED  = 1000;           // sanity bound
+constexpr int RECENCY_WINDOW_SECS  = 15 * 60;        // "seen" window - callsign must be recent
+constexpr int RENOTIFY_WINDOW_SECS = 12 * 60 * 60;   // re-notify throttle set to every 12hrs
+constexpr int MAX_PENDING_SCANNED  = 1000;           // sanity bound, likely not necessary
 } // namespace
 
 void UI_Constructor::processStoredMessageNotifications() {

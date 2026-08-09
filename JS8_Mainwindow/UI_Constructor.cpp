@@ -693,6 +693,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     connect(&m_msgNotifyTimer, &QTimer::timeout, this,
             &UI_Constructor::processStoredMessageNotifications);
     m_msgNotifyTimer.setSingleShot(false);
+    // sets the interval that processStoredMessageNotifications() will
+    // will run, currently set to scan the call activity every 15 minutes
     m_msgNotifyTimer.start(15 * 60 * 1000);
 
     QTimer::singleShot(0, this, &UI_Constructor::checkStartupWarnings);
