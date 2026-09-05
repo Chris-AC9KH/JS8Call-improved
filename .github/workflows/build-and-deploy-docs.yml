@@ -1,0 +1,67 @@
+name: Build and Deploy Docs
+# Trigger only if we have labeled the PR "documentation", or a manual trigger
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  id-token: write
+  pages: write
+
+jobs:
+  build_docs:
+    if: (contains(github.event.pull_request.labels.*.name, 'documentation') ||
+      (contains(github.event_name, 'workflow_dispatch')) )
+    concurrency: ci-${{ github.ref }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Update dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
+      - name: Fetch prebuilt doxygen 1.16.1
+        run: |
+          set -euo pipefail
+          mkdir -p local/doxygen1161
+          curl -fsSL -o doxygen.tar.gz \
+            "https://github.com/JS8Call-improved/js8lib/releases/download/lib%2F4.0/doxygen-1.16.1.tar.gz"
+          curl -fsSL -o doxygen.tar.gz.sha256 \
+            "https://github.com/JS8Call-improved/js8lib/releases/download/lib%2F4.0/doxygen-1.16.1.tar.gz.sha256"
+          EXPECTED="$(awk '{print $1}' doxygen.tar.gz.sha256)"
+          ACTUAL="$(sha256sum doxygen.tar.gz | awk '{print $1}')"
+          [ "$EXPECTED" = "$ACTUAL" ] || { echo "checksum mismatch"; exit 1; }
+          tar -C local/doxygen1161 -xzf doxygen.tar.gz
+          chmod +x local/doxygen1161/bin/doxygen
+
+      - name: Sanity-check doxygen binary
+        run: local/doxygen1161/bin/doxygen --version
+
+      - name: Build docs
+        run: (cat .github/workflows/misc/Doxyfile; echo "PROJECT_NUMBER=master";) | local/doxygen1161/bin/doxygen -
+
+      - name: Upload static files as artifact
+        id: deployment
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/html
+
+# Only run deploy if we are on master branch
+#    if: github.ref == 'refs/heads/master'
+# Try deploying on/from release branch or master. check paths afterwards
+  deploy:
+    if: startsWith(github.ref, 'refs/heads/release/') || contains(github.ref, '/tags/release') || contains(github.ref, 'refs/heads/master')
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build_docs
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
