@@ -1715,6 +1715,25 @@ Configuration::impl::impl(Configuration *self, QDir const &temp_directory,
                 Q_EMIT self_->auto_switch_bands_changed(auto_switch_bands);
             });
 
+    // Resetting activity now deletes every band's stored history, so
+    // ticking the box asks first; No unticks it
+    connect(ui_->reset_activity_check_box, &QCheckBox::clicked, this,
+            [this](bool checked) {
+                if (checked &&
+                    JS8MessageBox::Yes !=
+                        JS8MessageBox::query_message(
+                            this, tr("Reset Activity"),
+                            tr("Delete the stored call activity and RX "
+                               "history for every band at the next "
+                               "start?\n\nThis permanently deletes the "
+                               "stored history, not just what is on "
+                               "screen."),
+                            QString{}, JS8MessageBox::Yes | JS8MessageBox::No,
+                            JS8MessageBox::No)) {
+                    ui_->reset_activity_check_box->setChecked(false);
+                }
+            });
+
     // delegates
     auto stations_item_delegate = new QStyledItemDelegate{this};
     stations_item_delegate->setItemEditorFactory(item_editor_factory());

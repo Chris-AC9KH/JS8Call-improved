@@ -427,6 +427,9 @@
                   </item>
                   <item>
                    <widget class="QCheckBox" name="reset_activity_check_box">
+                    <property name="toolTip">
+                     <string>Permanently deletes the stored call activity and RX history for every band at each start; asks when you turn it on.</string>
+                    </property>
                     <property name="text">
                      <string>Reset the Band Activity, Call Activity, and RX history at startup</string>
                     </property>
