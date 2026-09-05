@@ -71,6 +71,56 @@ UI_Constructor::UI_Constructor(QString const &program_info,
       m_aprsClient{new APRSISClient{"rotate.aprs2.net", 14580}},
       m_aprsInboundRelay{nullptr} {
     ui->setupUi(this);
+
+    // Per-band persistent activity storage (activity.db3) - issue #267.
+    // Built as soon as the panes exist, because readSettings() below runs
+    // the one-time legacy import and the startup preload through it.
+    {
+        ActivityStorageController::Context context;
+        context.config = &m_config;
+        context.settings = m_settings;
+        context.defaultDial = Default::DIAL_FREQUENCY;
+        context.rxTextEdit = ui->textEditRX;
+        context.lastBand = &m_lastBand;
+        context.callActivity = &m_callActivity;
+        context.inboxCounts = &m_rxInboxCountCache;
+        context.callActivityBandCache = &m_callActivityBandCache;
+        context.rxTextBandCache = &m_rxTextBandCache;
+        context.showStatusMessage = [this](QString const &message) {
+            showStatusMessage(message);
+        };
+        context.displayActivity = [this]() { displayActivity(true); };
+        context.clearRxFrameBlockNumbers = [this]() {
+            m_rxFrameBlockNumbers.clear();
+        };
+        context.clearActivityPanes = [this]() { clearActivity(); };
+        context.clearRxPane = [this]() { clearRXActivity(); };
+        context.clearCallActivityPane = [this]() { clearCallActivity(); };
+        context.cacheActivity = [this](QString const &key) {
+            cacheActivity(key);
+        };
+        context.restoreActivity = [this](QString const &key) {
+            restoreActivity(key);
+        };
+        context.clearBandCaches = [this]() {
+            m_callActivityBandCache.clear();
+            m_rxTextBandCache.clear();
+            m_bandActivityBandCache.clear();
+            m_heardGraphIncomingBandCache.clear();
+            m_heardGraphOutgoingBandCache.clear();
+        };
+        context.dropBandCache = [this](QString const &key) {
+            m_callActivityBandCache.remove(key);
+            m_rxTextBandCache.remove(key);
+            m_bandActivityBandCache.remove(key);
+            m_heardGraphIncomingBandCache.remove(key);
+            m_heardGraphOutgoingBandCache.remove(key);
+        };
+        // no QObject parent: the unique_ptr is the sole owner
+        m_activityStorage =
+            std::make_unique<ActivityStorageController>(std::move(context));
+    }
+
     ui->frame->setStyleSheet(logFrameStyle());
     ui->logWidget->setStyleSheet(Styles::LogWidgetStyle);
     ui->dialFreqUpButton->setStyleSheet(Styles::DialFreqUpDownButtonStyle);
@@ -807,14 +857,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     auto clearActionAll = new QAction(QString("Clear All Lists"), nullptr);
     connect(clearActionAll, &QAction::triggered, this, [this]() {
-        if (QMessageBox::Yes !=
-            QMessageBox::question(
-                this, "Clear All Activity",
-                "Are you sure you would like to clear all activity?",
-                QMessageBox::Yes | QMessageBox::No)) {
-            return;
-        }
-
         on_actionClear_All_Activity_triggered();
     });
 
@@ -851,32 +893,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         }
     });
 
-    // Debounced write-on-change persistence of the RX text pane to
-    // activity.db3: any change (re)arms a short single-shot timer, so the
-    // stored copy trails the pane by at most a few seconds instead of
-    // being written only at shutdown. The second timer is armed once and
-    // NOT restarted by further changes: sustained sub-interval traffic
-    // (fast submodes, busy nets) would otherwise re-arm the debounce
-    // faster than it can fire, deferring the write - and growing the
-    // crash-loss window - indefinitely.
-    m_rxTextSaveTimer.setSingleShot(true);
-    m_rxTextSaveTimer.setInterval(5000);
-    m_rxTextSaveMaxTimer.setSingleShot(true);
-    m_rxTextSaveMaxTimer.setInterval(30000);
-    auto const flushRxText = [this]() {
-        m_rxTextSaveTimer.stop();
-        m_rxTextSaveMaxTimer.stop();
-        saveRxTextForBand(m_activityBand);
-    };
-    connect(&m_rxTextSaveTimer, &QTimer::timeout, this, flushRxText);
-    connect(&m_rxTextSaveMaxTimer, &QTimer::timeout, this, flushRxText);
-    connect(ui->textEditRX->document(), &QTextDocument::contentsChanged, this,
-            [this]() {
-                m_rxTextSaveTimer.start();
-                if (!m_rxTextSaveMaxTimer.isActive()) {
-                    m_rxTextSaveMaxTimer.start();
-                }
-            });
+    m_activityStorage->setupRxTextAutosave();
 
     ui->textEditRX->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(
@@ -1141,7 +1158,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
                     CallDetail cd = {};
                     cd.call = callsign;
                     m_callActivity[callsign] = cd;
-                    persistCallActivity(cd, true); // manual add: current band
+                    // manual add: current band
+                    m_activityStorage->persistCallActivity(cd, true);
                 }
             } else {
                 JS8MessageBox::critical_message(
@@ -1166,32 +1184,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         } else if (selectedCall.startsWith("@")) {
             m_config.removeGroup(selectedCall);
         } else if (m_callActivity.contains(selectedCall)) {
-            // Bucket-scoped: only the on-screen bucket's stored row is
-            // deleted. A row the same station holds on another band is
-            // that band's history, which this context cannot see and
-            // must not destroy; an unread inbox sender reappears
-            // regardless, re-synthesized from inbox.db3. Rows are
-            // stored under the trimmed callsign.
             m_callActivity.remove(selectedCall);
-            if (!m_activityStoreDisabled && m_activityBandLoaded &&
-                !activityDB()->deleteCall(activityConfigId(),
-                                          m_activityBand,
-                                          selectedCall.trimmed())) {
-                // the row would reappear at the next visit to this band,
-                // so say so rather than letting it look removed
-                // false also means "matched nothing": the row is filed
-                // under the band it was heard on, which this bucket's
-                // clear cannot reach
-                auto const why = activityDB()->error();
-                showStatusMessage(
-                    why.isEmpty()
-                        ? tr("%1 is stored under another band and will "
-                             "return there")
-                              .arg(selectedCall)
-                        : tr("Could not remove %1 from stored activity "
-                             "(%2)")
-                              .arg(selectedCall, why));
-            }
+            m_activityStorage->removeStoredCall(selectedCall);
         }
 
         displayActivity(true);

@@ -478,11 +478,12 @@ void UI_Constructor::displayCallActivity() {
         // pass with nothing to backfill opens none, and so never
         // reaches the store from inside a repaint.
         if (!backfilledGrids.isEmpty()) {
-            beginActivityBatch();
+            m_activityStorage->beginBatch();
             foreach (QString const &backfilled, backfilledGrids) {
-                persistCallActivity(m_callActivity.value(backfilled), true);
+                m_activityStorage->persistCallActivity(
+                    m_callActivity.value(backfilled), true);
             }
-            endActivityBatch();
+            m_activityStorage->endBatch();
         }
 
         // Set table color

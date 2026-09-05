@@ -33,22 +33,14 @@ constexpr char SCHEMA[] =
     "  band   TEXT NOT NULL, "
     "  html   TEXT, "
     "  PRIMARY KEY(config, band)"
+    ");"
+    "CREATE TABLE IF NOT EXISTS legacy_import_v1 ("
+    "  config TEXT NOT NULL PRIMARY KEY"
     ");";
 
-// Two guards on the conflict branch. The enrichment columns (grid,
-// ack_ts, cq_ts) keep their stored value when the incoming one is empty:
-// a bare re-hearing of a station must not wipe enrichment accumulated
-// earlier (grid from a directed frame or logbook backfill, ACK/CQ marks),
-// which the RAM map may no longer hold once aging has dropped the entry.
-// (`through` is deliberately NOT guarded: a direct hearing clears the
-// relay marker in RAM, and the store mirrors that.) And the whole update
-// applies only when the incoming row is at least as fresh as the stored
-// one - rows synthesized from old data (an unread inbox message's
-// original reception parameters, re-emitted on every clear) must not
-// roll a fresh row back to stale values. The timestamp format sorts
-// lexicographically, so TEXT comparison is chronological; an empty
-// (invalid) incoming timestamp never beats a real row - a blank manual
-// re-add of an already-stored callsign is deliberately a no-op.
+// grid, cq_ts, ack_ts: keep the stored value when the incoming one is empty
+// through: deliberately not guarded, so a direct hearing clears the relay
+// WHERE: the update applies only to a row as fresh as the one stored
 constexpr char UPSERT_CALL_SQL[] =
     "INSERT INTO call_activity_v1 "
     "  (config, band, callsign, through, snr, grid, dial, offset, "
@@ -83,19 +75,28 @@ QByteArray toTs(const QDateTime &dt) {
     return dt.toUTC().toString(TS_FORMAT).toUtf8();
 }
 
+/**
+ * @brief Parse a stored timestamp back into a UTC QDateTime.
+ * @param stmt The statement being read.
+ * @param col The column holding the timestamp text.
+ * @return The value, or an invalid QDateTime when the text is empty or
+ *         does not parse.
+ *
+ * The value is constructed directly in UTC, because parsing a full
+ * QDateTime first would normalize through local time - shifting a value
+ * that falls in a DST gap - before the zone could be corrected. Text that
+ * does not parse yields an invalid QDateTime rather than the midnight
+ * QDateTime substitutes, which would turn corrupt text into a
+ * plausible-looking timestamp.
+ */
 QDateTime fromTs(sqlite3_stmt *stmt, int col) {
     auto raw = QByteArray((const char *)sqlite3_column_text(stmt, col),
                           sqlite3_column_bytes(stmt, col));
     if (raw.isEmpty()) return {};
-    // Construct directly in UTC - parsing a full QDateTime first would
-    // normalize through local time (shifting a value that falls in a DST
-    // gap) before the zone could be corrected.
     auto const s = QString::fromUtf8(raw);
     auto const date = QDate::fromString(s.left(10), "yyyy-MM-dd");
     auto const time = QTime::fromString(s.mid(11), "HH:mm:ss");
     if (!date.isValid() || !time.isValid()) {
-        // QDateTime substitutes midnight for an invalid time, which would
-        // turn corrupt text into a plausible-looking timestamp
         return {};
     }
     return QDateTime(date, time, QTimeZone::utc());
@@ -116,34 +117,46 @@ void ActivityDB::captureError() {
     }
 }
 
-// A read or write that failed is counted; enough consecutive failures
-// (a volume that vanished mid-session, creeping corruption) close the
-// handle so isOpen() finally reports the truth - the UI's degraded-mode
-// paths and its throttled reopen retry key off isOpen(), and would
-// otherwise be unreachable for a store that breaks after a good open.
+/**
+ * @brief Record the outcome of one statement and count failures.
+ * @param ok Whether the statement completed.
+ * @return ok unchanged, so a caller can return it directly.
+ *
+ * A read or write that failed is counted; enough consecutive failures (a
+ * volume that vanished mid-session, creeping corruption) close the handle
+ * so isOpen() finally reports the truth - the UI's degraded-mode paths
+ * and its throttled reopen retry key off isOpen(), and would otherwise be
+ * unreachable for a store that breaks after a good open.
+ *
+ * Only a successful data statement proves the handle usable again, so
+ * only that path drops the strike count and any close deferred earlier in
+ * the batch. commit() does not reach here at all when its COMMIT
+ * succeeds, because a COMMIT succeeding says nothing about a batch whose
+ * every data statement failed.
+ *
+ * On failure the error is captured here, immediately after the failing
+ * statement, while sqlite3_errmsg() still describes it.
+ */
 bool ActivityDB::noteResult(bool ok) {
     if (ok) {
-        // A successful statement proves the handle is usable again, so
-        // it drops both the strike count and any close deferred earlier
-        // in this batch. commit() deliberately captures pendingClose_
-        // BEFORE calling this: a COMMIT succeeding says nothing about a
-        // batch whose every data statement failed.
         consecutiveFailures_ = 0;
         pendingClose_ = false;
     } else {
-        // callers invoke this immediately after the failing statement,
-        // while sqlite3_errmsg() still describes it
         captureError();
         noteFailureCaptured();
     }
     return ok;
 }
 
-// like noteResult(false), for failures whose error was already captured
-// before follow-up statements (a rollback) reset sqlite3_errmsg().
-// Inside a transaction the self-close is deferred to commit()/rollback():
-// sqlite3_close would roll the open transaction back, silently discarding
-// every row already written in the batch.
+/**
+ * @brief Count a failure whose error message was already captured.
+ *
+ * Like noteResult(false), for failures whose error was captured before
+ * follow-up statements - a rollback - reset sqlite3_errmsg() to "not an
+ * error". Inside a transaction the self-close is deferred to commit() or
+ * rollback(), because sqlite3_close() would roll the open transaction
+ * back and silently discard every row already written in the batch.
+ */
 void ActivityDB::noteFailureCaptured() {
     if (++consecutiveFailures_ >= 3) {
         if (inTransaction_) {
@@ -154,9 +167,32 @@ void ActivityDB::noteFailureCaptured() {
     }
 }
 
+/**
+ * @brief Open the store, creating or validating its schema.
+ * @return True when the handle is usable.
+ *
+ * WAL keeps an interrupted write from corrupting the store, and with
+ * synchronous=NORMAL commits are not individually fsynced, so frequent
+ * small writes stay cheap on the GUI thread while remaining safe against
+ * application crashes - an OS crash can lose, but not corrupt, the most
+ * recent commits. NORMAL carries that guarantee only under WAL, and WAL
+ * can be refused (filesystems without shared-memory support, such as
+ * network homes), so the sync level is relaxed only after checking what
+ * actually took effect. The busy timeout is set before that probe: the
+ * first WAL conversion takes a lock another connection may briefly hold,
+ * and probing without the timeout would silently leave the session on
+ * the rollback journal.
+ *
+ * The schema is created in one transaction, so a power cut cannot leave
+ * it half-built. Preparing the hot-path statements here doubles as a
+ * schema validation probe: CREATE TABLE IF NOT EXISTS silently accepts a
+ * pre-existing table with different columns, say after a version
+ * downgrade, and without this check every later write would fail with its
+ * return value unexamined - the application would look normal all session
+ * while persisting nothing.
+ */
 bool ActivityDB::open() {
-    // sqlite3_open requires UTF-8 (toLocal8Bit would hand the win32 VFS
-    // ANSI-code-page bytes, silently breaking non-ASCII profile paths)
+    // sqlite3_open needs UTF-8: toLocal8Bit breaks non-ASCII win32 paths
     int rc = sqlite3_open(path_.toUtf8().data(), &db_);
     if (rc != SQLITE_OK) {
         captureError();
@@ -164,18 +200,6 @@ bool ActivityDB::open() {
         return false;
     }
 
-    // WAL keeps an interrupted write from corrupting the store, and with
-    // synchronous=NORMAL commits are not individually fsynced - frequent
-    // small writes stay cheap on the GUI thread while remaining safe
-    // against application crashes (an OS crash can lose, but not corrupt,
-    // the most recent commits). NORMAL carries that guarantee only under
-    // WAL, and WAL can be refused (filesystems without shared-memory
-    // support, e.g. network homes), so check what actually took effect
-    // before relaxing the sync level. The busy timeout covers lock
-    // contention with another process holding the file open.
-    // busy timeout FIRST: the very first WAL conversion takes a lock
-    // another connection may briefly hold, and probing without the
-    // timeout would silently leave the session on the rollback journal
     sqlite3_exec(db_, "PRAGMA busy_timeout=5000;", nullptr, nullptr, nullptr);
     bool wal = false;
     for (int attempt = 0; attempt < 2 && !wal; ++attempt) {
@@ -194,7 +218,6 @@ bool ActivityDB::open() {
                      nullptr);
     }
 
-    // one transaction, so a power cut cannot leave a half-created schema
     rc = sqlite3_exec(db_, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
     if (rc == SQLITE_OK) {
         rc = sqlite3_exec(db_, SCHEMA, nullptr, nullptr, nullptr);
@@ -202,8 +225,7 @@ bool ActivityDB::open() {
             rc = sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
             if (rc != SQLITE_OK) captureError();
         } else {
-            // capture the real reason BEFORE the rollback - a successful
-            // ROLLBACK resets sqlite3_errmsg() to "not an error"
+            // capture before the rollback: a good ROLLBACK clears errmsg
             captureError();
             sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
         }
@@ -215,12 +237,6 @@ bool ActivityDB::open() {
         return false;
     }
 
-    // Preparing the hot-path statements here doubles as a schema
-    // validation probe: CREATE TABLE IF NOT EXISTS silently accepts a
-    // pre-existing table with different columns (e.g. after a version
-    // downgrade), and without this check every later write would fail
-    // with its return value unexamined - the app would look normal all
-    // session while persisting nothing.
     if (sqlite3_prepare_v2(db_, UPSERT_CALL_SQL, -1, &upsertCallStmt_,
                            nullptr) != SQLITE_OK ||
         sqlite3_prepare_v2(db_, SAVE_RX_TEXT_SQL, -1, &saveRxTextStmt_,
@@ -244,9 +260,7 @@ void ActivityDB::close() {
         saveRxTextStmt_ = nullptr;
     }
     if (db_) {
-        // _v2: defers the real close if anything is still unfinalized,
-        // rather than leaking the handle
-        sqlite3_close_v2(db_); // rolls back any open transaction
+        sqlite3_close_v2(db_);
         db_ = nullptr;
     }
     inTransaction_ = false;
@@ -259,47 +273,47 @@ QString ActivityDB::error() const { return lastError_; }
 
 bool ActivityDB::begin() {
     if (!isOpen() || inTransaction_) return false;
-    // IMMEDIATE, like open()'s schema transaction: take the write lock at
-    // BEGIN (where the busy timeout applies) rather than discovering the
-    // contention at COMMIT, where it cannot be waited out
+    // IMMEDIATE: take the write lock where the busy timeout still applies
     if (sqlite3_exec(db_, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) !=
         SQLITE_OK) {
-        captureError();
-        return false;
+        return noteResult(false);
     }
     inTransaction_ = true;
     return true;
 }
 
+/**
+ * @brief Commit the open transaction.
+ * @return True when the COMMIT succeeded.
+ *
+ * A successful COMMIT is not evidence that the store recovered: only a
+ * successful data statement is, and any of those has already cleared both
+ * the strike count and any deferred close. This path therefore does not
+ * go through noteResult() at all - resetting the strikes here would let
+ * an all-failing batch that commits cleanly hold the counter at zero
+ * forever, and the handle would never give up.
+ *
+ * A failed COMMIT (SQLITE_BUSY on the non-WAL fallback's lock upgrade,
+ * say) leaves the transaction open, so it is explicitly rolled back:
+ * without that, every later autocommit write would silently join the open
+ * transaction and be lost wholesale when the handle closes. It also
+ * counts as a failure strike, because the successful steps inside a
+ * doomed transaction reset the counter and a store whose commits
+ * persistently fail would otherwise never report unusable.
+ */
 bool ActivityDB::commit() {
     if (!isOpen() || !inTransaction_) return false;
     if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr) ==
         SQLITE_OK) {
         inTransaction_ = false;
-        // A successful COMMIT is not evidence that the store recovered:
-        // only a successful data statement is, and any of those has
-        // already cleared both the strike count and the deferred close.
-        // So this path touches neither - resetting the strikes here
-        // would let an all-failing batch that commits cleanly keep the
-        // counter at zero forever, and the handle would never give up.
-        bool const deferredClose = pendingClose_;
-        bool const ok = true;
-        if (deferredClose) {
-            // strikes accumulated mid-batch and nothing since succeeded:
-            // the commit above kept whatever the batch did write, so the
-            // broken handle can now close
+        if (pendingClose_) {
+            // strikes accumulated mid-batch and nothing since succeeded;
+            // the commit above kept whatever the batch did write
             pendingClose_ = false;
             close();
         }
-        return ok;
+        return true;
     }
-    // A failed COMMIT (e.g. SQLITE_BUSY on the non-WAL fallback's lock
-    // upgrade) leaves the transaction open; without an explicit rollback
-    // every later autocommit write would silently join it and be lost
-    // wholesale when the handle closes. It also counts toward the
-    // failure strikes: the successful steps inside a doomed transaction
-    // reset the counter, so a store whose commits persistently fail
-    // would otherwise never report unusable.
     captureError();
     rollback();
     noteFailureCaptured();
@@ -307,7 +321,7 @@ bool ActivityDB::commit() {
 }
 
 void ActivityDB::rollback() {
-    if (!isOpen() || !inTransaction_) return; // mirrors commit()'s guard
+    if (!isOpen() || !inTransaction_) return;
     sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
     inTransaction_ = false;
     if (pendingClose_) {
@@ -332,9 +346,7 @@ bool ActivityDB::upsertCall(const QString &config, const QString &band,
     auto ack8 = toTs(record.ackTimestamp);
     auto utc8 = toTs(record.utcTimestamp);
 
-    // A silently failed bind would leave the parameter NULL, and a NULL
-    // utc_ts makes the freshness guard unsatisfiable - the row could
-    // never be updated again - so every bind is checked.
+    // a failed bind leaves utc_ts NULL, which no freshness guard can meet
     int bindRc = SQLITE_OK;
     bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
     bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
@@ -383,8 +395,7 @@ bool ActivityDB::deleteCall(const QString &config, const QString &band,
     bindRc |= sqlite3_bind_text(stmt, 3, call8.data(), call8.size(),
                                 SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
-        // an unbound parameter makes the WHERE unsatisfiable, and the
-        // zero-row DELETE would still report success
+        // unbound: the zero-row DELETE would still report success
         sqlite3_finalize(stmt);
         return noteResult(false);
     }
@@ -392,9 +403,9 @@ bool ActivityDB::deleteCall(const QString &config, const QString &band,
     bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     int const changed = ok ? sqlite3_changes(db_) : 0;
     sqlite3_finalize(stmt);
-    // a statement that ran but matched nothing is not a removal - the
-    // row is stored under another band, and the caller must be able to
-    // say so rather than report a silent no-op as success
+    if (ok && changed == 0) {
+        lastError_.clear();
+    }
     return noteResult(ok) && changed > 0;
 }
 
@@ -449,7 +460,7 @@ QList<ActivityDB::CallRecord> ActivityDB::loadCalls(const QString &config,
     if (bindRc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         noteResult(false);
-        return result; // ok stays false: this is a failed read
+        return result;
     }
 
     int rc;
@@ -476,9 +487,6 @@ QList<ActivityDB::CallRecord> ActivityDB::loadCalls(const QString &config,
         result.append(r);
     }
 
-    // a read that failed mid-iteration must not pass for a complete
-    // (possibly empty) band - the caller may act on "no data" by
-    // overwriting what is actually there
     if (ok) *ok = (rc == SQLITE_DONE);
 
     sqlite3_finalize(stmt);
@@ -535,7 +543,7 @@ QString ActivityDB::loadRxText(const QString &config, const QString &band,
     if (bindRc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         noteResult(false);
-        return {}; // ok stays false: this is a failed read
+        return {};
     }
 
     QString result;
@@ -546,8 +554,6 @@ QString ActivityDB::loadRxText(const QString &config, const QString &band,
             sqlite3_column_bytes(stmt, 0));
         rc = sqlite3_step(stmt);
     }
-    // SQLITE_DONE means the read completed - either one row or none; an
-    // error must stay distinguishable from "no stored text" (see loadCalls)
     if (ok) *ok = (rc == SQLITE_DONE);
 
     sqlite3_finalize(stmt);
@@ -580,13 +586,12 @@ bool ActivityDB::clearRxText(const QString &config, const QString &band) {
     return noteResult(ok);
 }
 
-bool ActivityDB::hasConfig(const QString &config, bool *ok) {
+bool ActivityDB::hasImported(const QString &config, bool *ok) {
     if (ok) *ok = false;
     if (!isOpen()) return false;
 
     const char *sql =
-        "SELECT 1 FROM call_activity_v1 WHERE config = ? "
-        "UNION ALL SELECT 1 FROM rx_text_v1 WHERE config = ? LIMIT 1;";
+        "SELECT 1 FROM legacy_import_v1 WHERE config = ? LIMIT 1;";
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -595,10 +600,8 @@ bool ActivityDB::hasConfig(const QString &config, bool *ok) {
     }
 
     auto c8 = config.toUtf8();
-    int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    if (bindRc != SQLITE_OK) {
+    if (sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT) !=
+        SQLITE_OK) {
         sqlite3_finalize(stmt);
         noteResult(false);
         return false;
@@ -612,6 +615,28 @@ bool ActivityDB::hasConfig(const QString &config, bool *ok) {
     return rc == SQLITE_ROW;
 }
 
+bool ActivityDB::markImported(const QString &config) {
+    if (!isOpen()) return false;
+
+    const char *sql =
+        "INSERT OR IGNORE INTO legacy_import_v1 (config) VALUES (?);";
+
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return noteResult(false);
+
+    auto c8 = config.toUtf8();
+    if (sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT) !=
+        SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        return noteResult(false);
+    }
+
+    bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return noteResult(ok);
+}
+
 bool ActivityDB::clearConfig(const QString &config) {
     if (!isOpen()) return false;
 
@@ -622,10 +647,6 @@ bool ActivityDB::clearConfig(const QString &config) {
 
     auto c8 = config.toUtf8();
 
-    // Both tables or neither. When the caller has not already batched us
-    // into its own transaction we need our own; if it cannot be opened,
-    // do nothing at all rather than destroy one table and report
-    // failure for the other.
     bool ownTransaction = false;
     if (!inTransaction_) {
         if (!begin()) {
@@ -648,8 +669,75 @@ bool ActivityDB::clearConfig(const QString &config) {
         }
         if (sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT) !=
             SQLITE_OK) {
-            // an unbound config makes the WHERE unsatisfiable, and the
-            // zero-row DELETE would still report success
+            sqlite3_finalize(stmt);
+            noteResult(false);
+            ok = false;
+            continue;
+        }
+        bool stepOk = sqlite3_step(stmt) == SQLITE_DONE;
+        sqlite3_finalize(stmt);
+        noteResult(stepOk);
+        ok = stepOk && ok;
+    }
+
+    if (ownTransaction) {
+        if (ok) {
+            ok = commit();
+        } else {
+            rollback();
+        }
+    }
+
+    return ok;
+}
+
+bool ActivityDB::copyConfig(const QString &from, const QString &to) {
+    if (!isOpen()) return false;
+
+    const char *sqlCalls =
+        "INSERT OR IGNORE INTO call_activity_v1 "
+        "  (config, band, callsign, through, snr, grid, dial, offset, "
+        "   bits, tdrift, cq_ts, ack_ts, utc_ts, submode) "
+        "SELECT ?, band, callsign, through, snr, grid, dial, offset, "
+        "       bits, tdrift, cq_ts, ack_ts, utc_ts, submode "
+        "FROM call_activity_v1 WHERE config = ?;";
+    const char *sqlText =
+        "INSERT OR IGNORE INTO rx_text_v1 (config, band, html) "
+        "SELECT ?, band, html FROM rx_text_v1 WHERE config = ?;";
+    const char *sqlMarker =
+        "INSERT OR IGNORE INTO legacy_import_v1 (config) "
+        "SELECT ? FROM legacy_import_v1 WHERE config = ?;";
+
+    auto f8 = from.toUtf8();
+    auto t8 = to.toUtf8();
+
+    bool ownTransaction = false;
+    if (!inTransaction_) {
+        if (!begin()) {
+            return false;
+        }
+        ownTransaction = true;
+    }
+    bool ok = true;
+
+    for (const char *sql : {sqlCalls, sqlText, sqlMarker}) {
+        if (!isOpen()) {
+            ok = false;
+            break;
+        }
+        sqlite3_stmt *stmt;
+        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            noteResult(false);
+            ok = false;
+            continue;
+        }
+        // 1 is the destination the SELECT writes, 2 the source it reads
+        int bindRc = SQLITE_OK;
+        bindRc |= sqlite3_bind_text(stmt, 1, t8.data(), t8.size(),
+                                    SQLITE_TRANSIENT);
+        bindRc |= sqlite3_bind_text(stmt, 2, f8.data(), f8.size(),
+                                    SQLITE_TRANSIENT);
+        if (bindRc != SQLITE_OK) {
             sqlite3_finalize(stmt);
             noteResult(false);
             ok = false;

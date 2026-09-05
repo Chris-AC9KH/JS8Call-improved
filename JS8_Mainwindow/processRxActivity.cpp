@@ -19,7 +19,7 @@ void UI_Constructor::processRxActivity() {
 
     // one transaction for the whole drain - each logged station persists,
     // and a busy cycle would otherwise pay one autocommit per row
-    beginActivityBatch();
+    m_activityStorage->beginBatch();
 
     while (!m_rxActivityQueue.isEmpty()) {
         ActivityDetail d = m_rxActivityQueue.dequeue();
@@ -152,7 +152,7 @@ void UI_Constructor::processRxActivity() {
         }
     }
 
-    endActivityBatch();
+    m_activityStorage->endBatch();
 
 #if 0
     // TODO: this works but should also print in the rx window.

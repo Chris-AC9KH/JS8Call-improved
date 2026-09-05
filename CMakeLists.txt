@@ -269,6 +269,7 @@ target_sources(
   JS8_Logbook/CountriesWorked.cpp
   JS8_Logbook/LogBook.cpp
   JS8_Main/ActivityDB.cpp
+  JS8_Main/ActivityStorageController.cpp
   JS8_Main/AprsInboundRelay.cpp
   JS8_Main/APRSISClient.cpp
   JS8_Main/AttenuationSlider.cpp

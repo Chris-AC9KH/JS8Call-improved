@@ -7,6 +7,7 @@
 #include "JS8MessageBox.h"
 #include "JS8_Include/SettingsGroup.h"
 #include "JS8_Include/pimpl_impl.h"
+#include "JS8_Main/ActivitySettingsKeys.h"
 #include "qt_helpers.h"
 
 #include <QAction>
@@ -173,6 +174,10 @@ class MultiSettings::impl final : public QObject {
 
     // write the settings values from the dictionary to the current group
     void load_from(Dictionary const &, bool add_placeholder = true);
+
+    // swap a clone's inherited activity store id for the marker that
+    // makes it take its own copy of the stored activity
+    void mark_activity_clone(Dictionary &);
 
     // clone this configuration
     void clone_configuration(QMenu *, QMenu const *);
@@ -572,6 +577,38 @@ void MultiSettings::impl::select_configuration(QString const &target_name) {
     }
 }
 
+/**
+ * @brief Mark a dictionary that is about to become a clone's settings.
+ * @param settings The copied settings, modified in place.
+ *
+ * A configuration's stored activity lives in activity.db3 keyed by an id
+ * the configuration generates once into its own settings, so a clone
+ * that inherited that id verbatim would read and write its source's
+ * rows: a clear, a reset or a per-band wipe in either would destroy the
+ * other's history. Replacing the id with a marker naming the source
+ * leaves the clone with no id of its own, so it mints a fresh one at its
+ * first start and copies the source's rows under it, after which the two
+ * diverge.
+ *
+ * A source that has never needed an id has none, and the clone then has
+ * nothing to copy: the dictionary is left as it is. A pending clone (already
+ * carrying the marker) keeps it, so the new clone inherits the same
+ * grandparent the source itself will use once its own copy runs.
+ */
+void MultiSettings::impl::mark_activity_clone(Dictionary &settings) {
+    if (settings.contains(ActivitySettings::ACTIVITY_DB_CLONE_FROM_KEY)) {
+        settings.remove(ActivitySettings::ACTIVITY_DB_ID_KEY);
+        return;
+    }
+    if (!settings.contains(ActivitySettings::ACTIVITY_DB_ID_KEY)) {
+        return;
+    }
+    auto const source_id =
+        settings.take(ActivitySettings::ACTIVITY_DB_ID_KEY);
+    settings.insert(ActivitySettings::ACTIVITY_DB_CLONE_FROM_KEY,
+                    source_id);
+}
+
 void MultiSettings::impl::clone_configuration(QMenu *parent_menu,
                                               QMenu const *menu) {
     auto const &current_group = settings_.group();
@@ -602,6 +639,7 @@ void MultiSettings::impl::clone_configuration(QMenu *parent_menu,
     } while (settings_.childGroups().contains(new_name) ||
              new_name == current_);
     SettingsGroup new_group{&settings_, new_name};
+    mark_activity_clone(source_settings);
     load_from(source_settings);
 
     // insert the new configuration sub menu in the parent menu
@@ -660,6 +698,7 @@ void MultiSettings::impl::clone_into_configuration(QMenu const *menu) {
                 SettingsGroup source_group{&settings_, source_name};
                 new_settings_ = get_settings();
             }
+            mark_activity_clone(new_settings_);
 
             // purge target settings and replace
             if (target_name == current_) {

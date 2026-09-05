@@ -1,3 +1,7 @@
+/**
+ * @file ActivityDB.h
+ * @brief Declares the SQLite store behind activity.db3 (issue #267).
+ */
 #pragma once
 
 #include <QDateTime>
@@ -18,17 +22,14 @@
  * renames follow automatically, a settings reset orphans the old rows
  * and starts clean, and nothing ever infers that stored rows should
  * be deleted or moved. Deleting a configuration leaves its rows
- * behind (orphaned, never shown); a clone shares its source's id and
- * hence its activity.
+ * behind (orphaned, never shown); a clone mints an id of its own and
+ * takes a copy of its source's rows under it at its first start, so the
+ * two then diverge.
  *
  * Writes happen as activity arrives (write-on-change), not at shutdown,
  * so a crash, power loss, or SIGKILL loses at most the in-flight row
- * rather than everything since the last clean close. The database is
- * opened in WAL mode with synchronous=NORMAL: commits are not
- * individually fsynced, keeping frequent small writes off the GUI
- * thread's critical path, while the WAL keeps an interrupted write from
- * corrupting the store. Where the filesystem refuses WAL, the default
- * rollback journal and full synchronous level are kept instead.
+ * rather than everything since the last clean close; open() covers the
+ * journal and synchronous levels that keep those writes cheap and safe.
  *
  * Rows are never aged out of the store. The callsign-aging setting is
  * applied to what a band load contributes, bounding what a session
@@ -36,16 +37,11 @@
  * activity survives restarts and upgrades without flooding the table.
  *
  * The legacy [CallActivity] group and RXActivity key in the .ini are
- * imported once per configuration, in a single transaction, so a failed
- * import retries on the next start instead of being silently lost. They
- * are left in place for older versions of the software, following the
- * inbox_v1 -> inbox_v2 migration pattern. The import itself happens in
- * UI_Constructor, which knows the ini layout and the band plan. Its
- * fire-once marker lives in the configuration's own settings, so it
- * travels with the configuration through renames and clones; because
- * the data it gates lives here instead, the import also re-runs if the
- * marker is set while this configuration has nothing stored (an ini
- * restored without its database).
+ * imported once per configuration by ActivityStorageController, which
+ * knows the ini layout and the band plan, and left in place for older
+ * versions of the software, following the inbox_v1 -> inbox_v2
+ * migration pattern. The fire-once marker is a row here keyed by the
+ * configuration id, so it follows the data.
  */
 
 struct sqlite3;
@@ -82,44 +78,74 @@ public:
     bool open();
     void close();
 
-    // False after a failed open(), and after enough consecutive
-    // read/write failures that the handle closed itself - so a store
-    // that breaks mid-session (vanished volume, creeping corruption)
-    // eventually reports unusable instead of failing every call forever.
+    /**
+     * @brief Whether the handle is usable.
+     *
+     * False after a failed open(), and after enough consecutive
+     * read/write failures that the handle closed itself - so a store
+     * that breaks mid-session (vanished volume, creeping corruption)
+     * eventually reports unusable instead of failing every call forever.
+     */
     bool isOpen() const;
 
-    // The message captured at the most recent failure. Meaningful after
-    // any call here returns false - including after the failing call ran
-    // further (successful) statements such as a rollback, which would
-    // have reset sqlite3_errmsg() to "not an error".
+    /**
+     * @brief The message captured at the most recent failure.
+     *
+     * Meaningful after any call here returns false - including after the
+     * failing call ran further (successful) statements such as a
+     * rollback, which would have reset sqlite3_errmsg() to "not an
+     * error".
+     */
     QString error() const;
 
-    // Batch several writes into a single transaction (legacy import, QSY
-    // offset rewrites). A failed begin() leaves autocommit in effect, so
-    // the individual writes still land - just unbatched; a failed
-    // commit() rolls the batch back itself, so the connection can never
-    // be left stuck inside a transaction that would silently swallow
-    // every later write.
+    /**
+     * @brief Batch several writes into a single transaction (legacy
+     *        import, QSY offset rewrites).
+     *
+     * A failed begin() leaves autocommit in effect, so the individual
+     * writes still land - just unbatched.
+     */
     bool begin();
+
+    /**
+     * @brief Commit the open transaction.
+     *
+     * A failed commit() rolls the batch back itself, so the connection
+     * can never be left stuck inside a transaction that would silently
+     * swallow every later write.
+     */
     bool commit();
+
+    /// @brief Roll the open transaction back.
     void rollback();
+
+    /// @brief Whether a transaction is currently open.
     bool inTransaction() const { return inTransaction_; }
 
     // Call activity
     bool upsertCall(const QString &config, const QString &band,
                     const CallRecord &record);
-    // True only when a row was actually removed: a statement that ran
-    // but matched nothing (the row is filed under another band) reports
-    // false, so the caller can tell the user rather than appear to have
-    // deleted something.
+    /**
+     * @brief Remove one stored call from a band.
+     * @return True only when a row was actually removed.
+     *
+     * A statement that ran but matched nothing (the row is filed under
+     * another band) reports false, so the caller can tell the user rather
+     * than appear to have deleted something. error() is empty in that
+     * case, and carries a message only when the statement itself failed.
+     */
     bool deleteCall(const QString &config, const QString &band,
                     const QString &callsign);
     bool deleteCalls(const QString &config, const QString &band);
 
-    // Loads a band's rows. A read error is not the same as an empty band:
-    // when ok is provided it reports whether the read completed, so a
-    // transient I/O failure can be kept from being treated as - and then
-    // overwriting - genuinely absent data.
+    /**
+     * @brief Load a band's stored calls.
+     * @param ok When provided, reports whether the read completed.
+     *
+     * A read error is not the same as an empty band, so a transient I/O
+     * failure can be kept from being treated as - and then overwriting -
+     * genuinely absent data.
+     */
     QList<CallRecord> loadCalls(const QString &config, const QString &band,
                                 bool *ok = nullptr);
 
@@ -130,16 +156,54 @@ public:
                        bool *ok = nullptr);
     bool clearRxText(const QString &config, const QString &band);
 
-    // Whether anything is stored for a configuration. When ok is
-    // provided it reports whether the probe completed, so a failed read
-    // is never mistaken for "nothing stored".
-    bool hasConfig(const QString &config, bool *ok = nullptr);
+    /**
+     * @brief Whether the legacy .ini import has run for a configuration.
+     * @param config The id to probe.
+     * @param ok When provided, reports whether the probe completed.
+     * @return True when the marker row is present.
+     */
+    bool hasImported(const QString &config, bool *ok = nullptr);
 
-    // Wipe everything stored for a configuration (the startup
-    // "Reset ... Call Activity and RX History" behavior, the user-facing
-    // "Clear All Activity" actions, and the fresh-start wipe after a
-    // configuration reset).
+    /**
+     * @brief Record that the legacy .ini import has run.
+     * @param config The id the marker is filed under.
+     * @return True when the marker was written or already there.
+     *
+     * Written inside the import's transaction, so a failed import rolls
+     * it back with the rows. clearConfig() deliberately leaves it.
+     */
+    bool markImported(const QString &config);
+
+    /**
+     * @brief Wipe everything stored for a configuration.
+     *
+     * The startup "Reset ... Call Activity and RX History" behavior, the
+     * user-facing "Clear All Activity" actions, and the fresh-start wipe
+     * after a configuration reset. Both tables or neither: where a
+     * transaction cannot be opened it does nothing, rather than destroy
+     * one table and fail on the other.
+     */
     bool clearConfig(const QString &config);
+
+    /**
+     * @brief Copy everything stored for one configuration under a second
+     *        configuration's id.
+     * @param from The id whose rows are read.
+     * @param to The id the copies are written under.
+     * @return True when all three tables were copied.
+     *
+     * The clone half of the scheme above: a cloned configuration mints
+     * its own id and takes a private copy of its source's rows, rather
+     * than sharing them. Rows the destination already holds win, because
+     * a clone whose copy was deferred by a degraded start may have
+     * written newer ones of its own in the meantime. All three tables
+     * or none: the copy runs in one transaction, so a failure leaves
+     * nothing half-copied and the whole copy retries at the next start.
+     * That holds when the copy opens the transaction itself; inside a
+     * caller's transaction a failure is only reported, and the caller's
+     * rollback governs.
+     */
+    bool copyConfig(const QString &from, const QString &to);
 
 private:
     void captureError();
@@ -152,9 +216,7 @@ private:
     bool          inTransaction_;
     bool          pendingClose_; // third strike landed mid-transaction
     int           consecutiveFailures_;
-    // The two hot-path statements are prepared once at open() - which
-    // doubles as a schema validation probe against a pre-existing
-    // incompatible table - and reused for the life of the handle.
+    /// Prepared once at open() and reused for the life of the handle.
     sqlite3_stmt *upsertCallStmt_;
     sqlite3_stmt *saveRxTextStmt_;
 };
