@@ -197,7 +197,10 @@ void ActivityStorageController::bandChanged(QString const &band) {
  * reloads from the store at its next visit. Where the rig has not
  * reported at all only the two per-bucket panes move; clearActivity()
  * would also empty the compose box and the decode, command and spot
- * queues the session has accumulated.
+ * queues the session has accumulated. That state is the confirmation
+ * flag, not an empty bucket name: "" is also the out-of-plan bucket,
+ * whose Band Activity must not follow the panes to a band the rig later
+ * reports.
  */
 void ActivityStorageController::switchActivityBucket(QString const &band) {
     if (m_activityBandLoaded && m_activityBand == band) {
@@ -219,7 +222,7 @@ void ActivityStorageController::switchActivityBucket(QString const &band) {
         }
     }
 
-    if (m_ctx.lastBand->isEmpty()) {
+    if (!m_activityBandConfirmed) {
         m_ctx.rxTextEdit->clear();
         m_ctx.clearRxFrameBlockNumbers();
         m_ctx.clearCallActivityPane();

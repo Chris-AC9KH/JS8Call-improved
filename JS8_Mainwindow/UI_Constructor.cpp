@@ -81,7 +81,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         context.settings = m_settings;
         context.defaultDial = Default::DIAL_FREQUENCY;
         context.rxTextEdit = ui->textEditRX;
-        context.lastBand = &m_lastBand;
         context.callActivity = &m_callActivity;
         context.inboxCounts = &m_rxInboxCountCache;
         context.callActivityBandCache = &m_callActivityBandCache;

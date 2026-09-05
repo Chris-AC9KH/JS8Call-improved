@@ -57,8 +57,6 @@ public:
         /// The dial the ini falls back to when it has never recorded one.
         Radio::Frequency defaultDial = 0;
         QTextEdit *rxTextEdit = nullptr;
-        /// The band the rig last reported; "" before its first report.
-        QString const *lastBand = nullptr;
         /// The live Call Activity table; a seed merges stored rows into it.
         QMap<QString, CallDetail> *callActivity = nullptr;
         /// Unread-message counts; unread senders are exempt from aging.
