@@ -227,6 +227,8 @@ If a station has left you a message, a ⚑ indicator will be displayed next to t
 
 If a station has been blocked, a x indicator will be displayed next to their callsign and decoded text from that station will not be displayed in the incoming message pane.
 
+Call activity and the RX text history are kept per band and stored in a database (activity.db3, alongside the message inbox), so what you have heard on each band is still there after a restart, an upgrade, or a power cut - not just after a clean shutdown. Switching bands shows that band's own activity, and a station heard on one band no longer appears under another. "Clear Call Activity" and "Clear RX Activity" clear the band you are on; "Clear All Activity" permanently deletes the stored history for every band, so it asks first.
+
 Station distance and azimuth is computed from the first 6 digits of the maidenhead grid locators. This is an approximation describing an "area" on the map, not an exact point. JS8Call supports up to 12 digit locators for greater precision, but even then, the calculation will always remain an approximation.
 
 ### Waterfall
