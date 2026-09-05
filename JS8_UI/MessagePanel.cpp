@@ -210,7 +210,7 @@ void MessagePanel::populateMessages(QList<QPair<int, Message>> msgs) {
             dateItem->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
             ui->messageTableWidget->setItem(row, Column::Date, dateItem);
 
-            auto dial = (quint64)params.value("DIAL").toInt();
+            auto dial = params.value("DIAL").value<quint64>();
             auto dialItem = new QTableWidgetItem();
             dialItem->setData(Qt::EditRole, dial);
             dialItem->setData(Qt::DisplayRole, QString("%1 MHz").arg(Radio::pretty_frequency_MHz_string(dial)));

@@ -321,7 +321,10 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("TimeDrift", DriftingDateTime::drift());
     m_settings->setValue("ShowTooltips", ui->actionShow_Tooltips->isChecked());
     m_settings->setValue("ShowStatusbar", ui->statusBar->isVisible());
-    m_settings->setValue("RXActivity", ui->textEditRX->toHtml());
+    // RXActivity now lives in activity.db3 (see ActivityDB), written as it
+    // changes. The legacy RXActivity ini key is deliberately no longer
+    // rewritten - older versions of the software can still read whatever
+    // it last held.
 
     m_settings->endGroup();
 
@@ -357,40 +360,13 @@ void UI_Constructor::writeSettings() {
 
     m_settings->endGroup();
 
-    auto now = DriftingDateTime::currentDateTimeUtc();
-    int callsignAging = m_config.callsign_aging();
-
-    m_settings->beginGroup("CallActivity");
-    m_settings->remove(""); // remove all keys in current group
-    foreach (auto cd, m_callActivity.values()) {
-        if (cd.call.trimmed().isEmpty()) {
-            continue;
-        }
-        if (callsignAging &&
-            cd.utcTimestamp.secsTo(now) / 60 >= callsignAging) {
-            continue;
-        }
-        m_settings->setValue(
-            cd.call.trimmed(),
-            QVariantMap{
-                {"snr", QVariant(cd.snr)},
-                {"grid", QVariant(cd.grid)},
-                {"dial", QVariant(cd.dial)},
-                {"freq", QVariant(cd.offset)},
-                {"tdrift", QVariant(cd.tdrift)},
-#if CACHE_CALL_DATETIME_AS_STRINGS
-                {"ackTimestamp",
-                 QVariant(cd.ackTimestamp.toString("yyyy-MM-dd hh:mm:ss"))},
-                {"utcTimestamp",
-                 QVariant(cd.utcTimestamp.toString("yyyy-MM-dd hh:mm:ss"))},
-#else
-                {"ackTimestamp", QVariant(cd.ackTimestamp)},
-                {"utcTimestamp", QVariant(cd.utcTimestamp)},
-#endif
-                {"submode", QVariant(cd.submode)},
-            });
-    }
-    m_settings->endGroup();
+    // Call activity now lives in activity.db3 (see ActivityDB), written
+    // row-by-row as stations are heard rather than in bulk at shutdown, so
+    // a crash or SIGKILL no longer loses everything since the last clean
+    // close. The legacy [CallActivity] ini group is deliberately no longer
+    // rewritten - it is imported once (see importLegacyActivityIfNeeded)
+    // and then left in place for older versions of the software, following
+    // the inbox_v1 -> inbox_v2 migration pattern.
 }
 
 void UI_Constructor::applyPillSettings() {
@@ -462,10 +438,10 @@ void UI_Constructor::readSettings() {
     ui->actionShow_Statusbar->setChecked(
         m_settings->value("ShowStatusbar", true).toBool());
     ui->statusBar->setVisible(ui->actionShow_Statusbar->isChecked());
-    ui->textEditRX->setHtml(
-        m_config.reset_activity()
-            ? ""
-            : m_settings->value("RXActivity", "").toString());
+    // RX text is loaded per-band from activity.db3 once the dial frequency
+    // (and hence the band) is known - see restoreActivity(). Loading
+    // the legacy un-banded RXActivity blob here is what attributed it to
+    // whatever band the rig happened to be polled on at startup (#267).
     QTimer::singleShot(0, this, [this](){
         ui->textEditRX->verticalScrollBar()->setValue(
             ui->textEditRX->verticalScrollBar()->maximum());
@@ -564,51 +540,59 @@ void UI_Constructor::readSettings() {
         8);
     m_settings->endGroup();
 
-    if (m_config.reset_activity()) {
-        // NOOP
-    } else {
-        m_settings->beginGroup("CallActivity");
-        foreach (auto call, m_settings->allKeys()) {
+    // Call activity is loaded per-band from activity.db3 instead of being
+    // seeded here from the un-banded legacy [CallActivity] ini group -
+    // seeding it un-banded is what let one band's activity surface on
+    // another at startup (#267). The legacy ini data is imported into the
+    // database once, band-attributed via each record's dial frequency:
+    bool const activityReady = importLegacyActivityIfNeeded();
 
-            auto values = m_settings->value(call).toMap();
-
-            auto snr = values.value("snr", -64).toInt();
-            auto grid = values.value("grid", "").toString();
-            auto dial = values.value("dial", 0).value<Frequency>();
-            auto freq = values.value("freq", 0).toInt();
-            auto tdrift = values.value("tdrift", 0).toFloat();
-
-#if CACHE_CALL_DATETIME_AS_STRINGS
-            auto ackTimestampStr = values.value("ackTimestamp", "").toString();
-            auto ackTimestamp =
-                QDateTime::fromString(ackTimestampStr, "yyyy-MM-dd hh:mm:ss");
-            ackTimestamp.setUtcOffset(0);
-
-            auto utcTimestampStr = values.value("utcTimestamp", "").toString();
-            auto utcTimestamp =
-                QDateTime::fromString(utcTimestampStr, "yyyy-MM-dd hh:mm:ss");
-            utcTimestamp.setUtcOffset(0);
-#else
-            auto ackTimestamp = values.value("ackTimestamp").toDateTime();
-            auto utcTimestamp = values.value("utcTimestamp").toDateTime();
-#endif
-            auto submode =
-                values.value("submode", Varicode::JS8CallNormal).toInt();
-
-            CallDetail cd = {};
-            cd.call = call;
-            cd.snr = snr;
-            cd.grid = grid;
-            cd.dial = dial;
-            cd.offset = freq;
-            cd.tdrift = tdrift;
-            cd.ackTimestamp = ackTimestamp;
-            cd.utcTimestamp = utcTimestamp;
-            cd.submode = submode;
-
-            logCallActivity(cd, false);
-        }
+    // Preload the last-known band's activity so the panes are populated
+    // even before (or without) a rig connection - once the rig reports a
+    // dial frequency, updateCurrentBand() switches to the right band's
+    // data if this guess was wrong. Skipped when a requested reset could
+    // not be applied: better empty panes than a session showing exactly
+    // what the user asked to remove.
+    if (activityReady || !m_config.reset_activity()) {
+        m_settings->beginGroup("Common");
+        auto const dial =
+            m_settings
+                ->value("DialFreq", QVariant::fromValue<Frequency>(
+                                        Default::DIAL_FREQUENCY))
+                .value<Frequency>();
         m_settings->endGroup();
+        // populate the unread-message counts first: the seed's aging
+        // filter exempts unread senders, and an empty count cache at
+        // this point would age them out of the freshly seeded table
+        refreshInboxCounts();
+        m_activityStartupTimer.start();
+        restoreActivity(m_config.bands()->find(dial));
+
+        if (!activityDB()->isOpen() && !m_config.reset_activity()) {
+            // Degraded start: master restored the pane from the ini, and
+            // that copy is still there (this change never rewrites it).
+            // Show it rather than an empty pane - purely for display,
+            // since an unseeded bucket refuses to save.
+            m_settings->beginGroup("UI_Constructor");
+            auto const legacy =
+                m_settings->value("RXActivity", "").toString();
+            m_settings->endGroup();
+            if (!legacy.isEmpty()) {
+                ui->textEditRX->setHtml(legacy);
+                m_rxFrameBlockNumbers.clear();
+                // Mark the copy's extent: the recovery seed and the
+                // close-time sweep treat only text below it as session
+                // text (see m_rxTextLegacyBand).
+                auto const *doc = ui->textEditRX->document();
+                m_rxTextLegacyBand = m_activityBand;
+                m_rxTextLegacyBlocks = doc->blockCount();
+                if (doc->lastBlock().length() <= 1) {
+                    // an append may splice into a trailing empty block
+                    // (writeNoticeTextToUI's guard) - count it as below
+                    --m_rxTextLegacyBlocks;
+                }
+            }
+        }
     }
 
     QTimer::singleShot(0, this, [this]{
@@ -786,8 +770,79 @@ void UI_Constructor::on_actionFocus_Call_Activity_Table_triggered() {
     ui->tableWidgetCalls->setFocus();
 }
 
+// The explicit user-facing Clear actions also drop the matching stored
+// rows from activity.db3. (clearActivity() itself never deletes stored
+// rows - it also runs during band changes, where the outgoing band's
+// stored activity has to survive. Its refreshInboxCounts() call may
+// re-persist unread inbox senders, which is deliberate: unread senders
+// are always shown, and their rows key to their own message's band.)
 void UI_Constructor::on_actionClear_All_Activity_triggered() {
+    // This now deletes stored history for EVERY band, permanently - the
+    // ini no longer keeps a copy - so it asks first, as the context-menu
+    // path always has.
+    if (QMessageBox::Yes !=
+        QMessageBox::question(
+            this, "Clear All Activity",
+            "Clear all call activity and RX history for every band?\n\n"
+            "This permanently deletes the stored history, not just what "
+            "is on screen.",
+            QMessageBox::Yes | QMessageBox::No)) {
+        return;
+    }
+
+    // Store first, UI second: clearing the panes before the store can
+    // leave a half-cleared state - the emptied pane arms the debounced
+    // saver, which then deletes the current band's stored text even
+    // though the user was told the clear had failed.
+    // "All" spans bands: dropping only the current band's rows would let
+    // every other band's stored activity reload as if never cleared.
+    // The panes clear first - clearRXActivity() is also what unsticks the
+    // compose box, and master cleared unconditionally - and the store is
+    // wiped AFTER, because clearActivity()'s inbox refresh re-persists
+    // every unread sender and would otherwise repopulate the store the
+    // wipe had just emptied.
     clearActivity();
+
+    bool const stored = m_activityStoreDisabled ||
+                        activityDB()->clearConfig(activityConfigId());
+    if (!stored) {
+        qCWarning(mainwindow_js8)
+            << "clear all activity failed:" << activityDB()->error();
+        showStatusMessage(tr("Could not clear stored activity (%1)")
+                              .arg(activityDB()->error()));
+        // the pane was cleared but the store was not: a save would write
+        // the emptied pane over stored text, so force a re-merge first
+        m_activitySeeded.remove(m_activityBand);
+        m_rxTextSaveTimer.stop();
+        m_rxTextSaveMaxTimer.stop();
+        m_seedRetryTimer.start();
+    }
+
+    // The legacy ini keys hold a full copy of what was just cleared, and
+    // master's writeSettings erased them at every close. Leaving them
+    // would keep the "cleared" activity readable on disk and let an
+    // older build resurrect it.
+    purgeLegacyActivityIni();
+
+    // "All" also means the session's RAM band caches - otherwise a hop
+    // to a previously visited band would restore its pre-clear snapshot
+    // and the next debounced save would write the cleared history
+    // straight back into the store.
+    m_callActivityBandCache.clear();
+    m_rxTextBandCache.clear();
+    m_bandActivityBandCache.clear();
+    m_heardGraphIncomingBandCache.clear();
+    m_heardGraphOutgoingBandCache.clear();
+    m_rxTextDirtyBands.clear();
+    // Every bucket must be re-seeded: on success because the store is
+    // empty (and clearActivity's inbox refresh may have written unread
+    // senders back into it), on failure because the panes no longer
+    // contain the stored history and a save would destroy it.
+    m_activitySeeded.clear();
+    m_rxTextLegacyBand.clear();
+    m_rxTextLegacyBlocks = 0;
+    m_rxTextLastSavedRevision = ui->textEditRX->document()->revision();
+    m_rxTextLastSavedBand = m_activityBand;
 }
 
 void UI_Constructor::on_actionClear_Band_Activity_triggered() {
@@ -795,11 +850,57 @@ void UI_Constructor::on_actionClear_Band_Activity_triggered() {
 }
 
 void UI_Constructor::on_actionClear_RX_Activity_triggered() {
+    // Store first (see Clear All): if the delete fails, the pane keeps
+    // its text and no later seed can splice the stored history back in
+    // and re-persist it, silently undoing the clear.
+    bool const stored =
+        m_activityStoreDisabled ||
+        activityDB()->clearRxText(activityConfigId(), m_activityBand);
+    if (!stored) {
+        qCWarning(mainwindow_js8)
+            << "clear RX activity failed:" << activityDB()->error();
+        showStatusMessage(tr("Could not clear stored RX text (%1)")
+                              .arg(activityDB()->error()));
+        // The pane no longer holds the stored text, so a save would
+        // overwrite it: force a re-merge before saves resume, and stop
+        // the debounce the pane clear below arms - otherwise its retry
+        // seeds the bucket and puts the "cleared" text back on screen.
+        m_activitySeeded.remove(m_activityBand);
+        m_rxTextSaveTimer.stop();
+        m_rxTextSaveMaxTimer.stop();
+        m_seedRetryTimer.start(); // hold the retry off for its interval
+    }
+    if (m_activityBand == m_rxTextLegacyBand) {
+        // whatever the clear leaves on screen, it is not the legacy copy
+        m_rxTextLegacyBand.clear();
+        m_rxTextLegacyBlocks = 0;
+    }
+    // clears unconditionally - this is also the compose box's way out
     clearRXActivity();
+    m_rxTextLastSavedRevision = ui->textEditRX->document()->revision();
+    m_rxTextLastSavedBand = m_activityBand;
+    m_rxTextDirtyBands.remove(m_activityBand);
 }
 
 void UI_Constructor::on_actionClear_Call_Activity_triggered() {
+    if (!m_activityStoreDisabled &&
+        !activityDB()->deleteCalls(activityConfigId(), m_activityBand)) {
+        qCWarning(mainwindow_js8)
+            << "clear call activity failed:" << activityDB()->error();
+        showStatusMessage(tr("Could not clear stored call activity (%1)")
+                              .arg(activityDB()->error()));
+        // deliberately NOT un-seeded: the RX pane is untouched and still
+        // contains this bucket's stored text, so forcing a re-seed would
+        // splice that history in a second time. The rows simply return
+        // at the next session, which the message above reports.
+    }
     clearCallActivity();
+    // Bucket-scoped by design: a row displayed here but stored under
+    // another band (its own dial's band - e.g. a decode that completed
+    // just after a QSY) is that band's history, which this action cannot
+    // see and must not destroy. Unread inbox senders reappear regardless
+    // - they are re-synthesized from inbox.db3, the source of truth for
+    // unread mail.
 }
 
 void UI_Constructor::on_actionSetOffset_triggered() {
@@ -1233,16 +1334,31 @@ void UI_Constructor::updateCurrentBand() {
     auto const &band_name = m_config.bands()->find(dial_frequency);
 
     if (m_lastBand == band_name) {
+        // The rig's report agrees with m_lastBand but the panes may be
+        // showing a different bucket - at startup they are preloaded
+        // from the LAST session's dial before the rig has reported one
+        // (e.g. the rig is parked on an out-of-plan frequency, whose
+        // activity lives in the "" bucket). Move the panes to the rig's
+        // actual bucket through the same path a band change takes.
+        // confirm only AFTER the switch: the flush inside it must still
+        // see the outgoing bucket as unconfirmed, or the startup guess's
+        // pane - which now holds this band's decodes too - is written
+        // under the guessed band
+        if (m_activityBandLoaded && m_activityBand != band_name) {
+            switchActivityBucket(band_name);
+        }
+        m_activityBandConfirmed = true;
+        m_activityBandConfirmedBands.insert(band_name);
         return;
     }
 
-    cacheActivity(m_lastBand);
-
-    // clear activity on startup if asked or on when the previous band is not
-    // empty
-    if (m_config.reset_activity() || !m_lastBand.isEmpty()) {
-        clearActivity();
-    }
+    // Move the panes to the new bucket BEFORE anything reads them: the
+    // WSJT-X status datagram below reports the selected DX call and its
+    // grid, which would otherwise still be the outgoing band's. The
+    // confirmation flag is set AFTER the switch, so the flush inside it
+    // still treats the outgoing bucket as the startup guess it is.
+    switchActivityBucket(band_name);
+    m_activityBandConfirmed = true;
 
     m_wideGraph->setBand(band_name);
 
@@ -1294,7 +1410,6 @@ void UI_Constructor::updateCurrentBand() {
     m_lastBand = band_name;
 
     band_changed();
-    restoreActivity(m_lastBand);
 }
 
 void UI_Constructor::displayDialFrequency() {
@@ -1442,6 +1557,95 @@ void UI_Constructor::closeEvent(QCloseEvent *e) {
     }
     m_valid = false; // suppresses subprocess errors
     m_config.transceiver_offline();
+    // Final flush of the current band's RX text (covers anything the
+    // debounced save timer hasn't written yet). If the bucket was never
+    // seeded - the store was unusable at first visit - make one last
+    // seed attempt: saves are suppressed while unseeded, so without this
+    // the whole session's RX text would be discarded, where the legacy
+    // ini path always wrote it. The flag keeps the flush below from
+    // re-entering the seed's own retry (and its table rebuild) while the
+    // window is tearing down.
+    if (!m_activitySeeded.contains(m_activityBand) &&
+        !m_activityStoreDisabled && activityDB()->isOpen()) {
+        seedActivityForBand(m_activityBand);
+    }
+    m_activityShuttingDown = true;
+    m_activityBandConfirmed = true; // the guess, if any, ends here
+    saveRxTextForBand(m_activityBand);
+
+    // Bands whose text never reached the store - visited while it was
+    // down, or left before a seed succeeded - survive only in the RAM
+    // band cache, and this is their last chance. Append to whatever is
+    // stored rather than replacing it: the cached document does not
+    // contain that band's earlier history.
+    if (!m_activityStoreDisabled) {
+        foreach (auto const &dirty, m_rxTextDirtyBands) {
+            if (dirty == m_activityBand ||
+                !m_rxTextBandCache.contains(dirty)) {
+                continue;
+            }
+            if (!m_activityBandConfirmedBands.contains(dirty)) {
+                // this bucket was only ever the startup guess, and its
+                // pane collected text heard before the rig reported a
+                // band - writing it here would file that text under a
+                // band it was never heard on
+                continue;
+            }
+            auto cached = m_rxTextBandCache[dirty];
+            QTextDocument cachedDoc;
+            cachedDoc.setHtml(cached);
+            if (dirty == m_rxTextLegacyBand) {
+                // the cached top is the degraded start's legacy ini
+                // copy - already in the store via the import; only what
+                // the session added below it is worth sweeping
+                cached = htmlBelowLegacyCopy(&cachedDoc);
+                if (cached.isEmpty()) {
+                    continue;
+                }
+                cachedDoc.setHtml(cached);
+            }
+            if (cachedDoc.isEmpty()) {
+                // a cleared pane serialises to a full HTML skeleton, so
+                // the emptiness test has to be on the document: storing
+                // the skeleton would resurrect the cleared row
+                activityDB()->clearRxText(activityConfigId(), dirty);
+                continue;
+            }
+
+            if (m_activitySeeded.contains(dirty)) {
+                // the cached document already contains this bucket's
+                // stored history (that is what seeding merged in), so it
+                // replaces the row rather than being appended to it
+                activityDB()->saveRxText(activityConfigId(), dirty,
+                                         cached);
+                continue;
+            }
+
+            // never seeded: the cached text is this session's only, and
+            // whatever is stored is older history it does not contain
+            bool ok = false;
+            auto const storedHtml =
+                activityDB()->loadRxText(activityConfigId(), dirty, &ok);
+            if (!ok) {
+                continue; // cannot tell what is there; do not overwrite
+            }
+            if (storedHtml.isEmpty()) {
+                activityDB()->saveRxText(activityConfigId(), dirty,
+                                         cached);
+                continue;
+            }
+            QTextDocument doc;
+            doc.setHtml(storedHtml);
+            QTextCursor cursor(&doc);
+            cursor.movePosition(QTextCursor::End);
+            if (cursor.block().length() > 1) {
+                cursor.insertBlock();
+            }
+            cursor.insertHtml(cached);
+            activityDB()->saveRxText(activityConfigId(), dirty,
+                                     doc.toHtml());
+        }
+    }
     writeSettings();
     m_guiTimer.stop();
     m_prefixes.reset();
@@ -2278,6 +2482,10 @@ void UI_Constructor::logCallActivity(CallDetail d, bool spot) {
         }
     }
 
+    // mirror the row to activity.db3 as it changes, so it survives any
+    // kind of exit (write-on-change, not write-on-close)
+    persistCallActivity(d);
+
     // enqueue for spotting to psk reporter
     if (spot) {
         m_rxCallQueue.append(d);
@@ -2895,6 +3103,10 @@ void UI_Constructor::stopTx2() {
 
 void UI_Constructor::TxAgain() { auto_tx_mode(true); }
 
+// The RAM band caches are the session's display layer, exactly as on
+// master: hops restore the panes verbatim, with or without a working
+// store. activity.db3 sits underneath as a write-through store plus a
+// once-per-session seed of each bucket's history (seedActivityForBand).
 void UI_Constructor::cacheActivity(QString key) {
     m_callActivityBandCache[key] = m_callActivity;
     m_bandActivityBandCache[key] = m_bandActivity;
@@ -2903,28 +3115,844 @@ void UI_Constructor::cacheActivity(QString key) {
     m_heardGraphOutgoingBandCache[key] = m_heardGraphOutgoing;
 }
 
+// The one path that moves the panes from one storage bucket to another:
+// flush and park what is on screen under the bucket it belongs to, empty
+// the panes, then restore the target bucket's own view. Every caller -
+// a band change, the rig's first report correcting the startup guess -
+// goes through here, so no path can leave one bucket's activity on
+// screen under another's name (which is #267 itself).
+/**
+ * @brief Move the activity panes from one storage bucket to another.
+ * @param band The bucket to show: a band name, or "" for out-of-plan.
+ *
+ * Flushes and parks what is on screen under the bucket it belongs to,
+ * clears the panes, then restores the target bucket's own view. Every
+ * caller - a band change, and the rig's first report correcting the
+ * startup guess - goes through here, so no path can leave one bucket's
+ * activity on screen under another's name, which is issue #267 itself.
+ */
+void UI_Constructor::switchActivityBucket(QString const &band) {
+    if (m_activityBandLoaded && m_activityBand == band) {
+        return;
+    }
+    if (m_activityBandLoaded) {
+        // saveRxTextForBand declines while the bucket is unconfirmed -
+        // the pane may hold text heard on the band we are moving TO -
+        // and marks it dirty, so cacheActivity below keeps it and the
+        // close-time sweep still gets a chance at it
+        saveRxTextForBand(m_activityBand);
+        cacheActivity(m_activityBand);
+    }
+
+    if (m_lastBand.isEmpty()) {
+        // The rig's first report, correcting the startup guess. Master
+        // cleared nothing here, so only the two per-bucket panes move:
+        // clearActivity() would also empty the compose box and the
+        // decode, command and spot queues the session has accumulated.
+        ui->textEditRX->clear();
+        m_rxFrameBlockNumbers.clear();
+        clearCallActivity();
+    } else {
+        clearActivity();
+    }
+    restoreActivity(band);
+}
+
 void UI_Constructor::restoreActivity(QString key) {
-    if (m_callActivityBandCache.contains(key)) {
-        m_callActivity = m_callActivityBandCache[key];
+    // When re-entering the bucket already on screen (a seed retry after
+    // the store recovers), the live panes are newer than any cache entry
+    // and must not be replaced.
+    bool const sameBucket = m_activityBandLoaded && key == m_activityBand;
+
+    if (!sameBucket) {
+        // Every cache is restored the same way, as on master: replace
+        // when this bucket has a snapshot, otherwise leave the panes as
+        // the caller left them. switchActivityBucket() has already
+        // cleared them, so "no snapshot" correctly shows nothing; the
+        // startup preload deliberately does NOT clear, so the unread
+        // senders synthesized moments earlier survive into the seed.
+        if (m_bandActivityBandCache.contains(key)) {
+            m_bandActivity = m_bandActivityBandCache[key];
+        }
+        if (m_heardGraphIncomingBandCache.contains(key)) {
+            m_heardGraphIncoming = m_heardGraphIncomingBandCache[key];
+        }
+        if (m_heardGraphOutgoingBandCache.contains(key)) {
+            m_heardGraphOutgoing = m_heardGraphOutgoingBandCache[key];
+        }
+        if (m_callActivityBandCache.contains(key)) {
+            m_callActivity = m_callActivityBandCache[key];
+        }
+        if (m_rxTextBandCache.contains(key)) {
+            ui->textEditRX->setHtml(m_rxTextBandCache[key]);
+        }
+        // the document was rebuilt: block indexes remembered for
+        // in-progress multi-frame messages point into the old document
+        m_rxFrameBlockNumbers.clear();
+        // what was restored is what the cache holds; disarm the saver
+        // and resync its change tracking - EXCEPT when a flush for this
+        // band failed earlier (dirty), where the tracking must keep
+        // reporting unsaved so the next flush retries
+        m_rxTextSaveTimer.stop();
+        m_rxTextSaveMaxTimer.stop();
+        m_rxTextLastSavedRevision =
+            m_rxTextDirtyBands.contains(key)
+                ? -1
+                : ui->textEditRX->document()->revision();
+        m_rxTextLastSavedBand = key;
+        if (m_rxTextDirtyBands.contains(key)) {
+            // this band's last flush failed: actually re-arm the timer,
+            // or a quiet band never retries (nothing else restarts it -
+            // only document activity does)
+            m_rxTextSaveTimer.start();
+        }
+        QTimer::singleShot(0, this, [this]() {
+            ui->textEditRX->verticalScrollBar()->setValue(
+                ui->textEditRX->verticalScrollBar()->maximum());
+        });
     }
 
-    if (m_bandActivityBandCache.contains(key)) {
-        m_bandActivity = m_bandActivityBandCache[key];
-    }
+    m_activityBand = key;
+    m_activityBandLoaded = true;
 
-    if (m_rxTextBandCache.contains(key)) {
-        ui->textEditRX->setHtml(m_rxTextBandCache[key]);
-    }
-
-    if (m_heardGraphIncomingBandCache.contains(key)) {
-        m_heardGraphIncoming = m_heardGraphIncomingBandCache[key];
-    }
-
-    if (m_heardGraphOutgoingBandCache.contains(key)) {
-        m_heardGraphOutgoing = m_heardGraphOutgoingBandCache[key];
+    // first visit this session: merge the bucket's stored history in
+    if (!m_activitySeeded.contains(key)) {
+        seedActivityForBand(key);
     }
 
     displayActivity(true);
+}
+
+/**
+ * @brief Path of the per-band activity store, beside the message inbox.
+ *
+ * Per-band persistent activity storage keyed by (configuration, band,
+ * callsign) - see ActivityDB and issue #267.
+ */
+QString UI_Constructor::activityPath() const {
+    return QDir::toNativeSeparators(
+        m_config.writeable_data_dir().absoluteFilePath("activity.db3"));
+}
+
+/**
+ * @brief The activity store, opened on first use.
+ *
+ * A store that fails to open - or that closed itself after repeated
+ * failures - is retried on a throttle rather than per call, and the
+ * operator is told once per failure episode that activity is not being
+ * saved. Callers may always use the returned object: every method on it
+ * is a no-op while it is closed.
+ */
+ActivityDB *UI_Constructor::activityDB() {
+    // a failed open (transient mount problem, contended lock at launch) is
+    // retried, throttled so a persistently broken store doesn't pay the
+    // open attempt on every decode
+    // Arm the reopen throttle however the handle ended up closed - a
+    // failed open() below, or the self-close after consecutive
+    // read/write failures - so a store that breaks mid-session is also
+    // retried, not just one that failed at launch. Discovery of a
+    // self-close is also the one operator-visible signal for it (the
+    // per-write warnings are suppressed once the handle is closed).
+    if (m_activityDB && !m_activityDB->isOpen() &&
+        !m_activityDBRetryTimer.isValid()) {
+        m_activityDBRetryTimer.start();
+        qCWarning(mainwindow_js8)
+            << "activity store closed after repeated failures:"
+            << m_activityDB->error();
+        showStatusMessage(
+            tr("Activity database unavailable - activity is not being "
+               "saved (%1)")
+                .arg(m_activityDB->error()));
+    }
+    bool const retrying = m_activityDB && !m_activityDB->isOpen() &&
+                          m_activityDBRetryTimer.isValid() &&
+                          m_activityDBRetryTimer.hasExpired(30 * 1000) &&
+                          m_activityBatchDepth == 0;
+    if (retrying) {
+        // never while a batch holds the old handle: callers inside
+        // beginActivityBatch()/endActivityBatch() would be left with a
+        // dangling pointer and a vanished transaction
+        m_activityDB.reset();
+    }
+    if (!m_activityDB) {
+        m_activityDB = std::make_unique<ActivityDB>(activityPath());
+        if (!m_activityDB->open()) {
+            qCWarning(mainwindow_js8)
+                << "could not open" << activityPath() << ":"
+                << m_activityDB->error();
+            // one visible sign per failure episode - NOT per 30s retry:
+            // showStatusMessage temporarily hides the statusbar's mode
+            // and frequency readouts, so a blink every retry would blank
+            // the operator's primary readouts indefinitely
+            if (!retrying) {
+                showStatusMessage(
+                    tr("Activity database unavailable - activity will "
+                       "not be saved (%1)")
+                        .arg(m_activityDB->error()));
+            }
+            m_activityDBRetryTimer.start();
+        } else {
+            m_activityDBRetryTimer.invalidate();
+            if (retrying && m_activityBandLoaded &&
+                !m_activitySeeded.contains(m_activityBand)) {
+                // the store recovered while the operator sat on a bucket
+                // that could never be seeded - seed it now (deferred:
+                // this accessor is called from paths a seed re-enters)
+                QTimer::singleShot(0, this, [this]() {
+                    if (m_activityBandLoaded &&
+                        !m_activitySeeded.contains(m_activityBand)) {
+                        seedActivityForBand(m_activityBand);
+                        displayActivity(true);
+                    }
+                });
+            }
+        }
+    }
+    return m_activityDB.get();
+}
+
+// Nested write bursts (a decode drain whose handlers also refresh inbox
+// counts, say) share one transaction; the outermost end commits.
+// Batches are LAZY: opening one only records the intent, and the
+// transaction starts at the first write inside it. A decode cycle that
+// turns out to persist nothing then costs nothing - no BEGIN IMMEDIATE
+// taking the write lock on the GUI thread (with its 5 s busy timeout),
+// and no store-reopen probe on behalf of a caller that never writes.
+/**
+ * @brief Open a write batch; nested batches share one transaction.
+ *
+ * Lazy: the transaction starts at the first write inside the batch, so a
+ * decode cycle that persists nothing costs nothing.
+ */
+void UI_Constructor::beginActivityBatch() { ++m_activityBatchDepth; }
+
+/// @brief Start the transaction a batch deferred, at its first write.
+void UI_Constructor::startActivityBatchIfPending() {
+    if (m_activityBatchDepth > 0 && m_activityDB &&
+        m_activityDB->isOpen() && !m_activityDB->inTransaction()) {
+        m_activityDB->begin();
+    }
+}
+
+/// @brief Close the outermost batch, committing its transaction.
+void UI_Constructor::endActivityBatch() {
+    if (m_activityBatchDepth == 1) {
+        // commit on the same handle begin() used: no activityDB() call
+        // here, so the accessor cannot swap in a fresh instance first,
+        // and a handle that died mid-batch (no transaction any more)
+        // stays silent instead of logging a misleading empty error
+        if (m_activityDB && m_activityDB->inTransaction() &&
+            !m_activityDB->commit()) {
+            qCWarning(mainwindow_js8)
+                << "could not commit activity batch:"
+                << m_activityDB->error();
+        }
+    }
+    --m_activityBatchDepth;
+}
+
+// Activity is keyed by a per-configuration UUID generated once and
+// stored in the configuration's own settings - NOT by the configuration
+// name. The id follows the configuration through renames automatically,
+// is purged with the settings by MultiSettings' "Reset Configuration"
+// (orphaning the old rows and starting clean, with no wipe heuristics
+// that could misfire), and a clone shares its source's id - and hence
+// its activity view - until either is reset. The id is captured once:
+// during a configuration switch MultiSettings updates its state before
+// this window closes, and the outgoing configuration's final flush must
+// not land under the incoming configuration's key.
+/**
+ * @brief The storage key for this MultiSettings configuration.
+ * @return A UUID generated once into the configuration's own settings.
+ */
+QString UI_Constructor::activityConfigId() const {
+    if (m_activityConfigId.isEmpty()) {
+        auto id = m_settings->value("ActivityDbId").toString();
+        if (id.isEmpty()) {
+            id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            m_settings->setValue("ActivityDbId", id);
+        }
+        m_activityConfigId = id;
+    }
+    return m_activityConfigId;
+}
+
+/// @brief Convert a displayed call detail into a storable row.
+ActivityDB::CallRecord UI_Constructor::toCallRecord(CallDetail const &d) const {
+    ActivityDB::CallRecord r;
+    r.callsign = d.call.trimmed();
+    r.through = d.through;
+    r.snr = d.snr;
+    r.grid = d.grid;
+    r.dial = d.dial;
+    r.offset = d.offset;
+    r.bits = d.bits;
+    r.tdrift = d.tdrift;
+    r.cqTimestamp = d.cqTimestamp;
+    r.ackTimestamp = d.ackTimestamp;
+    r.utcTimestamp = d.utcTimestamp;
+    r.submode = d.submode;
+    return r;
+}
+
+/// @brief Convert a stored row back into a displayed call detail.
+UI_Constructor::CallDetail
+UI_Constructor::fromCallRecord(ActivityDB::CallRecord const &r) const {
+    CallDetail cd = {};
+    cd.call = r.callsign;
+    cd.through = r.through;
+    cd.snr = r.snr;
+    cd.grid = r.grid;
+    cd.dial = r.dial;
+    cd.offset = r.offset;
+    cd.bits = r.bits;
+    cd.tdrift = r.tdrift;
+    cd.cqTimestamp = r.cqTimestamp;
+    cd.ackTimestamp = r.ackTimestamp;
+    cd.utcTimestamp = r.utcTimestamp;
+    cd.submode = r.submode;
+    return cd;
+}
+
+// Rows are filed under the band of their own dial frequency
+// (processDecodeEvent deliberately stamps records with the capture-time
+// dial, so decodes completing after a QSY and inbox senders keep the
+// band they were heard on - keying by the live band would be #267 all
+// over again). A dial that resolves to no band files under "" - the
+// out-of-plan bucket, which round-trips only to out-of-plan operation
+// and gives transverter/channelized users the persistence the legacy
+// un-banded ini provided. fallbackToCurrentBand is passed by the call
+// sites where a dial-less entry genuinely belongs to the bucket on
+// screen instead: a manually added station, a logbook grid backfill,
+// and qsy()'s offset write-back for those same rows.
+/**
+ * @brief Write one call-activity row to the store.
+ * @param d The row to persist.
+ * @param fallbackToCurrentBand File a row carrying no dial under the
+ *        bucket on screen; passed only where that is genuinely where it
+ *        belongs (a manually added station, a logbook grid backfill).
+ */
+void UI_Constructor::persistCallActivity(CallDetail const &d,
+                                         bool fallbackToCurrentBand) {
+    if (m_activityStoreDisabled || d.call.trimmed().isEmpty()) {
+        return;
+    }
+
+    auto band = m_config.bands()->find(d.dial);
+    if (band.isEmpty() && d.dial == 0 && fallbackToCurrentBand &&
+        m_activityBandConfirmed) {
+        // only once the rig has confirmed the bucket: filing under the
+        // startup guess would strand the row on a band the operator is
+        // not on (saveRxTextForBand refuses for the same reason)
+        band = m_activityBand;
+    }
+
+    auto const r = toCallRecord(d);
+    activityDB(); // resolve (and possibly recover) before the batch opens
+    startActivityBatchIfPending();
+    if (band != m_activityBand) {
+        // stored into a bucket other than the one on screen (a decode
+        // that completed after a QSY, an inbox sender carrying its
+        // message's dial): drop that bucket's cached view so the next
+        // visit re-seeds and the row is actually visible there
+        m_activitySeeded.remove(band);
+        m_callActivityBandCache.remove(band);
+    }
+
+    if (!activityDB()->upsertCall(activityConfigId(), band, r) &&
+        activityDB()->isOpen()) {
+        // a failed open is already reported (throttled) by activityDB()
+        qCWarning(mainwindow_js8) << "could not persist call activity for"
+                                  << r.callsign << ":"
+                                  << activityDB()->error();
+    }
+}
+
+// One-time-per-session merge of a bucket's stored history under whatever
+// the session has already accumulated for it: RAM wins per callsign on a
+// newer-or-equal timestamp, and the RX pane's own lines are appended
+// after the stored history. On failure the bucket stays unseeded - its
+// RX-text saves stay suppressed (nothing containing the stored history
+// is on screen, so a save would overwrite it) and the next visit, or the
+// reopen after a store failure, retries.
+/**
+ * @brief Merge a bucket's stored history into the session, once.
+ * @param band The bucket to seed.
+ *
+ * Runs at a bucket's first visit each session. Stored rows are merged
+ * under whatever the session already holds - the newer of the two wins
+ * per callsign, and stored enrichment (grid, ACK and CQ marks) survives
+ * a bare re-hearing - and the stored RX text is placed behind the pane's
+ * own lines. Until a bucket has been seeded its RX-text saves are
+ * suppressed, so a document that does not contain the stored history can
+ * never overwrite it; a failed seed is retried at the flush cadence.
+ */
+/**
+ * @brief HTML of everything below the degraded start's legacy ini copy.
+ * @param doc The RX pane's document, or a cached copy of it.
+ * @return The session text below the copy, or "" when there is none.
+ */
+QString UI_Constructor::htmlBelowLegacyCopy(QTextDocument *doc) const {
+    if (doc->blockCount() <= m_rxTextLegacyBlocks) {
+        return {};
+    }
+    QTextCursor cursor(doc->findBlockByNumber(m_rxTextLegacyBlocks));
+    cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+    if (cursor.selection().toPlainText().trimmed().isEmpty()) {
+        return {};
+    }
+    return cursor.selection().toHtml();
+}
+
+void UI_Constructor::seedActivityForBand(QString const &band) {
+    if (m_activityStoreDisabled || !activityDB()->isOpen()) {
+        return;
+    }
+    auto const config = activityConfigId();
+
+    bool callsOk = false;
+    auto const stored = activityDB()->loadCalls(config, band, &callsOk);
+    if (callsOk) {
+        // Apply the callsign-aging setting to what the STORE
+        // contributes, mirroring master's save-time prune: it bounds
+        // what a session can load (the store itself keeps everything),
+        // and without it stale rows reach consumers that put an SNR on
+        // the air. Rows the session has already heard are never pruned -
+        // they are merged in below, untouched.
+        auto const aging = m_config.callsign_aging();
+        auto const agingNow = DriftingDateTime::currentDateTimeUtc();
+
+        QMap<QString, CallDetail> merged;
+        foreach (auto const &r, stored) {
+            auto const cd = fromCallRecord(r);
+            if (aging && !m_callActivity.contains(cd.call) &&
+                m_rxInboxCountCache.value(cd.call, 0) <= 0 &&
+                cd.utcTimestamp.isValid() &&
+                cd.utcTimestamp.secsTo(agingNow) / 60 >= aging) {
+                continue; // too old to show; still in the store
+            }
+            merged[cd.call] = cd;
+        }
+        // Explicit ordering, not QDateTime's operators: since Qt 6.8 a
+        // comparison involving an invalid QDateTime is UNORDERED, so
+        // both < and <= return false and a live row would lose to a
+        // stored one that carries no timestamp (every manually added
+        // station, and legacy-imported rows).
+        auto const newerThan = [](QDateTime const &lhs,
+                                  QDateTime const &rhs) {
+            if (!lhs.isValid()) return false;
+            if (!rhs.isValid()) return true;
+            return rhs < lhs;
+        };
+
+        QList<CallDetail> ramWinners;
+        for (auto it = m_callActivity.constBegin();
+             it != m_callActivity.constEnd(); ++it) {
+            auto const found = merged.constFind(it.key());
+            if (found != merged.constEnd() &&
+                newerThan(found->utcTimestamp, it->utcTimestamp)) {
+                continue; // the stored row is the newer one
+            }
+
+            auto live = it.value();
+            if (found != merged.constEnd()) {
+                // Keep the enrichment the stored row carries when the
+                // live one has none, mirroring the UPSERT's own CASE
+                // guards - otherwise a bare re-hearing would drop the
+                // grid and the ACK/CQ marks from the table while the
+                // database (correctly) kept them.
+                if (live.grid.isEmpty()) live.grid = found->grid;
+                if (!live.ackTimestamp.isValid())
+                    live.ackTimestamp = found->ackTimestamp;
+                if (!live.cqTimestamp.isValid())
+                    live.cqTimestamp = found->cqTimestamp;
+                if (newerThan(it->utcTimestamp, found->utcTimestamp)) {
+                    // heard while the store was unreachable: write it
+                    // through now, or it reverts at the next session
+                    ramWinners.append(live);
+                }
+            } else {
+                ramWinners.append(live);
+            }
+            merged[it.key()] = live;
+        }
+        m_callActivity = merged;
+        if (!ramWinners.isEmpty()) {
+            beginActivityBatch();
+            foreach (auto const &cd, ramWinners) {
+                if (cd.dial == 0) {
+                    // Bands::find(0) is "", so writing this here would
+                    // file it in the out-of-plan bucket rather than the
+                    // one that already holds it (a manual add is stored
+                    // when it is added). Leave it alone.
+                    continue;
+                }
+                persistCallActivity(cd);
+            }
+            endActivityBatch();
+        }
+
+
+
+    } else {
+        qCWarning(mainwindow_js8)
+            << "could not load call activity for band" << band << ":"
+            << activityDB()->error();
+        // retry later WITHOUT touching the RX pane: merging the stored
+        // text now would leave it spliced into an unseeded pane, and the
+        // retry would merge - and then persist - it a second time
+        return;
+    }
+
+    // NOTE: fresh activityDB() call - the loads can self-close a failing
+    // handle, and holding a pointer across them would dangle.
+    bool rxOk = false;
+    auto const storedHtml = activityDB()->loadRxText(config, band, &rxOk);
+    if (rxOk) {
+        auto sessionHtml = QString{};
+        if (band == m_rxTextLegacyBand) {
+            // The pane's top is the legacy ini copy shown by the
+            // degraded start - history the import already banked, not
+            // session text. Merging the whole pane would append a
+            // second copy of the history behind the stored one.
+            sessionHtml = htmlBelowLegacyCopy(ui->textEditRX->document());
+        } else if (!ui->textEditRX->toPlainText().trimmed().isEmpty()) {
+            sessionHtml = ui->textEditRX->toHtml();
+        }
+        if (!storedHtml.isEmpty()) {
+            ui->textEditRX->setHtml(storedHtml);
+            if (!sessionHtml.isEmpty()) {
+                auto cursor = QTextCursor(ui->textEditRX->document());
+                cursor.movePosition(QTextCursor::End);
+                // never splice the session's first line onto the last
+                // stored line (writeNoticeTextToUI uses the same guard)
+                if (cursor.block().length() > 1) {
+                    cursor.insertBlock();
+                }
+                cursor.insertHtml(sessionHtml);
+            }
+            // the document was rebuilt: stored block indexes are stale
+            m_rxFrameBlockNumbers.clear();
+            QTimer::singleShot(0, this, [this]() {
+                ui->textEditRX->verticalScrollBar()->setValue(
+                    ui->textEditRX->verticalScrollBar()->maximum());
+            });
+        }
+        if (band == m_rxTextLegacyBand) {
+            // consumed: the pane no longer holds an unaccounted copy -
+            // either the stored history replaced it, or (empty row) the
+            // pane's copy is now legitimately this bucket's document
+            m_rxTextLegacyBand.clear();
+            m_rxTextLegacyBlocks = 0;
+        }
+        m_rxTextSaveTimer.stop();
+        m_rxTextSaveMaxTimer.stop();
+        m_rxTextLastSavedBand = band;
+        if (sessionHtml.isEmpty()) {
+            // showing exactly the stored content - nothing to write back
+            m_rxTextLastSavedRevision =
+                ui->textEditRX->document()->revision();
+        } else {
+            // the merged document is newer than the stored row
+            m_rxTextLastSavedRevision = -1;
+        }
+    } else {
+        qCWarning(mainwindow_js8)
+            << "could not load RX text for band" << band << ":"
+            << activityDB()->error();
+    }
+
+    if (callsOk && rxOk) {
+        m_activitySeeded.insert(band);
+        if (m_rxTextLastSavedRevision == -1) {
+            saveRxTextForBand(band); // permitted now the bucket is seeded
+        }
+    }
+}
+
+/**
+ * @brief Persist the RX pane for a bucket, if it is safe to do so.
+ * @param band The bucket the pane's contents belong to.
+ *
+ * Declines while the bucket is only the startup guess (RX text carries
+ * no per-line frequency, so it could be filed under a band it was never
+ * heard on) or while the bucket is unseeded, marking it for the
+ * close-time sweep in both cases. An empty pane removes the stored row
+ * rather than storing an empty one.
+ */
+void UI_Constructor::saveRxTextForBand(QString const &band) {
+    if (m_activityStoreDisabled) {
+        return; // a requested reset could not be applied - see the import
+    }
+    if (!m_activityBandConfirmed && band == m_activityBand &&
+        m_activityStartupTimer.isValid() &&
+        !m_activityStartupTimer.hasExpired(60 * 1000)) {
+        // The rig has not reported yet, so this bucket is only the last
+        // session's guess. RX text carries no per-line frequency, so
+        // filing it here could permanently mis-attribute a band's
+        // history; hold it in the pane until the bucket is confirmed
+        // (the grace period covers a station running without CAT).
+        m_rxTextDirtyBands.insert(band);
+        return;
+    }
+    if (!m_activitySeeded.contains(band)) {
+        // The bucket's stored history has not been merged into the
+        // on-screen document (store down or a read failed at first
+        // visit) - saving would overwrite that history with a document
+        // that does not contain it. Remember that this bucket has
+        // unsaved text, and retry the seed at this flush cadence, so one
+        // transient failure cannot disable persistence for a whole
+        // parked session; a successful seed saves the merged document.
+        m_rxTextDirtyBands.insert(band);
+        if (band == m_activityBand && !m_activityShuttingDown &&
+            activityDB()->isOpen() &&
+            (!m_seedRetryTimer.isValid() ||
+             m_seedRetryTimer.hasExpired(30 * 1000))) {
+            m_seedRetryTimer.start();
+            seedActivityForBand(band);
+            displayActivity(true);
+        }
+        return;
+    }
+
+    int const revision = ui->textEditRX->document()->revision();
+    if (revision == m_rxTextLastSavedRevision &&
+        band == m_rxTextLastSavedBand) {
+        return; // unchanged since the last save
+    }
+
+    activityDB(); // resolve (and possibly recover) before the batch opens
+    startActivityBatchIfPending();
+
+    bool ok;
+    if (ui->textEditRX->document()->isEmpty()) {
+        // an empty pane stores as no row at all - otherwise the debounced
+        // save that follows a Clear would resurrect an empty-skeleton row
+        ok = activityDB()->clearRxText(activityConfigId(), band);
+    } else {
+        ok = activityDB()->saveRxText(activityConfigId(), band,
+                                      ui->textEditRX->toHtml());
+    }
+
+    if (ok) {
+        m_rxTextLastSavedRevision = revision;
+        m_rxTextLastSavedBand = band;
+        m_rxTextDirtyBands.remove(band);
+    } else {
+        // Remember that this band's on-screen/cached text is newer than
+        // the store - the next restore of the band re-arms a save, and
+        // closeEvent sweeps still-dirty bands from the RAM cache. Re-arm
+        // the debounce too: the flush stopped both timers before calling
+        // us, and only new document activity would otherwise restart
+        // them, so a band that falls quiet after one failed save would
+        // never try again.
+        m_rxTextDirtyBands.insert(band);
+        if (!m_activityShuttingDown && band == m_activityBand) {
+            // Back off: a store that stays unwritable would otherwise
+            // spin at the 5 s debounce forever, and every attempt
+            // serialises the whole (unbounded) RX document on the GUI
+            // thread. One minute is still far inside the window the
+            // write-on-change design is protecting.
+            m_rxTextSaveTimer.start(60 * 1000);
+            if (!m_rxTextSaveMaxTimer.isActive()) {
+                m_rxTextSaveMaxTimer.start();
+            }
+        }
+        if (activityDB()->isOpen()) {
+            qCWarning(mainwindow_js8)
+                << "could not save RX text for band" << band << ":"
+                << activityDB()->error();
+        }
+    }
+}
+
+/**
+ * @brief One-time import of the legacy .ini activity data into
+ *        activity.db3, following the inbox_v1 -> inbox_v2 pattern: the
+ *        legacy [CallActivity] group and RXActivity key are read once,
+ *        never written again, and left in place for older versions of
+ *        the software.
+ *
+ * Call activity rows are attributed to the band each record was actually
+ * heard on, via its stored dial frequency - the legacy store had no band
+ * dimension, which is how activity ended up displayed on whatever band
+ * the rig was polled on at startup (#267). The RX text blob has no
+ * per-line frequency, so it is attributed to the band of the last-known
+ * dial frequency - the band the user last saw it on.
+ */
+// Erase the legacy [CallActivity] group and RXActivity key. Master's
+// writeSettings rewrote both at every close, so a reset genuinely
+// destroyed the old data; leaving them would keep a full copy of
+// everything the user asked to erase.
+void UI_Constructor::purgeLegacyActivityIni() {
+    m_settings->beginGroup("CallActivity");
+    m_settings->remove(""); // the whole legacy group
+    m_settings->endGroup();
+    m_settings->beginGroup("UI_Constructor");
+    m_settings->remove("RXActivity");
+    m_settings->endGroup();
+}
+
+bool UI_Constructor::importLegacyActivityIfNeeded() {
+    auto *db = activityDB();
+    if (!db->isOpen()) {
+        if (m_config.reset_activity()) {
+            // The wipe cannot run, so nothing may be read or written
+            // this session - otherwise the store reopens later and
+            // splices back exactly what the user asked to erase. The
+            // legacy ini keys ARE erased now: they hold a copy of the
+            // same activity, and leaving them would let a later untick
+            // re-import the snapshot the user just asked to destroy.
+            m_activityStoreDisabled = true;
+            purgeLegacyActivityIni();
+        }
+        return false; // the database wipe retries at the next start
+    }
+
+    auto const config = activityConfigId();
+
+    // The fire-once marker lives in the configuration's own settings, so
+    // it travels WITH the configuration: a rename keeps it (no re-import
+    // resurrecting deleted stations under the new name), and a clone
+    // copies it along with the frozen legacy [CallActivity] snapshot the
+    // clone also inherits - which must likewise never be imported.
+    constexpr char importedKey[] = "ActivityDbImported";
+
+    if (m_config.reset_activity()) {
+        // The user asked to start clean. Wipe this configuration's
+        // stored activity AND the legacy ini keys: master's writeSettings
+        // removed the [CallActivity] group and rewrote RXActivity at
+        // every close, so a reset genuinely destroyed the old data.
+        // Leaving those keys behind would both hide a copy of everything
+        // the user asked to erase and let a later un-tick re-import a
+        // stale snapshot.
+        if (!db->clearConfig(config)) {
+            qCWarning(mainwindow_js8)
+                << "could not reset stored activity:" << db->error();
+            showStatusMessage(
+                tr("Could not reset stored activity - activity will not "
+                   "be saved this session (%1)")
+                    .arg(db->error()));
+            // Nothing is read and nothing is written for the rest of the
+            // session: the panes stay empty as asked, and no write can
+            // be destroyed by the wipe that retries at the next start.
+            m_activityStoreDisabled = true;
+            purgeLegacyActivityIni();
+            return false;
+        }
+
+        purgeLegacyActivityIni();
+        m_settings->setValue(importedKey, true);
+        return true;
+    }
+
+    if (m_settings->value(importedKey, false).toBool()) {
+        // The marker lives in the ini, the data in activity.db3 - a
+        // backup or a machine move that carries only JS8Call.ini would
+        // otherwise skip the import forever while the legacy keys sit
+        // there, readable and never read. If the marker is set but this
+        // configuration has nothing stored, import again.
+        bool probeOk = false;
+        if (db->hasConfig(config, &probeOk) || !probeOk) {
+            return true;
+        }
+        qCDebug(mainwindow_js8)
+            << "import marker set but no stored activity - re-importing";
+    }
+
+    // fallback band for records whose stored dial can't be resolved
+    // (manually added stations have dial == 0; out-of-band rows return
+    // ""): the band of the last-known dial frequency, i.e. the band the
+    // user last saw this data displayed on
+    m_settings->beginGroup("Common");
+    auto const lastDial =
+        m_settings
+            ->value("DialFreq", QVariant::fromValue<Frequency>(
+                                    Default::DIAL_FREQUENCY))
+            .value<Frequency>();
+    m_settings->endGroup();
+    auto const fallbackBand = m_config.bands()->find(lastDial);
+
+    // An empty fallbackBand is fine: "" is the out-of-plan bucket, which
+    // the panes load whenever the dial resolves to no band - exactly
+    // where a transverter/channelized user's un-banded legacy data
+    // should land.
+
+    // One transaction for the whole import, following Inbox's v1 -> v2
+    // migration: either every legacy row lands - and only then is the
+    // fire-once marker written - or nothing changes and the import
+    // retries on the next start. (Setting the marker after a partial
+    // import would silently lose the failed rows forever - the ini group
+    // is never rewritten, but never re-read either.)
+    if (!db->begin()) {
+        qCWarning(mainwindow_js8)
+            << "could not start legacy activity import:" << db->error();
+        return false;
+    }
+
+    bool allOk = true;
+    int imported = 0;
+    m_settings->beginGroup("CallActivity");
+    foreach (auto call, m_settings->allKeys()) {
+        auto values = m_settings->value(call).toMap();
+
+        ActivityDB::CallRecord r;
+        r.callsign = call;
+        r.snr = values.value("snr", -64).toInt();
+        r.grid = values.value("grid", "").toString();
+        r.dial = values.value("dial", 0).value<Frequency>();
+        r.offset = values.value("freq", 0).toInt();
+        r.tdrift = values.value("tdrift", 0).toFloat();
+        r.ackTimestamp = values.value("ackTimestamp").toDateTime();
+        r.utcTimestamp = values.value("utcTimestamp").toDateTime();
+        r.submode = values.value("submode", Varicode::JS8CallNormal).toInt();
+
+        // same rule as live persistence: a non-zero out-of-plan dial
+        // belongs to the "" bucket; only dial-less rows (master's manual
+        // adds) take the last-seen band
+        auto band = m_config.bands()->find(r.dial);
+        if (band.isEmpty() && r.dial == 0) {
+            band = fallbackBand;
+        }
+
+        if (db->upsertCall(config, band, r)) {
+            ++imported;
+        } else {
+            allOk = false;
+        }
+    }
+    m_settings->endGroup();
+
+    m_settings->beginGroup("UI_Constructor");
+    auto const html = m_settings->value("RXActivity", "").toString();
+    m_settings->endGroup();
+
+    if (!html.isEmpty()) {
+        // never clobber RX text a session has already stored for that
+        // band - the legacy blob is by definition the older data
+        bool haveOk = false;
+        auto const have = db->loadRxText(config, fallbackBand, &haveOk);
+        if (haveOk && have.isEmpty()) {
+            allOk = db->saveRxText(config, fallbackBand, html) && allOk;
+        } else if (!haveOk) {
+            allOk = false;
+        }
+    }
+
+    if (!allOk || !db->commit()) {
+        db->rollback();
+        qCWarning(mainwindow_js8)
+            << "legacy activity import failed - will retry on next start:"
+            << db->error();
+        return false;
+    }
+
+    m_settings->setValue(importedKey, true);
+
+    qCDebug(mainwindow_js8) << "imported" << imported
+                            << "legacy call activity rows into"
+                            << activityPath();
+    return true;
 }
 
 void UI_Constructor::clearActivity() {
@@ -2939,6 +3967,11 @@ void UI_Constructor::clearActivity() {
     m_rxCommandQueue.clear();
     m_lastTxMessage.clear();
 
+    // BEFORE the clears, as master ordered it: with the senders still in
+    // the map, refresh takes logCallActivity's update branch - the create
+    // branch would fire a call_new notification per unread sender on
+    // every band change. Senders reappear at the next refresh (message
+    // dock events), exactly as they always have.
     refreshInboxCounts();
     resetTimeDeltaAverage();
 
@@ -5322,10 +6355,33 @@ void UI_Constructor::qsy(int const hzDelta) {
 
     m_bandActivity.swap(bandActivity);
 
-    // Adjust call activity frequencies.
+    // Adjust call activity frequencies, mirroring each rewritten offset
+    // to the store (one transaction) - otherwise the stale persisted
+    // offsets come back at the next band round-trip or restart, and
+    // clicked decodes stop resolving to their stations. Only rows whose
+    // own dial belongs to the current band are written back: entries
+    // displayed here but keyed to another band (post-QSY stragglers,
+    // inbox senders carrying their message's dial) did not QSY, and
+    // dial-less RAM-only entries must not be promoted into the store by
+    // a waterfall nudge.
 
-    for (auto [key, value] : m_callActivity.asKeyValueRange()) {
-        value.offset -= hzDelta;
+    if (!m_callActivity.isEmpty()) {
+        beginActivityBatch();
+        for (auto [key, value] : m_callActivity.asKeyValueRange()) {
+            value.offset -= hzDelta;
+            // Write back the rows this bucket actually stores: those
+            // whose own dial resolves here, and dial-less rows (manual
+            // adds), which are filed under the bucket they were added
+            // on - hence the fallback, since Bands::find(0) is "". Rows
+            // keyed to another band did not QSY and keep their offsets.
+            auto const rowBand = m_config.bands()->find(value.dial);
+            if (rowBand == m_activityBand) {
+                persistCallActivity(value);
+            } else if (value.dial == 0 && !m_activityBand.isEmpty()) {
+                persistCallActivity(value, true);
+            }
+        }
+        endActivityBatch();
     }
 
     displayActivity(true);
@@ -5444,6 +6500,13 @@ void UI_Constructor::handle_transceiver_update(
 
     // ensure frequency display is correct
     // setRig();
+    // NOTE: the "state" property is deliberately set AFTER this call, as
+    // master did: the transceiver's very first report can carry a bogus
+    // frequency (e.g. the hamlib dummy backend's default when Rig=None),
+    // and the !state.isValid() guard in updateCurrentBand() discards it.
+    // The cost is a window until the second report during which RX text
+    // is appended to the preloaded bucket's pane; call activity is
+    // unaffected (rows are keyed by their own capture dial).
     updateCurrentBand();
     displayDialFrequency();
     update_dynamic_property(ui->readFreq, "state", "ok");
@@ -5900,9 +6963,27 @@ QString UI_Constructor::callsignSelected(bool) {
         auto const offsetLo = selectedOffset - threshold;
         auto const offsetHi = selectedOffset + threshold;
 
+        // Aged-out stations are not on the air and must not claim a
+        // clicked decode: this result becomes the directed-reply target,
+        // so an unfiltered match would address a transmission to a
+        // station last heard weeks ago. The store keeps rows
+        // indefinitely, so the filter lives here as it does in the
+        // table's own render (unread senders stay exempt).
+        auto const aging = m_config.callsign_aging();
+        auto const now = DriftingDateTime::currentDateTimeUtc();
+
         for (auto const &key : keys) {
             if (auto const &d = m_callActivity[key];
                 offsetLo <= d.offset && d.offset <= offsetHi) {
+                if (aging && m_rxInboxCountCache.value(d.call, 0) <= 0 &&
+                    d.utcTimestamp.isValid() &&
+                    d.utcTimestamp.secsTo(now) / 60 >= aging) {
+                    // the best match for this offset has aged out:
+                    // select nothing rather than silently substituting a
+                    // neighbouring station, which would then receive the
+                    // directed reply (or the Remove/Block action)
+                    return QString();
+                }
                 return d.call;
             }
         }
@@ -6066,6 +7147,11 @@ void UI_Constructor::processActivity(bool force) {
         return;
     }
 
+    // one transaction for the whole drain: the rx AND command handlers
+    // persist a row per station heard, and a busy cycle would otherwise
+    // pay one autocommit per row
+    beginActivityBatch();
+
     // Recent Rx Activity
     processRxActivity();
 
@@ -6083,6 +7169,8 @@ void UI_Constructor::processActivity(bool force) {
 
     // Process PSKReporter Spots
     processSpots();
+
+    endActivityBatch();
 
     m_rxDirty = false;
 }
@@ -6240,6 +7328,9 @@ QString UI_Constructor::inboxPath() {
 void UI_Constructor::refreshInboxCounts() {
     auto inbox = Inbox(inboxPath());
     if (inbox.open()) {
+        // one transaction for the whole sender fan-out (each synthesized
+        // sender persists through logCallActivity)
+        beginActivityBatch();
         // reset inbox counts
         m_rxInboxCountCache.clear();
 
@@ -6265,10 +7356,10 @@ void UI_Constructor::refreshInboxCounts() {
                 auto const snr = params.value("SNR").toInt();
                 auto const dial = params.value("DIAL").value<Frequency>();
                 auto const offset = params.value("OFFSET").toInt();
-                auto const tdrift = params.value("TDRIFT").toInt();
+                auto const tdrift = params.value("TDRIFT").toFloat();
                 auto const submode = params.value("SUBMODE").toInt();
 
-                CallDetail cd;
+                CallDetail cd = {};
                 cd.call = from;
                 cd.snr = snr;
                 cd.dial = dial;
@@ -6288,6 +7379,8 @@ void UI_Constructor::refreshInboxCounts() {
         foreach (auto key, groupMessageCounts.keys()) {
             m_rxInboxCountCache[key] = groupMessageCounts[key];
         }
+
+        endActivityBatch();
     }
 }
 

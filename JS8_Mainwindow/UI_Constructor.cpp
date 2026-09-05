@@ -815,13 +815,13 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             return;
         }
 
-        clearActivity();
+        on_actionClear_All_Activity_triggered();
     });
 
     // setup tablewidget context menus
     auto clearAction1 = new QAction(QString("Clear"), ui->textEditRX);
     connect(clearAction1, &QAction::triggered, this,
-            [this]() { clearRXActivity(); });
+            [this]() { on_actionClear_RX_Activity_triggered(); });
 
     auto saveAction = new QAction(QString("Save As..."), ui->textEditRX);
     connect(saveAction, &QAction::triggered, this, [this]() {
@@ -850,6 +850,33 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             stream << text;
         }
     });
+
+    // Debounced write-on-change persistence of the RX text pane to
+    // activity.db3: any change (re)arms a short single-shot timer, so the
+    // stored copy trails the pane by at most a few seconds instead of
+    // being written only at shutdown. The second timer is armed once and
+    // NOT restarted by further changes: sustained sub-interval traffic
+    // (fast submodes, busy nets) would otherwise re-arm the debounce
+    // faster than it can fire, deferring the write - and growing the
+    // crash-loss window - indefinitely.
+    m_rxTextSaveTimer.setSingleShot(true);
+    m_rxTextSaveTimer.setInterval(5000);
+    m_rxTextSaveMaxTimer.setSingleShot(true);
+    m_rxTextSaveMaxTimer.setInterval(30000);
+    auto const flushRxText = [this]() {
+        m_rxTextSaveTimer.stop();
+        m_rxTextSaveMaxTimer.stop();
+        saveRxTextForBand(m_activityBand);
+    };
+    connect(&m_rxTextSaveTimer, &QTimer::timeout, this, flushRxText);
+    connect(&m_rxTextSaveMaxTimer, &QTimer::timeout, this, flushRxText);
+    connect(ui->textEditRX->document(), &QTextDocument::contentsChanged, this,
+            [this]() {
+                m_rxTextSaveTimer.start();
+                if (!m_rxTextSaveMaxTimer.isActive()) {
+                    m_rxTextSaveMaxTimer.start();
+                }
+            });
 
     ui->textEditRX->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(
@@ -1078,7 +1105,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     auto clearAction4 =
         new QAction(QString("Clear Entire List"), ui->tableWidgetCalls);
     connect(clearAction4, &QAction::triggered, this,
-            [this]() { clearCallActivity(); });
+            [this]() { on_actionClear_Call_Activity_triggered(); });
 
     auto addStation = new QAction(QString("Add New Station or Group..."),
                                   ui->tableWidgetCalls);
@@ -1107,9 +1134,15 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
         } else {
             if (Varicode::isValidCallsign(callsign, nullptr)) {
-                CallDetail cd = {};
-                cd.call = callsign;
-                m_callActivity[callsign] = cd;
+                if (!m_callActivity.contains(callsign)) {
+                    // adding a callsign that is already listed is a
+                    // no-op - overwriting would blank the entry (and
+                    // the store deliberately ignores a blank re-add)
+                    CallDetail cd = {};
+                    cd.call = callsign;
+                    m_callActivity[callsign] = cd;
+                    persistCallActivity(cd, true); // manual add: current band
+                }
             } else {
                 JS8MessageBox::critical_message(
                     this, QString("%1 is not a valid callsign or group")
@@ -1133,7 +1166,32 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         } else if (selectedCall.startsWith("@")) {
             m_config.removeGroup(selectedCall);
         } else if (m_callActivity.contains(selectedCall)) {
+            // Bucket-scoped: only the on-screen bucket's stored row is
+            // deleted. A row the same station holds on another band is
+            // that band's history, which this context cannot see and
+            // must not destroy; an unread inbox sender reappears
+            // regardless, re-synthesized from inbox.db3. Rows are
+            // stored under the trimmed callsign.
             m_callActivity.remove(selectedCall);
+            if (!m_activityStoreDisabled && m_activityBandLoaded &&
+                !activityDB()->deleteCall(activityConfigId(),
+                                          m_activityBand,
+                                          selectedCall.trimmed())) {
+                // the row would reappear at the next visit to this band,
+                // so say so rather than letting it look removed
+                // false also means "matched nothing": the row is filed
+                // under the band it was heard on, which this bucket's
+                // clear cannot reach
+                auto const why = activityDB()->error();
+                showStatusMessage(
+                    why.isEmpty()
+                        ? tr("%1 is stored under another band and will "
+                             "return there")
+                              .arg(selectedCall)
+                        : tr("Could not remove %1 from stored activity "
+                             "(%2)")
+                              .arg(selectedCall, why));
+            }
         }
 
         displayActivity(true);

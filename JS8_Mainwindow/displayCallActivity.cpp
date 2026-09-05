@@ -97,16 +97,31 @@ void UI_Constructor::displayCallActivity() {
                     return lhs < rhs;
             };
 
-        auto const compareTimestamp = [this](QString const &lhsKey,
-                                             QString const &rhsKey) {
-            return m_callActivity[lhsKey].utcTimestamp <
-                   m_callActivity[rhsKey].utcTimestamp;
+        // Order invalid timestamps explicitly as oldest. Rows carrying
+        // none are routine now that stored activity is loaded (manually
+        // added stations, legacy-imported rows), and std::stable_sort
+        // requires a strict weak ordering: leaving the outcome to
+        // QDateTime's own comparison of invalid values would not
+        // guarantee one.
+        auto const olderThan = [](QDateTime const &lhs,
+                                  QDateTime const &rhs) {
+            if (!lhs.isValid()) return rhs.isValid();
+            if (!rhs.isValid()) return false;
+            return lhs < rhs;
         };
 
-        auto const compareAckTimestamp = [this](QString const &lhsKey,
-                                                QString const &rhsKey) {
-            return m_callActivity[rhsKey].ackTimestamp <
-                   m_callActivity[lhsKey].ackTimestamp;
+        auto const compareTimestamp = [this, olderThan](
+                                          QString const &lhsKey,
+                                          QString const &rhsKey) {
+            return olderThan(m_callActivity[lhsKey].utcTimestamp,
+                             m_callActivity[rhsKey].utcTimestamp);
+        };
+
+        auto const compareAckTimestamp = [this, olderThan](
+                                             QString const &lhsKey,
+                                             QString const &rhsKey) {
+            return olderThan(m_callActivity[rhsKey].ackTimestamp,
+                             m_callActivity[lhsKey].ackTimestamp);
         };
 
         auto const compareSNR =
@@ -188,6 +203,14 @@ void UI_Constructor::displayCallActivity() {
                          });
 
         int callsignAging = m_config.callsign_aging();
+
+        // Stations whose grid the logbook backfill filled in below. The
+        // render pass itself must not touch the database - it runs
+        // several times a decode period - so the writes are deferred to
+        // a single batch after the loop, and a pass that backfills
+        // nothing does no database work at all.
+        QStringList backfilledGrids;
+
         foreach (QString call, keys) {
             if (call.trimmed().isEmpty()) {
                 continue;
@@ -348,12 +371,17 @@ void UI_Constructor::displayCallActivity() {
                                               logDetailComment);
                 }
 
-                if (gridItemEmpty && !logDetailGrid.isEmpty()) {
-                    gridItem->setText(logDetailGrid.trimmed().left(4));
-                    gridItem->setToolTip(logDetailGrid.trimmed());
+                // guard on the trimmed grid: a whitespace-only GRIDSQUARE
+                // in the ADIF would otherwise pass the check, store an
+                // empty grid, and re-enter this branch - with its
+                // synchronous persist - on every display pass
+                auto const logGrid = logDetailGrid.trimmed();
+                if (gridItemEmpty && !logGrid.isEmpty()) {
+                    gridItem->setText(logGrid.left(4));
+                    gridItem->setToolTip(logGrid);
 
                     auto const vector =
-                        Geodesic::vector(m_config.my_grid(), d.grid);
+                        Geodesic::vector(m_config.my_grid(), logGrid);
                     auto const units = !showColumn("call", "labels");
 
                     distanceItem->setText(
@@ -362,9 +390,13 @@ void UI_Constructor::displayCallActivity() {
                     if (auto const azimuth = vector.azimuth())
                         azimuthItem->setToolTip(azimuth.compass().toString());
 
-                    // update the call activity cache with the loaded grid
+                    // update the call activity cache with the loaded
+                    // grid and note the station for the deferred write
+                    // below, so the persist happens once per pass
+                    // rather than once per row inside the render
                     if (m_callActivity.contains(d.call)) {
-                        m_callActivity[call].grid = logDetailGrid.trimmed();
+                        m_callActivity[d.call].grid = logGrid;
+                        backfilledGrids.append(d.call);
                     }
                 }
 
@@ -437,6 +469,20 @@ void UI_Constructor::displayCallActivity() {
                         QBrush(m_config.color_primary_highlight()));
                 }
             }
+        }
+
+        // Persist the logbook grid backfills, if there were any. Fall
+        // back to the current band so the backfill also persists for
+        // manually added (dial-less) stations instead of silently
+        // reverting every restart. One transaction covers the lot; a
+        // pass with nothing to backfill opens none, and so never
+        // reaches the store from inside a repaint.
+        if (!backfilledGrids.isEmpty()) {
+            beginActivityBatch();
+            foreach (QString const &backfilled, backfilledGrids) {
+                persistCallActivity(m_callActivity.value(backfilled), true);
+            }
+            endActivityBatch();
         }
 
         // Set table color

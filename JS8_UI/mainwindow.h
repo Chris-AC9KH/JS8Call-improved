@@ -12,6 +12,7 @@
 #include "JS8_JSC/JSC_checker.h"
 #include "JS8_Logbook/LogBook.h"
 #include "JS8_Main/APRSISClient.h"
+#include "JS8_Main/ActivityDB.h"
 #include "JS8_Main/AprsInboundRelay.h"
 #include "JS8_Main/Bands.h"
 #include "JS8_Main/DirectedMessageHighlighter.h"
@@ -103,6 +104,7 @@
 #include <QStyleFactory>
 #include <QtCore/QtGlobal>
 #include <QTableWidget>
+#include <QTextDocumentFragment>
 #include <QTextEdit>
 #include <QThread>
 #include <QTime>
@@ -112,6 +114,7 @@
 #include <QToolTip>
 #include <QUdpSocket>
 #include <QUrl>
+#include <QUuid>
 #include <QVariant>
 #include <QVector>
 #include <QVersionNumber>
@@ -127,6 +130,7 @@
 #include <cstring>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string_view>
@@ -251,6 +255,7 @@ class UI_Constructor : public QMainWindow {
     void logHeardGraph(QString from, QString to);
     QString lookupCallInCompoundCache(QString const &call);
     void cacheActivity(QString key);
+    void switchActivityBucket(QString const &band);
     void restoreActivity(QString key);
     void clearActivity();
     void clearBandActivity();
@@ -593,6 +598,76 @@ class UI_Constructor : public QMainWindow {
     Frequency m_lastDialFreq;
     QString m_lastBand;
 
+    // per-band persistent activity storage (activity.db3) - issue #267
+    std::unique_ptr<ActivityDB> m_activityDB;
+    QElapsedTimer m_activityDBRetryTimer; // throttles reopen attempts
+    // The storage bucket the on-screen call activity / RX text belongs
+    // to: a band name, or "" - the out-of-plan bucket, which persists
+    // activity heard on dials outside the band plan (transverter IFs,
+    // channelized operation) the way the legacy un-banded ini did.
+    // Usually this equals m_lastBand, but at startup the panes are
+    // preloaded from the last-known dial before the rig has reported
+    // one, and that data must be flushed to - and cleared as - the
+    // bucket it was loaded from, not whatever the rig later reports.
+    QString m_activityBand;
+    bool m_activityBandLoaded = false; // false until the first restore
+    // Buckets whose stored rows have been seeded into the session's RAM
+    // caches. Seeding happens once per bucket per session; until it has
+    // succeeded, RX-text saves for that bucket are suppressed - the
+    // on-screen document does not contain the stored history, so saving
+    // it would overwrite (or, empty, delete) that history.
+    QSet<QString> m_activitySeeded;
+    // Degraded start: the store was down, so readSettings showed the
+    // legacy ini copy in the RX pane. That copy is history the one-time
+    // import already banked - only text BELOW it is session text. These
+    // mark which bucket shows it and how many blocks it spans, so the
+    // recovery seed and the close-time sweep never merge a second copy
+    // of the history behind the stored one.
+    QString m_rxTextLegacyBand;
+    int m_rxTextLegacyBlocks = 0;
+    // Depth counter so nested write bursts (a decode drain that calls
+    // refreshInboxCounts, say) share one transaction.
+    int m_activityBatchDepth = 0;
+    // Bands whose latest RX text never reached the store (a flush failed
+    // while the store was down): restores re-arm their saves and
+    // closeEvent sweeps the stragglers from the RAM band cache.
+    QSet<QString> m_rxTextDirtyBands;
+    // Set when a requested startup reset could not be applied: nothing
+    // is read or written for the rest of the session, so the panes stay
+    // as empty as the user asked and no write of this session can be
+    // destroyed by the wipe that retries at the next start.
+    bool m_activityStoreDisabled = false;
+    // Set in closeEvent: suppresses the seed retry that a final flush
+    // would otherwise trigger while the window is tearing down.
+    bool m_activityShuttingDown = false;
+    // False until the rig has actually reported a band (or the startup
+    // grace period lapses, covering Rig=None). While false the storage
+    // bucket is only the last session's guess, so RX text - which has no
+    // per-line frequency - must not be filed under it.
+    bool m_activityBandConfirmed = false;
+    // Buckets the rig has actually reported this session. The close-time
+    // sweep writes only these: a bucket that was never confirmed holds a
+    // pane that may contain text heard on a different band.
+    QSet<QString> m_activityBandConfirmedBands;
+    QElapsedTimer m_activityStartupTimer;
+    QElapsedTimer m_seedRetryTimer; // throttles failed-seed retries
+    QTimer m_rxTextSaveTimer; // debounces RX-text writes to activity.db3
+    // Cap on the debounce: sustained sub-interval document changes (busy
+    // nets, fast submodes) restart m_rxTextSaveTimer indefinitely, so this
+    // timer - armed once and not restarted - bounds how stale the stored
+    // copy can get.
+    QTimer m_rxTextSaveMaxTimer;
+    // Storage id captured at first use: MultiSettings updates its
+    // current configuration BEFORE this window closes during a
+    // configuration switch, so reading it at close time would file the
+    // outgoing configuration's activity under the incoming one.
+    mutable QString m_activityConfigId;
+    // Skip unchanged RX-text rewrites via the document's revision
+    // counter - unlike hashing toHtml(), checking it costs nothing, so
+    // an idle debounce tick never serializes the (unbounded) document.
+    int m_rxTextLastSavedRevision = -1;
+    QString m_rxTextLastSavedBand;
+
     Detector *m_detector;
     unsigned m_FFTSize;
     SoundInput *m_soundInput;
@@ -910,11 +985,16 @@ class UI_Constructor : public QMainWindow {
 
     QMap<QString, int> m_rxInboxCountCache; // call -> count
 
+    // The RAM band caches remain the session's display layer, exactly as
+    // on master: band round-trips restore the panes verbatim, with or
+    // without a working store. activity.db3 sits underneath as a
+    // write-through store plus a once-per-session seed of each bucket's
+    // history (see seedActivityForBand).
     QMap<QString, QMap<QString, CallDetail>>
-        m_callActivityBandCache; // band -> call activity
+        m_callActivityBandCache; // bucket -> call activity
+    QMap<QString, QString> m_rxTextBandCache; // bucket -> rx text
     QMap<QString, QMap<int, QList<ActivityDetail>>>
         m_bandActivityBandCache;              // band -> band activity
-    QMap<QString, QString> m_rxTextBandCache; // band -> rx text
     QMap<QString, QMap<QString, QSet<QString>>>
         m_heardGraphOutgoingBandCache; // band -> heard in
     QMap<QString, QMap<QString, QSet<QString>>>
@@ -1041,6 +1121,26 @@ class UI_Constructor : public QMainWindow {
     QString hbBlockingPath() const;
     void pushNotificationHandler(); // JS8_Mainwindow/pushNotificationHandler.cpp
     QString msgNotifyPath() const;
+
+    // per-band persistent activity storage (activity.db3) - issue #267
+    QString activityPath() const;
+    ActivityDB *activityDB();
+    QString activityConfigId() const;
+    void persistCallActivity(CallDetail const &,
+                             bool fallbackToCurrentBand = false);
+    // single conversion pair, so a CallDetail field added later fails to
+    // persist/restore loudly at the one site instead of silently in
+    // hand-copied blocks
+    ActivityDB::CallRecord toCallRecord(CallDetail const &) const;
+    CallDetail fromCallRecord(ActivityDB::CallRecord const &) const;
+    void seedActivityForBand(QString const &band);
+    QString htmlBelowLegacyCopy(QTextDocument *doc) const;
+    void purgeLegacyActivityIni();
+    void beginActivityBatch();
+    void startActivityBatchIfPending();
+    void endActivityBatch();
+    void saveRxTextForBand(QString const &band);
+    bool importLegacyActivityIfNeeded();
     void removeStoredMessageNotification(int msgId);
     void refreshInboxCounts();
     bool hasMessageHistory(QString call);

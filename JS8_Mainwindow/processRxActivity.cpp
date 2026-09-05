@@ -17,6 +17,10 @@ void UI_Constructor::processRxActivity() {
     qCDebug(mainwindow_js8)
         << m_messageBuffer.count() << "message buffers open";
 
+    // one transaction for the whole drain - each logged station persists,
+    // and a busy cycle would otherwise pay one autocommit per row
+    beginActivityBatch();
+
     while (!m_rxActivityQueue.isEmpty()) {
         ActivityDetail d = m_rxActivityQueue.dequeue();
 
@@ -147,6 +151,8 @@ void UI_Constructor::processRxActivity() {
             m_rxFrameBlockNumbers.remove(d.offset);
         }
     }
+
+    endActivityBatch();
 
 #if 0
     // TODO: this works but should also print in the rx window.
