@@ -4,7 +4,7 @@
  * Handles autoreply confirmation via both local UI notification and
  * the network API, ensuring the operator and external clients are
  * kept in sync on pending autoreply transmissions.
- * @ingroup API Network Message API
+ * @ingroup API
  */
 
 #include "../JS8_UI/mainwindow.h"

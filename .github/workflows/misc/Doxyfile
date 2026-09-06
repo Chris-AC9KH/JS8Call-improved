@@ -1,4 +1,52 @@
-# Doxyfile 1.9.8
+# Doxyfile 1.16.0
+
+# JS8Call changes to defaults
+PROJECT_NAME           = "JS8Call-Improved"
+
+# We pass the project number in via the CI build system
+PROJECT_NUMBER         = 
+PROJECT_LOGO           = artwork/icon_128.svg
+IMAGE_PATH             = docs/user_guide/
+
+# Don't change this, GitHub-pages will break
+OUTPUT_DIRECTORY       = docs
+
+# This has to be YES
+CREATE_SUBDIRS         = YES
+RECURSIVE              = YES
+
+# Adjusted per doxygen output
+LOOKUP_CACHE_SIZE      = 1
+
+# Timestamp the pages by date
+TIMESTAMP              = DATE
+
+# The defines.dox contains grouping commands and such
+INPUT = docs/build_for_Linux.md docs/build_for_MacOS.md docs/build_for_Windows.md \
+        docs/CONTRIBUTOR_GUIDE.md docs/user_guide/JS8Call_User_Guide.md \
+        docs/API.md docs/defines.dox .
+
+# Exclude vendor directory(eigen, sqlite3, and crc) and the docker directory
+EXCLUDE                = vendor docker
+
+# The main page to use
+USE_MDFILE_AS_MAINPAGE = README.md
+
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+DIR_GRAPH_MAX_DEPTH    = 2
+
+# This might change, need user input on if it's worth the extra screen space used
+GENERATE_TREEVIEW      = YES
+
+# No need to use LaTeX
+GENERATE_LATEX         = NO
+
+# Default is NO, reminder for wmiler
+GENERATE_XML           = NO
+
+# JS8Call below here should be all Doxygen defaults
+
 
 # This file describes the settings to be used by the documentation system
 # doxygen (www.doxygen.org) for a project.
@@ -23,8 +71,6 @@
 # replacement variables:
 # doxygen -x_noenv [configFile]
 
-# For things we have changed, you can search on "js8call"
-
 #---------------------------------------------------------------------------
 # Project related configuration options
 #---------------------------------------------------------------------------
@@ -43,15 +89,12 @@ DOXYFILE_ENCODING      = UTF-8
 # project for which the documentation is generated. This name is used in the
 # title of most generated pages and in a few other places.
 # The default value is: My Project.
-# js8call Our change
-PROJECT_NAME           = "JS8Call-Improved"
 
 # The PROJECT_NUMBER tag can be used to enter a project or revision number. This
 # could be handy for archiving the generated documentation or if some version
 # control system is used.
-# js8call We pass this in via the CI build system
 
-PROJECT_NUMBER         = 
+# PROJECT_NUMBER         = 
 
 # Using the PROJECT_BRIEF tag one can provide an optional one line description
 # for a project that appears at the top of each page and should give viewer a
@@ -63,17 +106,12 @@ PROJECT_BRIEF          =
 # in the documentation. The maximum height of the logo should not exceed 55
 # pixels and the maximum width should not exceed 200 pixels. Doxygen will copy
 # the logo to the output directory.
-# js8call Our change
 
-PROJECT_LOGO           = artwork/icon_128.svg
 
 # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute) path
 # into which the generated documentation will be written. If a relative path is
 # entered, it will be relative to the location where doxygen was started. If
 # left blank the current directory will be used.
-# js8call Don't change this, GitHub-pages will break
-
-OUTPUT_DIRECTORY       = docs
 
 # If the CREATE_SUBDIRS tag is set to YES then doxygen will create up to 4096
 # sub-directories (in 2 levels) under the output directory of each output format
@@ -83,9 +121,6 @@ OUTPUT_DIRECTORY       = docs
 # performance problems for the file system. Adapt CREATE_SUBDIRS_LEVEL to
 # control the number of sub-directories.
 # The default value is: NO.
-# js8call After refactoring, this has to be YES
-
-CREATE_SUBDIRS         = YES
 
 # Controls the number of sub-directories that will be created when
 # CREATE_SUBDIRS tag is set to YES. Level 0 represents 16 directories, and every
@@ -488,9 +523,6 @@ TYPEDEF_HIDES_STRUCT   = NO
 # symbols. At the end of a run doxygen will report the cache usage and suggest
 # the optimal cache size from a speed point of view.
 # Minimum value: 0, maximum value: 9, default value: 0.
-# js8call Our change, adjusted per doxygen output
-
-LOOKUP_CACHE_SIZE      = 1
 
 # The NUM_PROC_THREADS specifies the number of threads doxygen is allowed to use
 # during processing. When set to 0 doxygen will based this on the number of
@@ -510,9 +542,6 @@ NUM_PROC_THREADS       = 1
 # NO can help when comparing the output of multiple runs.
 # Possible values are: YES, NO, DATETIME and DATE.
 # The default value is: NO.
-# js8call Our change
-
-TIMESTAMP              = DATE
 
 #---------------------------------------------------------------------------
 # Build related configuration options
@@ -950,11 +979,6 @@ WARN_LOGFILE           =
 # directories like /usr/src/myproject. Separate the files or directories with
 # spaces. See also FILE_PATTERNS and EXTENSION_MAPPING
 # Note: If this tag is empty the current directory is searched.
-# js8call Our change
-
-INPUT = docs/build_for_Linux.md docs/build_for_MacOS.md docs/build_for_Windows.md \
-        docs/CONTRIBUTOR_GUIDE.md docs/user_guide/JS8Call_User_Guide.md \
-        docs/API.md .
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -1048,9 +1072,6 @@ FILE_PATTERNS          = *.c \
 # The RECURSIVE tag can be used to specify whether or not subdirectories should
 # be searched for input files as well.
 # The default value is: NO.
-# js8call Our change, needed after the refactor
-
-RECURSIVE              = YES
 
 # The EXCLUDE tag can be used to specify files and/or directories that should be
 # excluded from the INPUT source files. This way you can easily exclude a
@@ -1058,9 +1079,6 @@ RECURSIVE              = YES
 #
 # Note that relative paths are relative to the directory from which doxygen is
 # run.
-# js8call Our change, exclude vendor directory(eigen, sqlite3, and crc) and the docker directory
-
-EXCLUDE                = vendor docker
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded
@@ -1109,8 +1127,6 @@ EXAMPLE_RECURSIVE      = NO
 # The IMAGE_PATH tag can be used to specify one or more files or directories
 # that contain images that are to be included in the documentation (see the
 # \image command).
-
-IMAGE_PATH             = docs/user_guide/
 
 # The INPUT_FILTER tag can be used to specify a program that doxygen should
 # invoke to filter for each input file. Doxygen will invoke the filter program
@@ -1170,9 +1186,6 @@ FILTER_SOURCE_PATTERNS =
 # is part of the input, its contents will be placed on the main page
 # (index.html). This can be useful if you have a project on for instance GitHub
 # and want to reuse the introduction page also for the doxygen output.
-# js8call Our change
-
-USE_MDFILE_AS_MAINPAGE = README.md
 
 # The Fortran standard specifies that for fixed formatted Fortran code all
 # characters from position 72 are to be considered as comment. A common
@@ -1278,7 +1291,7 @@ VERBATIM_HEADERS       = YES
 # generated with the -Duse_libclang=ON option for CMake.
 # The default value is: NO.
 
-CLANG_ASSISTED_PARSING = NO
+# CLANG_ASSISTED_PARSING = NO
 
 # If the CLANG_ASSISTED_PARSING tag is set to YES and the CLANG_ADD_INC_PATHS
 # tag is set to YES then doxygen will add the directory of each input to the
@@ -1286,7 +1299,7 @@ CLANG_ASSISTED_PARSING = NO
 # The default value is: YES.
 # This tag requires that the tag CLANG_ASSISTED_PARSING is set to YES.
 
-CLANG_ADD_INC_PATHS    = YES
+# CLANG_ADD_INC_PATHS    = NO
 
 # If clang assisted parsing is enabled you can provide the compiler with command
 # line options that you would normally use when invoking the compiler. Note that
@@ -1294,7 +1307,7 @@ CLANG_ADD_INC_PATHS    = YES
 # specified with INPUT and INCLUDE_PATH.
 # This tag requires that the tag CLANG_ASSISTED_PARSING is set to YES.
 
-CLANG_OPTIONS          =
+# CLANG_OPTIONS          =
 
 # If clang assisted parsing is enabled you can provide the clang parser with the
 # path to the directory containing a file called compile_commands.json. This
@@ -1307,7 +1320,7 @@ CLANG_OPTIONS          =
 # Note: The availability of this option depends on whether or not doxygen was
 # generated with the -Duse_libclang=ON option for CMake.
 
-CLANG_DATABASE_PATH    =
+# CLANG_DATABASE_PATH    =
 
 #---------------------------------------------------------------------------
 # Configuration options related to the alphabetical class index
@@ -1741,9 +1754,6 @@ DISABLE_INDEX          = NO
 # consider setting DISABLE_INDEX to YES when enabling this option.
 # The default value is: NO.
 # This tag requires that the tag GENERATE_HTML is set to YES.
-# js8call Our change
-
-GENERATE_TREEVIEW      = YES
 
 # When both GENERATE_TREEVIEW and DISABLE_INDEX are set to YES, then the
 # FULL_SIDEBAR option determines if the side bar is limited to only the treeview
@@ -1982,9 +1992,6 @@ EXTRA_SEARCH_MAPPINGS  =
 
 # If the GENERATE_LATEX tag is set to YES, doxygen will generate LaTeX output.
 # The default value is: YES.
-# js8call Our change, no need to use LaTeX at this point
-
-GENERATE_LATEX         = NO
 
 # The LATEX_OUTPUT tag is used to specify where the LaTeX docs will be put. If a
 # relative path is entered the value of OUTPUT_DIRECTORY will be put in front of
@@ -2268,7 +2275,7 @@ MAN_LINKS              = NO
 # captures the structure of the code including all documentation.
 # The default value is: NO.
 
-GENERATE_XML           = NO
+# GENERATE_XML           = NO
 
 # The XML_OUTPUT tag is used to specify where the XML pages will be put. If a
 # relative path is entered the value of OUTPUT_DIRECTORY will be put in front of
@@ -2697,9 +2704,6 @@ INCLUDED_BY_GRAPH      = YES
 # accomplished by means of the command \hidecallgraph.
 # The default value is: NO.
 # This tag requires that the tag HAVE_DOT is set to YES.
-# js8call Our change
-
-CALL_GRAPH             = YES
 
 # If the CALLER_GRAPH tag is set to YES then doxygen will generate a caller
 # dependency graph for every global function or class method.
@@ -2710,9 +2714,6 @@ CALL_GRAPH             = YES
 # accomplished by means of the command \hidecallergraph.
 # The default value is: NO.
 # This tag requires that the tag HAVE_DOT is set to YES.
-# js8call Our change
-
-CALLER_GRAPH           = YES
 
 # If the GRAPHICAL_HIERARCHY tag is set to YES then doxygen will graphical
 # hierarchy of all classes instead of a textual one.
@@ -2737,9 +2738,6 @@ DIRECTORY_GRAPH        = YES
 # of child directories generated in directory dependency graphs by dot.
 # Minimum value: 1, maximum value: 25, default value: 1.
 # This tag requires that the tag DIRECTORY_GRAPH is set to YES.
-# js8call Our change
-
-DIR_GRAPH_MAX_DEPTH    = 2
 
 # The DOT_IMAGE_FORMAT tag can be used to set the image format of the images
 # generated by dot. For an explanation of the image formats see the section

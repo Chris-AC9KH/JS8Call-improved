@@ -1,0 +1,9 @@
+/**
+ * This file contains doxygen commands for defining groups and what not.
+ * Add additional things as needed.
+ */
+
+/**
+ * @defgroup API Network Message API
+ * @brief All API related docs
+ */

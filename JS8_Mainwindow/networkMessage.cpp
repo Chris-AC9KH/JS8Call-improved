@@ -3,7 +3,8 @@
  * @brief member function of the UI_Constructor class
  * API commands for external control and data retrieval.
  * sends data to external clients via the Network Message API
- * defgroup API Network Message API
+ * @addtogroup API
+ * @{
  */
 
 #include "JS8_UI/mainwindow.h"

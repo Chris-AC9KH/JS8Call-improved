@@ -245,7 +245,7 @@ The center incoming message pane shows you messages that are either on the frequ
 
 You type into the message composition box on the bottom to prepare a message for transmission.
 
-Normal FT8 character restrictions **do not** apply! The extended character set includes all printable uppercase ASCII ```(A-Z 0-9 Space ./?+-`~!@#$%^&*()_={}[]|;':",<>)``` and Latin 1 ```(¡¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ)```. The message structure is variable encoded, so the most common characters take the least amount of space, and special characters take longer to send.
+Normal FT8 character restrictions **do not** apply! The extended character set includes all printable uppercase ASCII ```(A-Z 0-9 Space ./?+-\`~!@#$%^&*()_={}[]|;':",<>)``` and Latin 1 ```(¡¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ)```. The message structure is variable encoded, so the most common characters take the least amount of space, and special characters take longer to send.
 
 As you type your message you'll see the send button display the transmission time it'll take to send your complete message. All you have to do is click send (or hit enter) to start transmitting on the next interval. As each frame is transmitted one after the other, the button will update with the amount of time left to transmit the message. JS8Call 2.0 supports typeahead, so you can start transmitting and continue typing your message as each frame is transmitted. Checksummed messages like MSG or Relays cannot use typeahead.
 
