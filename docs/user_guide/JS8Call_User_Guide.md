@@ -28,8 +28,6 @@ To save an offline copy of the User Guide as PDF download from [here](https://js
 
 Read more on the original [design inspiration here.](https://github.com/jsherer/ft8call)
 
-For release announcements and discussion, join the JS8Call mailing list here: [https://groups.io/g/js8Call](https://groups.io/g/js8call)
-
 <hr>
 
 <center><img src="JS8Call_User_Guide_html_4c60ef75.jpg" style="width:5.1866in;height:3.7374in">
@@ -548,7 +546,7 @@ You might notice a few of these being close to the JT9 frequencies. Don't grab y
 
 But also, please keep in mind these are only *suggested* frequencies. We all have VFOs, so please use them. Just remember to be good operators and prevent from interfering with other signals on our shared bands.
 
-You **CAN** type in any frequency. JS8Call will not limit which frequencies you can manually transmit on. You can use the groups.io mailing list to schedule on other frequencies with test operators.
+You **CAN** type in any frequency. JS8Call will not limit which frequencies you can manually transmit on. You can use the js8call-improved mailing list to schedule on other frequencies with test operators.
 
 If you want to transmit on a non-standard frequency (recommended) you can either modify the frequencies list in the settings, or you can type directly into the band dropdown box in the top left of the screen.
 
@@ -874,7 +872,7 @@ via [https://sourceforge.net/p/wsjt/mailman/message/36224507/](https://sourcefor
 
 ## Troubleshooting
 
-If you're having trouble, head over to the troubleshooting chatroom for help: [JS8Call email list](https://js8call.groups.io/g/main), [Github Discussions](https://github.com/orgs/JS8Call-improved/discussions) or email Jordan directly: [kn4crd@gmail.com](mailto:kn4crd@gmail.com)
+If you're having trouble, head over to the troubleshooting chatroom for help: [JS8Call email list](https://groups.google.com/g/js8call-improved), or [Github Discussions](https://github.com/orgs/JS8Call-improved/discussions)
 
 > [!NOTE]
 > Starting with the 3.0.0 release, there is a new `Diagnostics` tab on the main Settings screen. Information from this sreen may be requested when you are submitting an issue or bug report.
