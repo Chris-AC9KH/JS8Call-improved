@@ -4,15 +4,16 @@
 <tbody>
 <tr class="odd">
 <td><img src="JS8Call_User_Guide_html_e18288a9.png" style="width:0.7465in;height:0.7465in" /></td>
-<td><p><span id="anchor"></span><span id="anchor-1"></span>JS8Call de KN4CRD</p><p>2026-03-12 - v3.0.0
+<td><p><span id="anchor"></span><span id="anchor-1"></span>JS8Call de the JS8Call-improved Team</p><p>2026-09-06 - v4.0
 <!-- TODO: change to User Guide release date following approval and remove 'partially updated' warning below | assignee: @Aqueum --> </p></td>
 </tr>
 </tbody>
 </table>
-<b>This is the User Guide from the repo master and contains items currently in development. We have marked items that have not been released yet.</b>
+<b>This is the User Guide from JS8Call-improved master and contains items currently in development. We have marked items that have not been released yet.</b>
 <hr>
 
 To save an offline copy of the User Guide as PDF download from [here](https://js8call-improved.github.io/downloads/JS8Call_User_Guide.pdf)
+<br> To participate in our online forum, post questions, comments or request support see [here](https://groups.google.com/g/js8call-improved)
 
 <hr>
 
