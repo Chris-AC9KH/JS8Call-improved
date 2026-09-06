@@ -38,81 +38,6 @@ For release announcements and discussion, join the JS8Call mailing list here: [h
 </center>
 </div>
 
-
- ## History
-
-- **July 6, 2017** - The initial idea of using a modification to the FT8 protocol to support long-form QSOs was developed by Jordan, KN4CRD, and submitted to the WSJT-X mailing list: [https://sourceforge.net/p/wsjt/mailman/message/35931540/](https://sourceforge.net/p/wsjt/mailman/message/35931540/)
-
-- **August 31, 2017** - Jordan, KN4CRD, did a little development and modified WSJT-X to support long-form QSOs using the existing FT8 protocol: [https://sourceforge.net/p/wsjt/mailman/message/36020051/](https://sourceforge.net/p/wsjt/mailman/message/36020051/)
-
-  He sent a video example to the WSJT-X group: [https://widefido.wistia.com/medias/7bb1uq62ga](https://widefido.wistia.com/medias/7bb1uq62ga)
-
-- **January 8, 2018** - Jordan, KN4CRD, started working on the design of a long-form QSO application built on top of FT8 with a redesigned interface.
-
-- **February 9, 2018** - Jordan, KN4CRD, submitted question to the WSJT-X group to see if there was any interest in pursuing the idea: [https://sourceforge.net/p/wsjt/mailman/message/36221549/](https://sourceforge.net/p/wsjt/mailman/message/36221549/)
-
-- **February 10, 2018** - Jordan KN4CRD, Julian OH8STN, John N0JDS, and the Portable Digital QRP group did an experiment using FSQ. The idea of FT8Call, combining FT8, long-form QSOs, and FSQCall like features was born.
-
-- **February 11, 2018** - Jordan, KN4CRD, inquired about the idea of integrating long-form messages into WSJT-X: [https://sourceforge.net/p/wsjt/mailman/message/36223372/](https://sourceforge.net/p/wsjt/mailman/message/36223372/)
-
-- **February 12, 2018** - Joe Taylor, K1JT, wrote back: [https://sourceforge.net/p/wsjt/mailman/message/36224507/](https://sourceforge.net/p/wsjt/mailman/message/36224507/) saying no and "Please don't let my comment discourage you from proceeding as you wish, toward something new."
-
-- **March 4, 2018** - Jordan, KN4CRD, published a design document for FT8Call: [https://github.com/jsherer/ft8call](https://github.com/jsherer/ft8call)
-
-- **July 6, 2018** - Version 0.0.1 of FT8Call released to the development group
-
-- **July 15, 2018** - Version 0.1 released - a dozen testers
-
-- **July 21, 2018** - Version 0.2 released - 75 testers
-
-- **July 27, 2018** - Version 0.3 released - 150 testers
-
-- **August 12, 2018** - Version 0.4 released - (["leaked" on QRZ](https://forums.qrz.com/index.php?threads/a-new-ft8-with-qso-and-rag-chew-capabilities-called-ft8call.623882/)) - 500 testers
-
-- **September 2, 2018** - Version 0.5 released - 3000 testers
-
-- **September 14, 2018** - Version 0.6 released - 5000 testers
-
-- **October 8, 2018** - Version 0.7 released - 6000 testers, name changed to JS8 & JS8Call
-
-- **October 31, 2018** - Version 0.8 released - ~7000 testers
-
-- **November 15, 2018** - Version 0.9 released - ~7500 testers
-
-- **November 30, 2018** - Version 0.10 released - ~7800 testers
-
-- **December 18, 2018** - Version 0.11 released - ~8200 testers
-
-- **January 1, 2019** - Version 0.12 released - ~9000 testers
-
-- **January 23, 2019** - Version 0.13 released - ~9250 testers
-
-- **February 7, 2019** - Version 0.14 released - ~9600 testers
-
-- **February 21, 2019** - Version 1.0.0-RC1 released - ~10000 testers
-
-- **March 11, 2019** - Version 1.0.0-RC2 released - >10000 testers
-
-- **March 26, 2019** - Version 1.0.0-RC3 released - >11000 testers
-
-- **April 1, 2019** - Version 1.0.0 general availability - Public Release!
-
-- **June 6, 2019** - Version 1.1.0 general availability
-
-- **November 29, 2019** - Version 2.0.0 general availability - Fast and Turbo speeds introduced!
-
-- **December 22, 2019** - Version 2.1.0 general availability - Slow speed introduced!
-
-- **June 30, 2020** - Version 2.2.0 general availability
-
-- **November 3, 2025** - Version 2.4.0 released as JS8Call-improved, OmniRig deprecated on Windows, Fortran code removed
-  See [Release notes v2.4.0](https://github.com/JS8Call-improved/JS8Call-improved/releases/tag/release%2F2.4.0)
-
-- **January 6, 2026** - Version 2.5.0 released, renamed back to JS8Call. 
-  See [Release notes v2.5.0](https://github.com/JS8Call-improved/JS8Call-improved/releases/tag/release%2F2.5.0)
-
-- **May 17, 2026** - Version 3.0.1 and later, JS8Call is now developed by the JS8Call-improved team with over 17 contributors and has been brought up to modern standards to support the newest versions of Qt and Hamlib. 
-
 ## Notice
 
 JS8Call is a **derivative** of the WSJT-X application, restructured and redesigned for message passing using a custom FSK modulation called JS8. It is not supported by nor endorsed by the WSJT-X development group. While the WSJT-X group maintains copyright over the original work and code, JS8Call is a derivative work licensed under and in accordance with the terms of the [GPLv3 license](https://www.gnu.org/licenses/gpl-3.0.html). The source code modifications are public and can be found in `js8call-improved` repository of this GitHub organisation: [https://github.com/JS8Call-improved](https://github.com/JS8Call-improved)
@@ -1204,3 +1129,77 @@ There are many opportunities to explore reliable messaging in the future with th
 ### (s,c)-Dense Code:
 
 A whitepaper article is being written on this topic. In the meantime, see jsc.h, jsc.cpp, & jsc_map.cpp in the source repository for the complete dense code table.
+
+## History
+
+- **July 6, 2017** - The initial idea of using a modification to the FT8 protocol to support long-form QSOs was developed by Jordan, KN4CRD, and submitted to the WSJT-X mailing list: [https://sourceforge.net/p/wsjt/mailman/message/35931540/](https://sourceforge.net/p/wsjt/mailman/message/35931540/)
+
+- **August 31, 2017** - Jordan, KN4CRD, did a little development and modified WSJT-X to support long-form QSOs using the existing FT8 protocol: [https://sourceforge.net/p/wsjt/mailman/message/36020051/](https://sourceforge.net/p/wsjt/mailman/message/36020051/)
+
+  He sent a video example to the WSJT-X group: [https://widefido.wistia.com/medias/7bb1uq62ga](https://widefido.wistia.com/medias/7bb1uq62ga)
+
+- **January 8, 2018** - Jordan, KN4CRD, started working on the design of a long-form QSO application built on top of FT8 with a redesigned interface.
+
+- **February 9, 2018** - Jordan, KN4CRD, submitted question to the WSJT-X group to see if there was any interest in pursuing the idea: [https://sourceforge.net/p/wsjt/mailman/message/36221549/](https://sourceforge.net/p/wsjt/mailman/message/36221549/)
+
+- **February 10, 2018** - Jordan KN4CRD, Julian OH8STN, John N0JDS, and the Portable Digital QRP group did an experiment using FSQ. The idea of FT8Call, combining FT8, long-form QSOs, and FSQCall like features was born.
+
+- **February 11, 2018** - Jordan, KN4CRD, inquired about the idea of integrating long-form messages into WSJT-X: [https://sourceforge.net/p/wsjt/mailman/message/36223372/](https://sourceforge.net/p/wsjt/mailman/message/36223372/)
+
+- **February 12, 2018** - Joe Taylor, K1JT, wrote back: [https://sourceforge.net/p/wsjt/mailman/message/36224507/](https://sourceforge.net/p/wsjt/mailman/message/36224507/) saying no and "Please don't let my comment discourage you from proceeding as you wish, toward something new."
+
+- **March 4, 2018** - Jordan, KN4CRD, published a design document for FT8Call: [https://github.com/jsherer/ft8call](https://github.com/jsherer/ft8call)
+
+- **July 6, 2018** - Version 0.0.1 of FT8Call released to the development group
+
+- **July 15, 2018** - Version 0.1 released - a dozen testers
+
+- **July 21, 2018** - Version 0.2 released - 75 testers
+
+- **July 27, 2018** - Version 0.3 released - 150 testers
+
+- **August 12, 2018** - Version 0.4 released - (["leaked" on QRZ](https://forums.qrz.com/index.php?threads/a-new-ft8-with-qso-and-rag-chew-capabilities-called-ft8call.623882/)) - 500 testers
+
+- **September 2, 2018** - Version 0.5 released - 3000 testers
+
+- **September 14, 2018** - Version 0.6 released - 5000 testers
+
+- **October 8, 2018** - Version 0.7 released - 6000 testers, name changed to JS8 & JS8Call
+
+- **October 31, 2018** - Version 0.8 released - ~7000 testers
+
+- **November 15, 2018** - Version 0.9 released - ~7500 testers
+
+- **November 30, 2018** - Version 0.10 released - ~7800 testers
+
+- **December 18, 2018** - Version 0.11 released - ~8200 testers
+
+- **January 1, 2019** - Version 0.12 released - ~9000 testers
+
+- **January 23, 2019** - Version 0.13 released - ~9250 testers
+
+- **February 7, 2019** - Version 0.14 released - ~9600 testers
+
+- **February 21, 2019** - Version 1.0.0-RC1 released - ~10000 testers
+
+- **March 11, 2019** - Version 1.0.0-RC2 released - >10000 testers
+
+- **March 26, 2019** - Version 1.0.0-RC3 released - >11000 testers
+
+- **April 1, 2019** - Version 1.0.0 general availability - Public Release!
+
+- **June 6, 2019** - Version 1.1.0 general availability
+
+- **November 29, 2019** - Version 2.0.0 general availability - Fast and Turbo speeds introduced!
+
+- **December 22, 2019** - Version 2.1.0 general availability - Slow speed introduced!
+
+- **June 30, 2020** - Version 2.2.0 general availability
+
+- **November 3, 2025** - Version 2.4.0 released as JS8Call-improved, OmniRig deprecated on Windows, Fortran code removed
+  See [Release notes v2.4.0](https://github.com/JS8Call-improved/JS8Call-improved/releases/tag/release%2F2.4.0)
+
+- **January 6, 2026** - Version 2.5.0 released, renamed back to JS8Call. 
+  See [Release notes v2.5.0](https://github.com/JS8Call-improved/JS8Call-improved/releases/tag/release%2F2.5.0)
+
+- **May 17, 2026** - Version 3.0.1 and later, JS8Call is now developed by the JS8Call-improved team with over 17 contributors and has been brought up to modern standards to support the newest versions of Qt and Hamlib. 
