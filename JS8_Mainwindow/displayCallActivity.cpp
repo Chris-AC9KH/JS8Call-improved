@@ -97,12 +97,7 @@ void UI_Constructor::displayCallActivity() {
                     return lhs < rhs;
             };
 
-        // Order invalid timestamps explicitly as oldest. Rows carrying
-        // none are routine now that stored activity is loaded (manually
-        // added stations, legacy-imported rows), and std::stable_sort
-        // requires a strict weak ordering: leaving the outcome to
-        // QDateTime's own comparison of invalid values would not
-        // guarantee one.
+        // Order invalid timestamps explicitly as oldest.
         auto const olderThan = [](QDateTime const &lhs,
                                   QDateTime const &rhs) {
             if (!lhs.isValid()) return rhs.isValid();
@@ -204,11 +199,7 @@ void UI_Constructor::displayCallActivity() {
 
         int callsignAging = m_config.callsign_aging();
 
-        // Stations whose grid the logbook backfill filled in below. The
-        // render pass itself must not touch the database - it runs
-        // several times a decode period - so the writes are deferred to
-        // a single batch after the loop, and a pass that backfills
-        // nothing does no database work at all.
+        // Stations whose grid the logbook backfill filled in below
         QStringList backfilledGrids;
 
         foreach (QString call, keys) {
@@ -390,10 +381,7 @@ void UI_Constructor::displayCallActivity() {
                     if (auto const azimuth = vector.azimuth())
                         azimuthItem->setToolTip(azimuth.compass().toString());
 
-                    // update the call activity cache with the loaded
-                    // grid and note the station for the deferred write
-                    // below, so the persist happens once per pass
-                    // rather than once per row inside the render
+                    // update the call activity cache
                     if (m_callActivity.contains(d.call)) {
                         m_callActivity[d.call].grid = logGrid;
                         backfilledGrids.append(d.call);
@@ -471,12 +459,7 @@ void UI_Constructor::displayCallActivity() {
             }
         }
 
-        // Persist the logbook grid backfills, if there were any. Fall
-        // back to the current band so the backfill also persists for
-        // manually added (dial-less) stations instead of silently
-        // reverting every restart. One transaction covers the lot; a
-        // pass with nothing to backfill opens none, and so never
-        // reaches the store from inside a repaint.
+        // Persist the logbook grid backfills, if there were any.
         if (!backfilledGrids.isEmpty()) {
             m_activityStorage->beginBatch();
             foreach (QString const &backfilled, backfilledGrids) {

@@ -248,7 +248,7 @@ void UI_Constructor::tryBandHop() {
             m->show();
 
 #if 0
-		  // TODO: jsherer - this is totally a hack because of the signal that gets emitted to clearActivity on band change...
+          // TODO: jsherer - this is totally a hack because of the signal that gets emitted to clearActivity on band change...
           QTimer *t = new QTimer(this);
           t->setInterval(250);
           t->setSingleShot(true);
@@ -321,10 +321,8 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("TimeDrift", DriftingDateTime::drift());
     m_settings->setValue("ShowTooltips", ui->actionShow_Tooltips->isChecked());
     m_settings->setValue("ShowStatusbar", ui->statusBar->isVisible());
-    // RXActivity now lives in activity.db3 (see ActivityDB), written as it
-    // changes. The legacy RXActivity ini key is deliberately no longer
-    // rewritten - older versions of the software can still read whatever
-    // it last held.
+    // RXActivity now lives in activity.db3 (see ActivityDB); the legacy
+    // ini key is left unwritten so older builds can still read it.
 
     m_settings->endGroup();
 
@@ -360,13 +358,9 @@ void UI_Constructor::writeSettings() {
 
     m_settings->endGroup();
 
-    // Call activity now lives in activity.db3 (see ActivityDB), written
-    // row-by-row as stations are heard rather than in bulk at shutdown, so
-    // a crash or SIGKILL no longer loses everything since the last clean
-    // close. The legacy [CallActivity] ini group is deliberately no longer
-    // rewritten - it is imported once (see importLegacyActivityIfNeeded)
-    // and then left in place for older versions of the software, following
-    // the inbox_v1 -> inbox_v2 migration pattern.
+    // Call activity now lives in activity.db3, written row-by-row as
+    // stations are heard; the legacy [CallActivity] group is imported
+    // once (importLegacyActivityIfNeeded) and left unwritten thereafter.
 }
 
 void UI_Constructor::applyPillSettings() {
@@ -395,7 +389,7 @@ void UI_Constructor::readSettings() {
     m_geometryNoControls =
         m_settings->value("geometryNoControls", saveGeometry()).toByteArray();
     restoreState(m_settings->value("state", saveState()).toByteArray());
-    
+
     // If messagePanel is docked ensure that it refreshes on program startup
     if (messagePanel_) {
         QTimer::singleShot(0, messagePanel_, [this]() {
@@ -438,10 +432,8 @@ void UI_Constructor::readSettings() {
     ui->actionShow_Statusbar->setChecked(
         m_settings->value("ShowStatusbar", true).toBool());
     ui->statusBar->setVisible(ui->actionShow_Statusbar->isChecked());
-    // RX text is loaded per-band from activity.db3 once the dial frequency
-    // (and hence the band) is known - see restoreActivity(). Loading
-    // the legacy un-banded RXActivity blob here is what attributed it to
-    // whatever band the rig happened to be polled on at startup (#267).
+    // RX text is loaded per-band once the dial frequency is known - see
+    // restoreActivity() (fixes #267: activity attributed to the wrong band)
     QTimer::singleShot(0, this, [this](){
         ui->textEditRX->verticalScrollBar()->setValue(
             ui->textEditRX->verticalScrollBar()->maximum());
@@ -540,19 +532,13 @@ void UI_Constructor::readSettings() {
         8);
     m_settings->endGroup();
 
-    // Call activity is loaded per-band from activity.db3 instead of being
-    // seeded here from the un-banded legacy [CallActivity] ini group -
-    // seeding it un-banded is what let one band's activity surface on
-    // another at startup (#267). The legacy ini data is imported into the
-    // database once, band-attributed via each record's dial frequency:
+    // Call activity is imported into activity.db3 once, band-attributed by
+    // each record's dial frequency (fixes #267), then loaded per-band.
     bool const activityReady = m_activityStorage->importLegacyActivityIfNeeded();
 
-    // Preload the last-known band's activity so the panes are populated
-    // even before (or without) a rig connection - once the rig reports a
-    // dial frequency, updateCurrentBand() switches to the right band's
-    // data if this guess was wrong. Skipped when a requested reset could
-    // not be applied: better empty panes than a session showing exactly
-    // what the user asked to remove.
+    // Preload the last-known band so the panes have data before (or
+    // without) a rig connection; updateCurrentBand() corrects the guess
+    // once the rig reports. Skipped if a requested reset failed to apply.
     if (activityReady || !m_config.reset_activity()) {
         m_settings->beginGroup("Common");
         auto const dial =
@@ -561,9 +547,8 @@ void UI_Constructor::readSettings() {
                                         Default::DIAL_FREQUENCY))
                 .value<Frequency>();
         m_settings->endGroup();
-        // populate the unread-message counts first: the seed's aging
-        // filter exempts unread senders, and an empty count cache at
-        // this point would age them out of the freshly seeded table
+        // must run before the seed below, or its aging filter won't see
+        // unread senders as exempt
         refreshInboxCounts();
         m_activityStorage->beginStartupGrace();
         restoreActivity(m_config.bands()->find(dial));
@@ -745,14 +730,11 @@ void UI_Constructor::on_actionFocus_Call_Activity_Table_triggered() {
     ui->tableWidgetCalls->setFocus();
 }
 
-// The explicit user-facing Clear actions also drop the matching stored
-// rows from activity.db3. (clearActivity() itself never deletes stored
-// rows - it also runs during band changes, where the outgoing band's
-// stored activity has to survive. Its refreshInboxCounts() call may
-// re-persist unread inbox senders, which is deliberate: unread senders
-// are always shown, and their rows key to their own message's band.)
+// The Clear actions also drop the matching rows from activity.db3;
+// clearActivity() itself never deletes stored rows, since it also runs
+// during ordinary band changes.
 void UI_Constructor::on_actionClear_All_Activity_triggered() {
-    // Deletes every band's stored history permanently, so it asks first.
+    // permanently deletes every band's stored history, so it asks first
     if (QMessageBox::Yes !=
         QMessageBox::question(
             this, tr("Clear All Activity"),
@@ -764,11 +746,8 @@ void UI_Constructor::on_actionClear_All_Activity_triggered() {
         return;
     }
 
-    // "All" spans bands: dropping only the current band's rows would let
-    // every other band's stored activity reload as if never cleared. The
-    // panes clear first because clearActivity()'s inbox refresh
-    // re-persists every unread sender, which would otherwise repopulate
-    // the store right after the wipe.
+    // panes clear first: clearActivity()'s inbox refresh re-persists
+    // unread senders, which would otherwise repopulate the store post-wipe
     clearActivity();
     m_activityStorage->clearAllActivity();
 }
@@ -959,7 +938,6 @@ void UI_Constructor::on_actionSettings_triggered() { openSettings(); }
 
 void UI_Constructor::openSettings(int tab) {
     m_config.select_tab(tab);
-    
     // Save scroll position before opening settings
     QScrollBar *bar = ui->textEditRX->verticalScrollBar();
     const bool wasAtBottom = (bar->value() == bar->maximum());
@@ -1024,7 +1002,7 @@ void UI_Constructor::openSettings(int tab) {
 
         m_opCall = m_config.opCall();
     }
-    
+
     // Restore scroll position after settings dialog
     QTimer::singleShot(0, this, [this, wasAtBottom, savedPos](){
         QScrollBar *bar = ui->textEditRX->verticalScrollBar();
@@ -1216,25 +1194,13 @@ void UI_Constructor::updateCurrentBand() {
     auto const &band_name = m_config.bands()->find(dial_frequency);
 
     if (m_lastBand == band_name) {
-        // The rig's report agrees with m_lastBand but the panes may be
-        // showing a different bucket - at startup they are preloaded
-        // from the LAST session's dial before the rig has reported one
-        // (e.g. the rig is parked on an out-of-plan frequency, whose
-        // activity lives in the "" bucket). Move the panes to the rig's
-        // actual bucket through the same path a band change takes.
-        // confirm only AFTER the switch: the flush inside it must still
-        // see the outgoing bucket as unconfirmed, or the startup guess's
-        // pane - which now holds this band's decodes too - is written
-        // under the guessed band
+        // panes may still show the startup-guessed bucket; move them
+        // to the rig's actual bucket even though the band name agrees
         m_activityStorage->bandUnchanged(band_name);
         return;
     }
 
-    // Move the panes to the new bucket BEFORE anything reads them: the
-    // WSJT-X status datagram below reports the selected DX call and its
-    // grid, which would otherwise still be the outgoing band's. The
-    // confirmation flag is set AFTER the switch, so the flush inside it
-    // still treats the outgoing bucket as the startup guess it is.
+    // switch panes before the WSJT-X status datagram below reads them
     m_activityStorage->bandChanged(band_name);
 
     m_wideGraph->setBand(band_name);
@@ -2905,19 +2871,11 @@ void UI_Constructor::cacheActivity(QString key) {
 }
 
 void UI_Constructor::restoreActivity(QString key) {
-    // When re-entering the bucket already on screen (a seed retry after
-    // the store recovers), the live panes are newer than any cache entry
-    // and must not be replaced.
+    // re-entering the bucket on screen: live panes are newer than any cache
     bool const sameBucket = m_activityStorage->isBucketLoaded() &&
                             key == m_activityStorage->currentBucket();
 
     if (!sameBucket) {
-        // Every cache is restored the same way, as on master: replace
-        // when this bucket has a snapshot, otherwise leave the panes as
-        // the caller left them. The bucket switch has already cleared
-        // them, so "no snapshot" correctly shows nothing; the startup
-        // preload deliberately does NOT clear, so the unread senders
-        // synthesized moments earlier survive into the seed.
         if (m_bandActivityBandCache.contains(key)) {
             m_bandActivity = m_bandActivityBandCache[key];
         }
@@ -2959,11 +2917,8 @@ void UI_Constructor::clearActivity() {
     m_rxCommandQueue.clear();
     m_lastTxMessage.clear();
 
-    // BEFORE the clears, as master ordered it: with the senders still in
-    // the map, refresh takes logCallActivity's update branch - the create
-    // branch would fire a call_new notification per unread sender on
-    // every band change. Senders reappear at the next refresh (message
-    // dock events), exactly as they always have.
+    // before the clears: with senders still in the map this hits the
+    // update branch, not the create branch that would notify per sender
     refreshInboxCounts();
     resetTimeDeltaAverage();
 
@@ -5347,24 +5302,16 @@ void UI_Constructor::qsy(int const hzDelta) {
 
     m_bandActivity.swap(bandActivity);
 
-    // Adjust call activity frequencies, mirroring each rewritten offset
-    // to the store (one transaction) - otherwise the stale persisted
-    // offsets come back at the next band round-trip or restart, and
-    // clicked decodes stop resolving to their stations. Only rows whose
-    // own dial belongs to the current band are written back: entries
-    // displayed here but keyed to another band (post-QSY stragglers,
-    // inbox senders carrying their message's dial) did not QSY, and
-    // dial-less RAM-only entries must not be promoted into the store by
-    // a waterfall nudge.
-
+    // mirrors the offset rewrite to the store, or stale offsets return
+    // at the next band round-trip and clicked decodes stop resolving
     m_activityStorage->adjustCallActivityOffsets(hzDelta);
 
     displayActivity(true);
 }
 
 void UI_Constructor::onDriftChanged(qint64 /*new_drift_ms*/) {
-    // here we reset the buffer position without clearing the buffer
-    // this makes the detected emit the correct k when drifting time
+    // resets k without clearing the buffer, so the detector emits the
+    // correct k across a drift change
     qCDebug(mainwindow_js8) << "Processing drift change.";
     m_detector->resetBufferPosition();
 }
@@ -5475,13 +5422,9 @@ void UI_Constructor::handle_transceiver_update(
 
     // ensure frequency display is correct
     // setRig();
-    // NOTE: the "state" property is deliberately set AFTER this call, as
-    // master did: the transceiver's very first report can carry a bogus
-    // frequency (e.g. the hamlib dummy backend's default when Rig=None),
-    // and the !state.isValid() guard in updateCurrentBand() discards it.
-    // The cost is a window until the second report during which RX text
-    // is appended to the preloaded bucket's pane; call activity is
-    // unaffected (rows are keyed by their own capture dial).
+    // "state" is set AFTER this call: the rig's first report can be bogus
+    // (e.g. hamlib's dummy backend with Rig=None), and updateCurrentBand()
+    // discards it via the !state.isValid() guard below.
     updateCurrentBand();
     displayDialFrequency();
     update_dynamic_property(ui->readFreq, "state", "ok");
@@ -5938,10 +5881,8 @@ QString UI_Constructor::callsignSelected(bool) {
         auto const offsetLo = selectedOffset - threshold;
         auto const offsetHi = selectedOffset + threshold;
 
-        // Skip stations the Call Activity table no longer shows (see
-        // displayCallActivity): this result becomes the directed-reply
-        // target, and the unfiltered map could otherwise address a
-        // station last heard hours ago. Unread senders stay exempt.
+        // Skip aged-out stations rather than let the reply/remove/block
+        // action silently target a neighbouring station instead.
         auto const aging = m_config.callsign_aging();
         auto const now = DriftingDateTime::currentDateTimeUtc();
 
@@ -5951,10 +5892,6 @@ QString UI_Constructor::callsignSelected(bool) {
                 if (aging && m_rxInboxCountCache.value(d.call, 0) <= 0 &&
                     d.utcTimestamp.isValid() &&
                     d.utcTimestamp.secsTo(now) / 60 >= aging) {
-                    // the best match for this offset has aged out:
-                    // select nothing rather than silently substituting a
-                    // neighbouring station, which would then receive the
-                    // directed reply (or the Remove/Block action)
                     return QString();
                 }
                 return d.call;
@@ -6120,9 +6057,7 @@ void UI_Constructor::processActivity(bool force) {
         return;
     }
 
-    // one transaction for the whole drain: the rx AND command handlers
-    // persist a row per station heard, and a busy cycle would otherwise
-    // pay one autocommit per row
+    // batch: avoid one autocommit per station across this whole drain
     m_activityStorage->beginBatch();
 
     // Recent Rx Activity
@@ -6301,8 +6236,7 @@ QString UI_Constructor::inboxPath() {
 void UI_Constructor::refreshInboxCounts() {
     auto inbox = Inbox(inboxPath());
     if (inbox.open()) {
-        // one transaction for the whole sender fan-out (each synthesized
-        // sender persists through logCallActivity)
+        // batch: each synthesized sender below persists via logCallActivity
         m_activityStorage->beginBatch();
         // reset inbox counts
         m_rxInboxCountCache.clear();

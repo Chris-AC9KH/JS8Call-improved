@@ -277,9 +277,6 @@ bool Inbox::migrateV1ToV2() {
         sqlite3_bind_text(ins, 9, g8.constData(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(ins, 10, e8.constData(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_double(ins, 11, params.value("TDRIFT").toDouble());
-        // 64-bit: a dial is a Radio::Frequency, and the band plan runs
-        // past 2^31 Hz - truncating it to 0 would file the sender's
-        // activity under no band at all
         sqlite3_bind_int64(ins, 12,
                            (sqlite3_int64)params.value("DIAL").toULongLong());
         sqlite3_bind_int(ins, 13, params.value("OFFSET").toInt());

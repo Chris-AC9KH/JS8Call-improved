@@ -1151,9 +1151,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         } else {
             if (Varicode::isValidCallsign(callsign, nullptr)) {
                 if (!m_callActivity.contains(callsign)) {
-                    // adding a callsign that is already listed is a
-                    // no-op - overwriting would blank the entry (and
-                    // the store deliberately ignores a blank re-add)
                     CallDetail cd = {};
                     cd.call = callsign;
                     m_callActivity[callsign] = cd;
