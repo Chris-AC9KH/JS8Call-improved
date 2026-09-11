@@ -4,7 +4,7 @@
  * dialog styles used in functions in the UI_Constructor class that assembles
  * the UI and provides the proper "look and feel" for each desktop platform
  *
- * styles.h was added on 11 Apr, 2026 and is intended to eventually become the
+ * styles.h was added on 11 Apr, 2026 and is intended to be the
  * default StyleSheet configuration for the JS8Call user interface.
  */
 
@@ -19,17 +19,17 @@
 #include <QWidget>
 
 /**
- * @brief Provides platform-adaptive stylesheet strings for status bar QLabel
- * widgets.
+ * @brief Provides platform-adaptive stylesheet strings for control bar QLabel
+ * and QPushButton widgets.
  *
- * This module defines styling for QLabel-based status indicators,
+ * This module defines styling for control and control indicators,
  * with platform-specific geometry (border-radius, padding, border style)
  * targeting macOS, Windows, and Linux. A minimal fallback is provided for other
  * platforms, e.g. possibly compiling on BSD Unix, iOS, Android, etc..
  *
  * @section tx_status Transmit Status Appearance
  * The @c TxStatusAppearance enum represents four logical states for the TX
- * status label:
+ * control button:
  * - @c Receiving    – Active receive; rendered with a green background, black text.
  * - @c Transmitting – Active transmit; rendered with a red background, black text.
  * - @c Decoding     – Decoding in progress; currently shares colors with @c
@@ -273,7 +273,7 @@ inline QString buttonStyle() {
 #endif
 }
 
-// defines the background, color, font and size of the header bar frequency
+// defines the background, color, font and size of the control bar frequency
 // display, the #else section contains the definitions for linux
 static inline QString logFrameStyle() {
 #if defined(Q_OS_MACOS)
@@ -316,10 +316,10 @@ static inline QString logFrameStyle() {
 
 /**
  * @namespace Styles
- * @brief Defines platform-specific style constants for JS8Call's header bar controls.
+ * @brief Defines platform-specific style constants for JS8Call's control bar..
  *
  * This namespace provides a set of constant strings that determine the appearance of
- * various header bar UI elements in JS8Call, including frequency widgets, buttons, and labels.
+ * various control bar UI elements in JS8Call, including frequency widgets, buttons, and labels.
  * Each definition adapts to the conventions of MacOS, Windows, or other (which includes linux)
  * platforms, ensuring a consistent and native look and feel per-platform.
  *
@@ -425,18 +425,6 @@ constexpr const char *LabUTCStyle =
     "    color : #39FF14;"
     "}";
 
-constexpr const char *ButtonGridStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
-
 constexpr const char *MonitorTxButtonStyle =
     "QPushButton {"
     "    background-color:lightgray;"
@@ -467,6 +455,14 @@ constexpr const char *MonitorButtonStyle =
     "QPushButton:checked {"
     "    background-color:#22FF22;"
     "    color:black;"
+    "}"
+    "QPushButton:disabled {"
+    "    background-color:lightgray;"
+    "    color:gray;"
+    "}"
+    "QPushButton:checked:disabled {"
+    "    background-color:#a0d8a0;"
+    "    color:gray;"
     "}";
 
 constexpr const char *LogQSOButtonStyle =
@@ -493,7 +489,7 @@ constexpr const char *TuneButtonStyle =
     "    border-radius:6px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
+    "    background-color:#FF2222;"
     "    color:black;"
     "}";
 
@@ -620,18 +616,6 @@ constexpr const char *LabUTCStyle =
     "    color : #39FF14;"
     "}";
 
-constexpr const char *ButtonGridStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
-
 constexpr const char *MonitorTxButtonStyle =
     "QPushButton {"
     "    background-color:lightgray;"
@@ -662,6 +646,14 @@ constexpr const char *MonitorButtonStyle =
     "QPushButton:checked {"
     "    background-color:#22FF22;"
     "    color:black;"
+    "}"
+    "QPushButton:disabled {"
+    "    background-color:lightgray;"
+    "    color:gray;"
+    "}"
+    "QPushButton:checked:disabled {"
+    "    background-color:#a0d8a0;"
+    "    color:gray;"
     "}";
 
 constexpr const char *LogQSOButtonStyle =
@@ -712,7 +704,7 @@ constexpr const char *SpotButtonStyle =
 #else
 namespace Styles {
 
-// background color of the header bar - must be the same as the frequency display above
+// background color of the control bar - must be the same as the frequency display above
 constexpr const char *LogWidgetStyle =
     "QFrame#logWidget { background-color: #F2F2F0; }";
 
@@ -807,19 +799,6 @@ constexpr const char *LabUTCStyle =
     "    color : #39FF14;"
     "}";
 
-// defintion of the display of the button grid
-constexpr const char *ButtonGridStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
-
 // defintion of the display of the Tx button
 constexpr const char *MonitorTxButtonStyle =
     "QPushButton {"
@@ -847,6 +826,14 @@ constexpr const char *MonitorButtonStyle =
     "}"
     "QPushButton:checked {"
     "    background-color:#22FF22;"
+    "}"
+    "QPushButton:disabled {"
+    "    background-color:lightgray;"
+    "    color:gray;"
+    "}"
+    "QPushButton:checked:disabled {"
+    "    background-color:#a0d8a0;"
+    "    color:gray;"
     "}";
 
 // defintion of the display of the Log and Tune buttons

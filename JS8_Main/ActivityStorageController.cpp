@@ -290,12 +290,11 @@ QString ActivityStorageController::activityPath() const {
  * warnings being suppressed once the handle is closed.
  *
  * The status message is emitted once per failure episode rather than once
- * per retry because showStatusMessage() temporarily hides the statusbar's
- * mode and frequency readouts, and a blink every thirty seconds would
- * blank the operator's primary readouts indefinitely. The handle is never
- * replaced while a batch holds it, or callers inside beginBatch() and
- * endBatch() would be left with a dangling pointer and a vanished
- * transaction.
+ * per retry because a blink every thirty seconds would be a distracting
+ * nuisance to the operator for a condition that, once known, doesn't need
+ * repeating. The handle is never replaced while a batch holds it, or
+ * callers inside beginBatch() and endBatch() would be left with a dangling
+ * pointer and a vanished transaction.
  */
 ActivityDB *ActivityStorageController::activityDB() {
     if (m_activityDB && !m_activityDB->isOpen() &&

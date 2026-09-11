@@ -48,7 +48,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
       m_btxok{false}, m_auto{false}, m_restart{false}, m_currentMessageType{-1},
       m_lastMessageType{-1}, m_tuneup{false}, m_isTimeToSend{false}, m_ihsym{0},
       m_px{0.0}, m_iptt0{0}, m_btxok0{false}, m_onAirFreq0{0.0},
-      m_first_error{true}, tx_status_label{"Receiving"},
+      m_first_error{true},
       m_appDir{QApplication::applicationDirPath()}, m_palette{"Linrad"},
       m_txFrameCountEstimate{0}, m_txFrameCount{0}, m_txFrameCountSent{0},
       m_txTextDirty{false}, m_driftMsMMA{0}, m_driftMsMMA_N{0},
@@ -126,16 +126,17 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->dialFreqDownButton->setStyleSheet(Styles::DialFreqUpDownButtonStyle);
     ui->labCallsign->setStyleSheet(Styles::LabCallsignStyle);
     ui->labUTC->setStyleSheet(Styles::LabUTCStyle);
-    ui->buttonGrid->setStyleSheet(Styles::ButtonGridStyle);
-    ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
-    ui->monitorButton->setStyleSheet(Styles::MonitorButtonStyle);
-    ui->logQSOButton->setStyleSheet(Styles::LogQSOButtonStyle);
-    ui->tuneButton->setStyleSheet(Styles::TuneButtonStyle);
-    ui->modeButton->setStyleSheet(Styles::ModeButtonStyle);
-    ui->spotButton->setStyleSheet(Styles::SpotButtonStyle);
+    updateCallActivityHeaderLabel();
 
-    createStatusBar();
+    createControlBar();
     add_child_to_event_filter(this);
+
+    // Keep the header row (frequency + callsign/clock) aligned with the
+    // tableWidgetRXAll + textEditRX columns below, including live updates
+    // as the user drags the splitter.
+    connect(ui->textHorizontalSplitter, &QSplitter::splitterMoved, this,
+            &UI_Constructor::syncHeaderRowWidth);
+    QTimer::singleShot(0, this, &UI_Constructor::syncHeaderRowWidth);
 
     m_baseCall = Radio::base_callsign(m_config.my_callsign());
     m_opCall = m_config.opCall();
@@ -762,7 +763,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     }
 
     ui->actionModeAutoreply->setChecked(m_config.autoreply_on_at_startup());
-    ui->spotButton->setChecked(m_config.spot_to_reporting_networks());
+    spotButton.setChecked(m_config.spot_to_reporting_networks());
 
     QActionGroup *modeActionGroup = new QActionGroup(this);
     ui->actionModeJS8Normal->setActionGroup(modeActionGroup);
@@ -770,13 +771,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->actionModeJS8Turbo->setActionGroup(modeActionGroup);
     ui->actionModeJS8Slow->setActionGroup(modeActionGroup);
     ui->actionModeJS8Ultra->setActionGroup(modeActionGroup);
-
-    ui->modeButton->installEventFilter(new EventFilter::MouseButtonPress(
-        [this](QMouseEvent *event) {
-            ui->menuModeJS8->popup(event->globalPosition().toPoint());
-            return true;
-        },
-        this));
 
     if (!JS8_ENABLE_JS8A)
         ui->actionModeJS8Normal->setVisible(false);
@@ -1462,43 +1456,12 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     // period
     m_lastTxStopTime = nextTransmitCycle().addSecs(-m_TRperiod / 2);
 
-    int width = 75;
-    /*
-    QList<QPushButton*> btns;
-    foreach(auto child, ui->buttonGrid->children()){
-        if(!child->isWidgetType()){
-            continue;
-        }
-
-        if(!child->objectName().contains("Button")){
-            continue;
-        }
-
-        auto b = qobject_cast<QPushButton*>(child);
-        width = qMax(width, b->geometry().width());
-        btns.append(b);
-    }
-    */
-    foreach (auto child, ui->buttonGrid->children()) {
-        if (!child->isWidgetType()) {
-            continue;
-        }
-
-        if (!child->objectName().contains("Button")) {
-            continue;
-        }
-
-        auto b = qobject_cast<QPushButton *>(child);
+    for (QPushButton *b : {&monitorTxButton, &monitorButton, &logQSOButton,
+                          &tuneButton, &spotButton, &auto_reply_button,
+                          &multi_button, &hb_button, &hb_ack_button}) {
         b->setCursor(QCursor(Qt::PointingHandCursor));
     }
-    auto buttonLayout = ui->buttonGrid->layout();
-    auto gridButtonLayout = qobject_cast<QGridLayout *>(buttonLayout);
-    gridButtonLayout->setColumnMinimumWidth(0, width);
-    gridButtonLayout->setColumnMinimumWidth(1, width);
-    gridButtonLayout->setColumnMinimumWidth(2, width);
-    gridButtonLayout->setColumnStretch(0, 1);
-    gridButtonLayout->setColumnStretch(1, 1);
-    gridButtonLayout->setColumnStretch(2, 1);
+    mode_button.setCursor(QCursor(Qt::PointingHandCursor));
 
     // dial up and down buttons sizes
     ui->dialFreqUpButton->setFixedSize(30, 24);
