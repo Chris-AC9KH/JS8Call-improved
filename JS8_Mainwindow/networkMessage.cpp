@@ -69,7 +69,7 @@ void UI_Constructor::networkMessage(Message const &message) {
         UI_Constructor::on_tuneButton_clicked(value.toBool());
           sendNetworkMessage("RIG.SET_TUNE", "", {
             {"_ID", id},
-            {"value", ui->tuneButton->isChecked()}
+            {"value", tuneButton.isChecked()}
           });
         return;
     }
@@ -83,7 +83,7 @@ void UI_Constructor::networkMessage(Message const &message) {
         UI_Constructor::on_stopTxButton_clicked();
           sendNetworkMessage("RIG.TX_HALT", "", {
             {"_ID", id},
-            {"value", ui->monitorTxButton->isChecked()}
+            {"value", monitorTxButton.isChecked()}
           });
         return;
     }
@@ -169,7 +169,7 @@ void UI_Constructor::networkMessage(Message const &message) {
     // STATION.GET_CONFIG - Get all config states (auto_reply, js8hb, hback, etc.)
     // STATION.SET_AUTO_REPLY - Toggle auto-reply on/off
     // STATION.SET_JS8HB - Toggle JS8 heartbeat on/off
-    // STATION.SET_HBACK - Toggle heartbeat acknowledgments on/off
+    // STATION.SET_HBACK - Toggle heartbeat acknowledgements on/off
     // STATION.SET_MULTI_DECODER - Toggle multi-decoder on/off
     // STATION.SET_HB_INTERVAL - Set heartbeat interval (seconds)
     // STATION.SET_HB_TIMER - Start/stop heartbeat timer
@@ -271,10 +271,10 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if(type == "STATION.GET_OS"){
       sendNetworkMessage("STATION.GET_OS", "", {
-	      {"OS_NAME", QSysInfo::prettyProductName()},
-	      {"OS_KERNEL", QSysInfo::kernelType()},
-	      {"OS_KERNEL_VERSION", QSysInfo::kernelVersion()},
-	      {"_ID", id}
+          {"OS_NAME", QSysInfo::prettyProductName()},
+          {"OS_KERNEL", QSysInfo::kernelType()},
+          {"OS_KERNEL_VERSION", QSysInfo::kernelVersion()},
+          {"_ID", id}
         });
         return;
     }
@@ -287,8 +287,8 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if(type == "STATION.GET_SPOT") {
         sendNetworkMessage("STATION.SPOT", "", {
-          {"value", ui->spotButton->isChecked()},
-	      {"_ID", id}
+          {"value", spotButton.isChecked()},
+          {"_ID", id}
         });
         return;
     }
@@ -303,7 +303,7 @@ if(type == "STATION.SET_SPOT") {
         auto value = QVariant(message.value());
           UI_Constructor::on_spotButton_clicked(value.toBool());
           sendNetworkMessage("STATION.SPOT", "", {
-            {"value", ui->spotButton->isChecked()},
+            {"value", spotButton.isChecked()},
             {"_ID", id}
           });
           return;
@@ -324,8 +324,8 @@ if(type == "STATION.SET_SPOT") {
             {"MULTI_DECODER", QVariant(ui->actionModeMultiDecoder->isChecked())},
             {"HB_INTERVAL", QVariant(m_hbInterval)},
             {"HB_TIMER_ACTIVE", QVariant(m_hb_loop->isActive())},
-            {"MONITOR", QVariant(ui->monitorButton->isChecked())},
-            {"TX_ENABLED", QVariant(ui->monitorTxButton->isChecked())},
+            {"MONITOR", QVariant(monitorButton.isChecked())},
+            {"TX_ENABLED", QVariant(monitorTxButton.isChecked())},
             {"SPEED", QVariant(m_nSubMode)},
             {"CAN_HB", QVariant(canCurrentModeSendHeartbeat())},
             {"AUTOREPLY_CONFIRMATION", QVariant(m_config.autoreply_confirmation())},
@@ -359,7 +359,7 @@ if(type == "STATION.SET_SPOT") {
         return;
     }
 
-    /** @brief STATION.SET_HBACK: Toggle heartbeat acknowledgments.
+    /** @brief STATION.SET_HBACK: Toggle heartbeat acknowledgements.
      *  @note API 2.6+ */
     if (type == "STATION.SET_HBACK") {
         auto checked = QVariant(message.value()).toBool();
@@ -761,9 +761,9 @@ if(type == "STATION.SET_SPOT") {
       int depth = m_txMessageQueue.size();
       if(m_transmitting && depth==0) depth=1;
       sendNetworkMessage("TX.QUEUE_DEPTH", "", {
-	  {"_ID", id},
-	  {"DEPTH", QVariant(depth)}
-	});
+      {"_ID", id},
+      {"DEPTH", QVariant(depth)}
+    });
       return;
     }
     /** @} */ // End TX Commands

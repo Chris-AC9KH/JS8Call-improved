@@ -92,7 +92,6 @@
 #include <QPair>
 #include <QPixmap>
 #include <QPointer>
-#include <QProgressBar>
 #include <QProgressDialog>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -101,6 +100,7 @@
 #include <QSet>
 #include <QSoundEffect>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QStringBuilder>
 #include <QStyleFactory>
 #include <QtCore/QtGlobal>
@@ -111,6 +111,8 @@
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolButton>
+#include <QPushButton>
+#include <QMenu>
 #include <QToolTip>
 #include <QUdpSocket>
 #include <QUrl>
@@ -305,6 +307,7 @@ class UI_Constructor : public QMainWindow {
     void closeEvent(QCloseEvent *) override;
     void childEvent(QChildEvent *) override;
     bool eventFilter(QObject *, QEvent *) override;
+    void resizeEvent(QResizeEvent *) override;
 
   private slots:
     void initialize_fonts();
@@ -326,7 +329,6 @@ class UI_Constructor : public QMainWindow {
     void on_actionClear_Call_Activity_triggered();
     void on_actionSetOffset_triggered();
     void on_actionShow_Fullscreen_triggered(bool checked);
-    void on_actionShow_Statusbar_triggered(bool checked);
     void on_actionShow_Frequency_Clock_triggered(bool checked);
     void on_actionShow_Band_Activity_triggered(bool checked);
     void on_actionShow_Band_Heartbeats_and_ACKs_triggered(bool checked);
@@ -563,6 +565,7 @@ class UI_Constructor : public QMainWindow {
     void setFreq(int);
     void transmit();
 
+    bool canEnableHBReplies();
     bool presentlyWantHBReplies();
 
     QString m_nextFreeTextMsg;
@@ -674,20 +677,28 @@ class UI_Constructor : public QMainWindow {
 
     char m_msg[100][80];
 
-    // labels and widgets in status and header bar
-    QLabel tx_status_label;
+    // labels and widgets in control bar
     QLabel config_label;
-    QLabel mode_label;
     QLabel frequency_label;
-    QLabel auto_reply_label;
-    QLabel last_tx_label;
-    QLabel auto_tx_label;
-    QProgressBar progressBar;
     QLabel wpm_label;
+    QLabel statusMessage_label;
+
+    QPushButton mode_button;
+    QMenu *modeSpeedMenu = nullptr;
+
+    QPushButton auto_reply_button;
+    QPushButton multi_button;
+    QPushButton hb_button;
+    QPushButton hb_ack_button;
+
+    // buttons relocated here from the former top-bar button grid
+    QPushButton monitorTxButton;  // TX
+    QPushButton monitorButton;    // RX
+    QPushButton logQSOButton;     // LOG
+    QPushButton tuneButton;       // TUNE
+    QPushButton spotButton;       // SPOT
     Styles::OffsetSliderWidget *freqOffsetWidget = nullptr;
     int m_sliderFreqBeforeHB = 0;
-
-    // QPointer<QProcess> proc_js8;
 
     QTimer m_guiTimer;
     // Timer to switch off PTT after end of transmission.
@@ -991,7 +1002,11 @@ class UI_Constructor : public QMainWindow {
     void readSettings();
     void set_application_font(QFont const &);
     void writeSettings();
-    void createStatusBar();
+    void updateCallActivityHeaderLabel();
+    void createControlBar();
+    void bindStatusButtonToAction(QPushButton &button, QAction *action,
+                                  QString const &label);
+    void syncHeaderRowWidth();
     void statusChanged();
     void rigFailure(QString const &reason);
     void spotSetLocal();
@@ -1070,7 +1085,6 @@ class UI_Constructor : public QMainWindow {
     void tryBandHop();
     void add_child_to_event_filter(QObject *);
     void remove_child_from_event_filter(QObject *);
-    void setup_status_bar();
     QString columnLabel(QString defaultLabel);
     void ensureMessageDock();
 
@@ -1082,4 +1096,3 @@ class UI_Constructor : public QMainWindow {
 };
 
 #endif // MAINWINDOW_H
-
