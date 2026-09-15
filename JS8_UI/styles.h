@@ -114,47 +114,6 @@ inline QString txStatusLabelStyle(TxStatusAppearance appearance) {
 }
 
 /**
- * @brief Constructs a unified cross-platform QSS stylesheet for the
- * QProgressBar.
- *
- * Generates a stylesheet that produces a consistent progress bar appearance
- * across all platforms, with a white background (@c #ffffff) and a light-blue
- * chunk fill
- * (@c #a5cdff). Border is suppressed entirely; text is centered. The bar
- * dimensions are fully constrained via @c min-height / @c max-height to prevent
- * platform layout interference.
- *
- * @param small     If @c true, renders a compact variant (height: 10px, radius:
- * 3px); if @c false (default), renders the standard size (height: 14px, radius:
- * 5px).
- * @return A QSS QString suitable for use with @c QWidget::setStyleSheet().
- */
-static inline QString progress_bar_stylesheet(bool small = false) {
-    const QString base = QString("QProgressBar {"
-                                 "  border: 0px;"
-                                 "  background-color: #ffffff;"
-                                 "  color: #000000;"
-                                 "  text-align: center;"
-                                 "  padding: 0px;"
-                                 "  %1"
-                                 "}"
-                                 "QProgressBar::chunk {"
-                                 "  background-color: #a5cdff;"
-                                 "  border-radius: %2px;"
-                                 "  %3"
-                                 "}");
-
-    const int height = small ? 10 : 14; // overall control height
-    const int radius = small ? 3 : 5;   // roundness of the bar ends
-    const QString barDim =
-        QString("min-height:%1px; max-height:%1px; border-radius:%2px;")
-            .arg(height)
-            .arg(radius);
-    const QString chunkDim = QString("min-height:%1px;").arg(height);
-    return base.arg(barDim, QString::number(radius), chunkDim);
-}
-
-/**
  * @brief Returns a platform-native QPushButton/QToolButton stylesheet.
  *
  * Generates a stylesheet that approximates the native button conventions of the

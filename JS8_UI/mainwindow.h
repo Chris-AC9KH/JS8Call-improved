@@ -92,7 +92,6 @@
 #include <QPair>
 #include <QPixmap>
 #include <QPointer>
-#include <QProgressBar>
 #include <QProgressDialog>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -681,7 +680,6 @@ class UI_Constructor : public QMainWindow {
     // labels and widgets in control bar
     QLabel config_label;
     QLabel frequency_label;
-    QProgressBar progressBar;
     QLabel wpm_label;
     QLabel statusMessage_label;
 

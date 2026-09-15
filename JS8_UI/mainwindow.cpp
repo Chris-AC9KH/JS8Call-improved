@@ -1447,14 +1447,7 @@ void UI_Constructor::createControlBar()
     
     ui->horizontalLayoutControl->addStretch(1);
 
-    // progress bar
-    ui->horizontalLayoutControl->addWidget(&progressBar, 1);
-    progressBar.setMinimumSize(QSize{100, 18});
-    progressBar.setMaximumWidth(400);
-    const bool small = true;
-    progressBar.setStyleSheet(progress_bar_stylesheet(small));
-    progressBar.setFormat("%v/%m");
-
+    // wpm label
     ui->horizontalLayoutControl->addWidget(&wpm_label);
     wpm_label.setMinimumSize(QSize{120, 18});
     wpm_label.setStyleSheet(statusLabelStyle());
@@ -2747,18 +2740,6 @@ void UI_Constructor::guiUpdate() {
         m_sec0 = seconds_since_epoch;
 
         updateClockUI(now);
-
-        if (m_monitoring or m_transmitting) {
-            // We are lucky that TX delay starts well into the second
-            // and lasts less than a second. So as long as we
-            // do this near the begining of a second, we will never hit
-            // the confusing "progress" of tx delay.
-            progressBar.setMaximum(period);
-            int progress = seconds_since_epoch % period;
-            progressBar.setValue(progress);
-        } else {
-            progressBar.setValue(0);
-        }
 
         if (m_transmitting) {
             transmitDisplay(true);

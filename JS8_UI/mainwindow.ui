@@ -38,6 +38,10 @@
         </property>
         <item>
           <widget class="QSplitter" name="mainSplitter">
+            <property name="styleSheet">
+              <string notr="true">QSplitter::handle { background: transparent; image: none; }
+              </string>
+            </property>
             <property name="frameShadow">
               <enum>QFrame::Shadow::Plain</enum>
             </property>
@@ -48,7 +52,7 @@
               <bool>true</bool>
             </property>
             <property name="handleWidth">
-              <number>6</number>
+              <number>0</number>
             </property>
             <property name="childrenCollapsible">
               <bool>true</bool>
