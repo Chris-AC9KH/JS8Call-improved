@@ -312,28 +312,6 @@
                             </spacer>
                           </item>
                           <item>
-                            <widget class="QLabel" name="labTitleMessaging">
-                              <property name="sizePolicy">
-                                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-                                  <horstretch>0</horstretch>
-                                  <verstretch>0</verstretch>
-                                </sizepolicy>
-                              </property>
-                              <property name="font">
-                                <font>
-                                  <pointsize>16</pointsize>
-                                  <bold>true</bold>
-                                </font>
-                              </property>
-                              <property name="text">
-                                <string>JS8 Weak Signal Messaging</string>
-                              </property>
-                              <property name="alignment">
-                                <set>Qt::AlignmentFlag::AlignCenter</set>
-                              </property>
-                            </widget>
-                          </item>
-                          <item>
                             <spacer name="rightCenterSpacer">
                               <property name="orientation">
                                 <enum>Qt::Orientation::Horizontal</enum>

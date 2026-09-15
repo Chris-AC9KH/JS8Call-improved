@@ -1306,18 +1306,31 @@ void UI_Constructor::updateCallActivityHeaderLabel() {
             .arg(m_config.callsign_aging()));
 }
 
+/**
+ * @brief Populate the header bar's widgets.
+ *
+ * config_label sits in the static slot between the frequency and
+ * clock displays. It only displays for non-default configurations
+ */
+void UI_Constructor::createHeaderBar()
+{
+    config_label.setAlignment(Qt::AlignCenter);
+    {
+        QFont headerFont = config_label.font();
+        headerFont.setPointSize(14);
+        headerFont.setBold(true);
+        config_label.setFont(headerFont);
+    }
+    ui->horizontalLayout_17->insertWidget(2, &config_label);
+    config_label.hide(); // only shown for non-default configuration
+}
+
 void UI_Constructor::createControlBar()
 {
     statusBar()->hide();
 
     // status bar labels, push button controls, status bar
     // styles defined in styles.h per platform
-    config_label.setAlignment(Qt::AlignCenter);
-    config_label.setMinimumSize(QSize{80, 18});
-    config_label.setStyleSheet(statusLabelStyle());
-    ui->horizontalLayoutControl->addWidget(&config_label);
-    config_label.hide(); // only shown for non-default configuration
-
     frequency_label.setAlignment(Qt::AlignCenter);
     frequency_label.setMinimumSize(QSize{110, 18});
     frequency_label.setStyleSheet(statusLabelStyle());
@@ -1438,6 +1451,9 @@ void UI_Constructor::createControlBar()
     wpm_label.setMinimumSize(QSize{120, 18});
     wpm_label.setStyleSheet(statusLabelStyle());
     wpm_label.setAlignment(Qt::AlignCenter);
+    
+    // minimum width of the control bar to prevent crushing buttons
+    ui->controlHorizontalWidget->setMinimumWidth(1000);
 }
 
 void UI_Constructor::bindStatusButtonToAction(QPushButton &button, QAction *action,
@@ -7023,3 +7039,4 @@ QByteArray UI_Constructor::wisdomFileName() const {
 
 Q_LOGGING_CATEGORY(decoder_js8, "decoder.js8", QtWarningMsg)
 Q_LOGGING_CATEGORY(mainwindow_js8, "mainwindow.js8", QtWarningMsg)
+

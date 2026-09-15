@@ -125,6 +125,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->labUTC->setStyleSheet(Styles::LabUTCStyle);
     updateCallActivityHeaderLabel();
 
+    createHeaderBar();
     createControlBar();
     add_child_to_event_filter(this);
 

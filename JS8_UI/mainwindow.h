@@ -1001,6 +1001,7 @@ class UI_Constructor : public QMainWindow {
     void set_application_font(QFont const &);
     void writeSettings();
     void updateCallActivityHeaderLabel();
+    void createHeaderBar();
     void createControlBar();
     void bindStatusButtonToAction(QPushButton &button, QAction *action,
                                   QString const &label);
