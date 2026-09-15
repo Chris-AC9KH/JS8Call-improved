@@ -65,7 +65,6 @@ public:
             nullptr;
         QMap<QString, QString> const *rxTextBandCache = nullptr;
 
-        std::function<void(QString const &)> showStatusMessage;
         std::function<void()> displayActivity;
         std::function<void()> clearRxFrameBlockNumbers;
         /// UI_Constructor::clearActivity - every pane and session queue.

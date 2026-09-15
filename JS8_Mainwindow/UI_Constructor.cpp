@@ -85,9 +85,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         context.inboxCounts = &m_rxInboxCountCache;
         context.callActivityBandCache = &m_callActivityBandCache;
         context.rxTextBandCache = &m_rxTextBandCache;
-        context.showStatusMessage = [this](QString const &message) {
-            showStatusMessage(message);
-        };
         context.displayActivity = [this]() { displayActivity(true); };
         context.clearRxFrameBlockNumbers = [this]() {
             m_rxFrameBlockNumbers.clear();
@@ -318,7 +315,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     connect(m_soundInput, &SoundInput::error, &m_config,
             &Configuration::invalidate_audio_input_device);
     // connect(m_soundInput, &SoundInput::status, this,
-    // &UI_Constructor::showStatusMessage);
     connect(&m_audioThread, &QThread::finished, m_soundInput,
             &QObject::deleteLater);
 
@@ -575,8 +571,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             });
     connect(&m_config, &Configuration::manual_band_hop_requested, this,
             &UI_Constructor::manualBandHop);
-    connect(&m_config, &Configuration::enumerating_audio_devices,
-            [this]() { showStatusMessage(tr("Enumerating audio devices")); });
 
     // set up configurations menu
     connect(m_multi_settings, &MultiSettings::configurationNameChanged,

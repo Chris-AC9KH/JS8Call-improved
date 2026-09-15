@@ -596,15 +596,6 @@ void UI_Constructor::showSoundOutError(const QString &errorMsg) {
                                     errorMsg);
 }
 
-void UI_Constructor::showStatusMessage(const QString &statusMsg) {
-    statusMessage_label.setText(statusMsg);
-    statusMessage_label.show();
-
-    QTimer::singleShot(5000, &statusMessage_label, [this]() {
-        statusMessage_label.hide();
-    });
-}
-
 void UI_Constructor::on_menuModeJS8_aboutToShow() {
     bool canChangeMode =
         !m_transmitting && m_txFrameCount == 0 && m_txFrameQueue.isEmpty();
@@ -1326,11 +1317,6 @@ void UI_Constructor::createControlBar()
     config_label.setStyleSheet(statusLabelStyle());
     ui->horizontalLayoutControl->addWidget(&config_label);
     config_label.hide(); // only shown for non-default configuration
-
-    statusMessage_label.setAlignment(Qt::AlignCenter);
-    statusMessage_label.setStyleSheet(statusLabelStyle());
-    ui->horizontalLayoutControl->addWidget(&statusMessage_label);
-    statusMessage_label.hide(); // only shown for 5 sec while a transient message is active
 
     frequency_label.setAlignment(Qt::AlignCenter);
     frequency_label.setMinimumSize(QSize{110, 18});
@@ -6742,8 +6728,6 @@ void UI_Constructor::sendNetworkMessage(QString const &type,
 
 void UI_Constructor::pskReporterError(QString const &message) {
     qCDebug(mainwindow_js8) << "PSK Reporter Error:" << message;
-
-    showStatusMessage(tr("Spotting to PSK Reporter unavailable"));
 }
 
 void UI_Constructor::setRig(Frequency f) {

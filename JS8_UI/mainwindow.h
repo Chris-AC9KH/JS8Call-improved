@@ -236,7 +236,6 @@ class UI_Constructor : public QMainWindow {
   public slots:
     void showSoundInError(const QString &errorMsg);
     void showSoundOutError(const QString &errorMsg);
-    void showStatusMessage(const QString &statusMsg);
     void dataSink(qint64 frames); // JS8_Mainwindow/dataSink.cpp
     /**
      * The name `guiUpdate` suggests updating of the views from the models
@@ -681,7 +680,6 @@ class UI_Constructor : public QMainWindow {
     QLabel config_label;
     QLabel frequency_label;
     QLabel wpm_label;
-    QLabel statusMessage_label;
 
     QPushButton mode_button;
     QMenu *modeSpeedMenu = nullptr;
