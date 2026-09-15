@@ -596,15 +596,6 @@ void UI_Constructor::showSoundOutError(const QString &errorMsg) {
                                     errorMsg);
 }
 
-void UI_Constructor::showStatusMessage(const QString &statusMsg) {
-    statusMessage_label.setText(statusMsg);
-    statusMessage_label.show();
-
-    QTimer::singleShot(5000, &statusMessage_label, [this]() {
-        statusMessage_label.hide();
-    });
-}
-
 void UI_Constructor::on_menuModeJS8_aboutToShow() {
     bool canChangeMode =
         !m_transmitting && m_txFrameCount == 0 && m_txFrameQueue.isEmpty();
@@ -642,11 +633,10 @@ void UI_Constructor::on_menuControl_aboutToShow() {
     buildCQMenu(cqMenu);
     ui->actionCQ->setMenu(cqMenu);
 
-    ui->actionEnable_Monitor_RX->setChecked(monitorButton.isChecked());
-    ui->actionEnable_Transmitter_TX->setChecked(
-        monitorTxButton.isChecked());
-    ui->actionEnable_Reporting_SPOT->setChecked(spotButton.isChecked());
-    ui->actionEnable_Tuning_Tone_TUNE->setChecked(tuneButton.isChecked());
+    ui->actionEnable_Monitor_RX->setChecked(ui->monitorButton->isChecked());
+    ui->actionEnable_Transmitter_TX->setChecked(ui->monitorTxButton->isChecked());
+    ui->actionEnable_Reporting_SPOT->setChecked(ui->spotButton->isChecked());
+    ui->actionEnable_Tuning_Tone_TUNE->setChecked(ui->tuneButton->isChecked());
 }
 
 void UI_Constructor::on_actionCheck_for_Updates_triggered() {
@@ -659,19 +649,19 @@ void UI_Constructor::on_actionUser_Guide_triggered() {
 }
 
 void UI_Constructor::on_actionEnable_Monitor_RX_toggled(bool checked) {
-    monitorButton.setChecked(checked);
+    ui->monitorButton->setChecked(checked);
 }
 
 void UI_Constructor::on_actionEnable_Transmitter_TX_toggled(bool checked) {
-    monitorTxButton.setChecked(checked);
+    ui->monitorTxButton->setChecked(checked);
 }
 
 void UI_Constructor::on_actionEnable_Reporting_SPOT_toggled(bool checked) {
-    spotButton.setChecked(checked);
+    ui->spotButton->setChecked(checked);
 }
 
 void UI_Constructor::on_actionEnable_Tuning_Tone_TUNE_toggled(bool checked) {
-    tuneButton.setChecked(checked);
+    ui->tuneButton->setChecked(checked);
     on_tuneButton_clicked(checked);
 }
 
@@ -1038,11 +1028,11 @@ void UI_Constructor::prepareSpotting() {
         emit aprsClientSetIncomingRelayEnabled(
             aprsEnabled && m_config.spot_to_aprs_relay());
         emit aprsClientSetPaused(!aprsEnabled);
-        spotButton.setChecked(true);
+        ui->spotButton->setChecked(true);
     } else {
         emit aprsClientSetPaused(true);
         emit aprsClientSetIncomingRelayEnabled(false);
-        spotButton.setChecked(false);
+        ui->spotButton->setChecked(false);
     }
 }
 
@@ -1070,12 +1060,12 @@ void UI_Constructor::on_monitorButton_clicked(bool checked) {
         // Get Configuration in/out of strict split and mode checking
         Q_EMIT m_config.sync_transceiver(true, checked);
     } else {
-        monitorButton.setChecked(false); // disallow
+        ui->monitorButton->setChecked(false); // disallow
     }
 }
 
 void UI_Constructor::monitor(bool state) {
-    monitorButton.setChecked(state);
+    ui->monitorButton->setChecked(state);
 
     // make sure widegraph is running if we are monitoring, otherwise pause it.
     m_wideGraph->setPaused(!state);
@@ -1098,11 +1088,11 @@ void UI_Constructor::on_actionAbout_triggered() // Display "About"
 }
 
 void UI_Constructor::on_monitorButton_toggled(bool) {
-    resetPushButtonToggleText(&monitorButton);
+    resetPushButtonToggleText(ui->monitorButton);
 }
 
 void UI_Constructor::on_monitorTxButton_toggled(bool checked) {
-    resetPushButtonToggleText(&monitorTxButton);
+    resetPushButtonToggleText(ui->monitorTxButton);
 
     if (!checked) {
         qCDebug(mainwindow_js8)
@@ -1112,11 +1102,11 @@ void UI_Constructor::on_monitorTxButton_toggled(bool checked) {
 }
 
 void UI_Constructor::on_tuneButton_toggled(bool) {
-    resetPushButtonToggleText(&tuneButton);
+    resetPushButtonToggleText(ui->tuneButton);
 }
 
 void UI_Constructor::on_spotButton_toggled(bool) {
-    resetPushButtonToggleText(&spotButton);
+    resetPushButtonToggleText(ui->spotButton);
 }
 
 void UI_Constructor::auto_tx_mode(bool state) {
@@ -1268,9 +1258,6 @@ void UI_Constructor::displayDialFrequency() {
     }
 
     freqOffsetWidget->setValue(audio_frequency);
-
-    auto const onAir = dial_frequency + audio_frequency;
-        frequency_label.setText(QString("Freq: %1").arg(Radio::pretty_frequency_MHz_string(onAir)));
 }
 
 void UI_Constructor::statusChanged() { statusUpdate(); }
@@ -1315,67 +1302,52 @@ void UI_Constructor::updateCallActivityHeaderLabel() {
             .arg(m_config.callsign_aging()));
 }
 
+/**
+ * @brief Populate the header bar's widgets.
+ *
+ * config_label sits in the static slot between the frequency and
+ * clock displays. It only displays for non-default configurations
+ */
+void UI_Constructor::createHeaderBar()
+{
+    config_label.setAlignment(Qt::AlignCenter);
+    {
+        QFont headerFont = config_label.font();
+        headerFont.setPointSize(14);
+        headerFont.setBold(true);
+        config_label.setFont(headerFont);
+    }
+    ui->horizontalLayout_17->insertWidget(2, &config_label);
+    config_label.hide(); // only shown for non-default configuration
+}
+
 void UI_Constructor::createControlBar()
 {
     statusBar()->hide();
+    
+    // give button columns stretch so they grow with available space,
+    // while spacer columns (already Expanding by default) stay lighter-weight gaps
+    for (int col : {0, 1, 2, 4, 5, 7, 8, 9, 11, 12}) {
+        ui->controlGridLayout->setColumnStretch(col, 1);
+    }
+    for (int col : {3, 6, 10}) {
+        ui->controlGridLayout->setColumnStretch(col, 0);
+    }
 
-    // status bar labels, push button controls, status bar
-    // styles defined in styles.h per platform
-    config_label.setAlignment(Qt::AlignCenter);
-    config_label.setMinimumSize(QSize{80, 18});
-    config_label.setStyleSheet(statusLabelStyle());
-    ui->horizontalLayoutControl->addWidget(&config_label);
-    config_label.hide(); // only shown for non-default configuration
-
-    statusMessage_label.setAlignment(Qt::AlignCenter);
-    statusMessage_label.setStyleSheet(statusLabelStyle());
-    ui->horizontalLayoutControl->addWidget(&statusMessage_label);
-    statusMessage_label.hide(); // only shown for 5 sec while a transient message is active
-
-    frequency_label.setAlignment(Qt::AlignCenter);
-    frequency_label.setMinimumSize(QSize{110, 18});
-    frequency_label.setStyleSheet(statusLabelStyle());
-    frequency_label.setText(QString("Freq: %1").arg(Radio::pretty_frequency_MHz_string(dialFrequency() + freq())));
-    ui->horizontalLayoutControl->addWidget(&frequency_label);
-
-    // Log QSO button
-    logQSOButton.setMinimumSize(QSize{50, 18});
-    logQSOButton.setToolTip(tr("Insert a new entry into the log"));
-    logQSOButton.setText("LOG");
-    logQSOButton.setStyleSheet(Styles::LogQSOButtonStyle);
-    ui->horizontalLayoutControl->addWidget(&logQSOButton);
-    connect(&logQSOButton, &QPushButton::clicked, this,
-            &UI_Constructor::on_logQSOButton_clicked);
-
-    // Mode/speed button
-    mode_button.setMinimumSize(QSize{90, 18});
-    mode_button.setStyleSheet(Styles::ModeButtonStyle);
-    mode_button.setToolTip(tr("Set the JS8 mode speed"));
+    ui->mode_button->setStyleSheet(Styles::ModeButtonStyle);
+    ui->mode_button->setToolTip(tr("Set the JS8 mode speed"));
     {
         QString modeLabelText;
         switch (m_nSubMode) {
-        case Varicode::JS8CallSlow:
-            modeLabelText = "Mode:Slow";
-            break;
-        case Varicode::JS8CallNormal:
-            modeLabelText = "Mode:Normal";
-            break;
-        case Varicode::JS8CallFast:
-            modeLabelText = "Mode:Fast";
-            break;
-        case Varicode::JS8CallTurbo:
-            modeLabelText = "Mode:JS840";
-            break;
-        case Varicode::JS8CallUltra:
-            modeLabelText = "Mode:JS860";
-            break;
-        default:
-            modeLabelText = "JS8";
-            break;
+        case Varicode::JS8CallSlow:   modeLabelText = "JS8 Slow";   break;
+        case Varicode::JS8CallNormal: modeLabelText = "JS8 Normal"; break;
+        case Varicode::JS8CallFast:   modeLabelText = "JS8 Fast";   break;
+        case Varicode::JS8CallTurbo:  modeLabelText = "JS8 40";     break;
+        case Varicode::JS8CallUltra:  modeLabelText = "JS8 60";     break;
+        default:                      modeLabelText = "JS8";        break;
         }
-        mode_button.setText(modeLabelText);
+        ui->mode_button->setText(modeLabelText);
     }
-    ui->horizontalLayoutControl->addWidget(&mode_button);
 
     modeSpeedMenu = new QMenu(this);
     modeSpeedMenu->addAction(ui->actionModeJS8Slow);
@@ -1383,7 +1355,7 @@ void UI_Constructor::createControlBar()
     modeSpeedMenu->addAction(ui->actionModeJS8Fast);
     modeSpeedMenu->addAction(ui->actionModeJS8Turbo);
     modeSpeedMenu->addAction(ui->actionModeJS8Ultra);
-    mode_button.installEventFilter(new EventFilter::MouseButtonPress(
+    ui->mode_button->installEventFilter(new EventFilter::MouseButtonPress(
         [this](QMouseEvent *event) {
             on_menuModeJS8_aboutToShow();
             modeSpeedMenu->popup(event->globalPosition().toPoint());
@@ -1392,84 +1364,68 @@ void UI_Constructor::createControlBar()
         this));
 
     // On/off control buttons
-    bindStatusButtonToAction(auto_reply_button, ui->actionModeAutoreply, "Auto Reply");
-    auto_reply_button.setToolTip(tr("Turn on/off Auto Reply"));
-    bindStatusButtonToAction(multi_button, ui->actionModeMultiDecoder, "Multi-Mode Decode");
-    multi_button.setToolTip(tr("Turn on/off decode of all mode speeds"));
-    bindStatusButtonToAction(hb_button, ui->actionModeJS8HB, "HB");
-    hb_button.setToolTip(tr("Turn on/off heartbeat networking"));
-    bindStatusButtonToAction(hb_ack_button, ui->actionHeartbeatAcknowledgements, "HB ACK");
-    hb_ack_button.setToolTip(tr("Turn on/off automatic heartbeat acknowledgements"));
+    bindStatusButtonToAction(ui->auto_reply_button, ui->actionModeAutoreply, "Auto Reply");
+    ui->auto_reply_button->setToolTip(tr("Turn on/off Auto Reply"));
+    bindStatusButtonToAction(ui->multi_button, ui->actionModeMultiDecoder, "Multi Decode");
+    ui->multi_button->setToolTip(tr("Turn on/off decode of all mode speeds"));
+    bindStatusButtonToAction(ui->hb_button, ui->actionModeJS8HB, "HB");
+    ui->hb_button->setToolTip(tr("Turn on/off heartbeat networking"));
+    bindStatusButtonToAction(ui->hb_ack_button, ui->actionHeartbeatAcknowledgements, "HB ACK");
+    ui->hb_ack_button->setToolTip(tr("Turn on/off automatic heartbeat acknowledgements"));
 
-    // Tx, Rx, Tune buttons
-    monitorTxButton.setMinimumSize(QSize{50, 18});
-    monitorTxButton.setCheckable(true);
-    monitorTxButton.setToolTip(tr("Enable or disable the transmitter"));
-    monitorTxButton.setText("TX");
-    monitorTxButton.setStyleSheet(Styles::MonitorTxButtonStyle);
-    ui->horizontalLayoutControl->addWidget(&monitorTxButton);
-    connect(&monitorTxButton, &QPushButton::toggled, this,
+    // Tx, Rx, Tune
+    ui->monitorTxButton->setToolTip(tr("Enable or disable the transmitter"));
+    ui->monitorTxButton->setText("TX");
+    ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
+    connect(ui->monitorTxButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorTxButton_toggled);
 
-    monitorButton.setMinimumSize(QSize{50, 18});
-    monitorButton.setCheckable(true);
-    monitorButton.setToolTip(tr("Enable or disable the receiver"));
-    monitorButton.setText("RX");
-    monitorButton.setStyleSheet(Styles::MonitorButtonStyle);
-    ui->horizontalLayoutControl->addWidget(&monitorButton);
-    connect(&monitorButton, &QPushButton::clicked, this,
+    ui->monitorButton->setToolTip(tr("Enable or disable the receiver"));
+    ui->monitorButton->setText("RX");
+    ui->monitorButton->setStyleSheet(Styles::MonitorButtonStyle);
+    connect(ui->monitorButton, &QPushButton::clicked, this,
             &UI_Constructor::on_monitorButton_clicked);
-    connect(&monitorButton, &QPushButton::toggled, this,
+    connect(ui->monitorButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorButton_toggled);
 
-    tuneButton.setMinimumSize(QSize{55, 18});
-    tuneButton.setCheckable(true);
-    tuneButton.setToolTip(tr("Transmit a tuning tone"));
-    tuneButton.setText("TUNE");
-    tuneButton.setStyleSheet(Styles::TuneButtonStyle);
-    ui->horizontalLayoutControl->addWidget(&tuneButton);
-    connect(&tuneButton, &QPushButton::clicked, this,
+    ui->tuneButton->setToolTip(tr("Transmit a tuning tone"));
+    ui->tuneButton->setText("TUNE");
+    ui->tuneButton->setStyleSheet(Styles::TuneButtonStyle);
+    connect(ui->tuneButton, &QPushButton::clicked, this,
             &UI_Constructor::on_tuneButton_clicked);
-    connect(&tuneButton, &QPushButton::toggled, this,
+    connect(ui->tuneButton, &QPushButton::toggled, this,
             &UI_Constructor::on_tuneButton_toggled);
 
     // Spot
-    spotButton.setMinimumSize(QSize{55, 18});
-    spotButton.setCheckable(true);
-    spotButton.setToolTip(tr("Spot to reporting networks"));
-    spotButton.setText("SPOT");
-    spotButton.setStyleSheet(Styles::MonitorButtonStyle);
-    ui->horizontalLayoutControl->addWidget(&spotButton);
-    connect(&spotButton, &QPushButton::clicked, this,
+    ui->spotButton->setToolTip(tr("Spot to reporting networks"));
+    ui->spotButton->setText("SPOT");
+    ui->spotButton->setStyleSheet(Styles::MonitorButtonStyle);
+    connect(ui->spotButton, &QPushButton::clicked, this,
             &UI_Constructor::on_spotButton_clicked);
-    connect(&spotButton, &QPushButton::toggled, this,
+    connect(ui->spotButton, &QPushButton::toggled, this,
             &UI_Constructor::on_spotButton_toggled);
-    
-    ui->horizontalLayoutControl->addStretch(1);
 
-    // wpm label
-    ui->horizontalLayoutControl->addWidget(&wpm_label);
-    wpm_label.setMinimumSize(QSize{120, 18});
-    wpm_label.setStyleSheet(statusLabelStyle());
-    wpm_label.setAlignment(Qt::AlignCenter);
+    // Log QSO button
+    ui->logQSOButton->setToolTip(tr("Insert a new entry into the log"));
+    ui->logQSOButton->setText("LOG");
+    ui->logQSOButton->setStyleSheet(Styles::LogQSOButtonStyle);
+    connect(ui->logQSOButton, &QPushButton::clicked, this,
+            &UI_Constructor::on_logQSOButton_clicked);
 }
 
-void UI_Constructor::bindStatusButtonToAction(QPushButton &button, QAction *action,
+void UI_Constructor::bindStatusButtonToAction(QPushButton *button, QAction *action,
                                               QString const &label) {
-    button.setCheckable(true);
-    button.setMinimumSize(QSize{80, 18});
-    button.setText(label);
-    button.setStyleSheet(Styles::MonitorButtonStyle);
-    button.setChecked(action->isChecked());
-    button.setEnabled(action->isEnabled());
-    ui->horizontalLayoutControl->addWidget(&button);
+    button->setText(label);
+    button->setStyleSheet(Styles::MonitorButtonStyle);
+    button->setChecked(action->isChecked());
+    button->setEnabled(action->isEnabled());
 
-    connect(&button, &QPushButton::clicked, action, [action](bool checked) {
+    connect(button, &QPushButton::clicked, action, [action](bool checked) {
         action->setChecked(checked);
     });
-    connect(action, &QAction::changed, &button, [&button, action]() {
-        button.setChecked(action->isChecked());
-        button.setEnabled(action->isEnabled());
+    connect(action, &QAction::changed, button, [button, action]() {
+        button->setChecked(action->isChecked());
+        button->setEnabled(action->isEnabled());
     });
 }
 
@@ -3389,7 +3345,7 @@ bool UI_Constructor::ensureNotIdle() {
 }
 
 bool UI_Constructor::ensureCanTransmit() {
-    return monitorTxButton.isChecked();
+    return ui->monitorTxButton->isChecked();
 }
 
 bool UI_Constructor::ensureCreateMessageReady(const QString &text) {
@@ -4114,7 +4070,7 @@ bool UI_Constructor::canCurrentModeSendHeartbeat() const {
 
 void UI_Constructor::prepareMonitorControls() {
     // on_monitorButton_toggled(!m_config.monitor_off_at_startup());
-    monitorTxButton.setChecked(!m_config.transmit_off_at_startup());
+    ui->monitorTxButton->setChecked(!m_config.transmit_off_at_startup());
 }
 
 void UI_Constructor::prepareHeartbeatMode(bool enabled) {
@@ -5205,7 +5161,7 @@ void UI_Constructor::end_tuning() {
 void UI_Constructor::stop_tuning() {
     tuneATU_Timer.stop(); // stop tune watchdog when stopping Tune manually
     on_tuneButton_clicked(false);
-    tuneButton.setChecked(false);
+    ui->tuneButton->setChecked(false);
     m_isTimeToSend = false;
     m_tune = false;
 }
@@ -5232,20 +5188,6 @@ void UI_Constructor::resetPushButtonToggleText(QPushButton *btn) {
         btn->setText(on + text.replace(on, ""));
     } else {
         btn->setText(text.replace(on, ""));
-    }
-#endif
-
-#if PUSH_BUTTON_MIN_WIDTH
-    int width = 0;
-    QList<QPushButton *> btns{&monitorTxButton, &monitorButton, &logQSOButton,
-                             &tuneButton,       &spotButton,    &auto_reply_button,
-                             &multi_button,     &hb_button,     &hb_ack_button};
-    for (auto b : btns) {
-        width = qMax(width, b->geometry().width());
-    }
-
-    foreach (auto child, btns) {
-        child->setMinimumWidth(width);
     }
 #endif
 }
@@ -5593,7 +5535,7 @@ void UI_Constructor::tryNotify(QString const &key) {
 void UI_Constructor::displayTransmit() {
     // Transmit Activity
     update_dynamic_property(ui->startTxButton, "transmitting", m_transmitting);
-    update_dynamic_property(&monitorTxButton, "transmitting",
+    update_dynamic_property(ui->monitorTxButton, "transmitting",
                             m_transmitting);
 }
 
@@ -5611,25 +5553,25 @@ void UI_Constructor::updateModeButtonText() {
     QString modeLabelText;
     switch (m_nSubMode) {
     case Varicode::JS8CallSlow:
-        modeLabelText = "Mode: Slow";
+        modeLabelText = "JS8 Slow";
         break;
     case Varicode::JS8CallNormal:
-        modeLabelText = "Mode: Normal";
+        modeLabelText = "JS8 Normal";
         break;
     case Varicode::JS8CallFast:
-        modeLabelText = "Mode: Fast";
+        modeLabelText = "JS8 Fast";
         break;
     case Varicode::JS8CallTurbo:
-        modeLabelText = "Mode: JS8 40";
+        modeLabelText = "JS8 40";
         break;
     case Varicode::JS8CallUltra:
-        modeLabelText = "Mode: JS8 60";
+        modeLabelText = "JS8 60";
         break;
     default:
         modeLabelText = "JS8";
         break;
     }
-    mode_button.setText(modeLabelText);
+    ui->mode_button->setText(modeLabelText);
 }
 
 void UI_Constructor::updateButtonDisplay() {
@@ -5660,9 +5602,6 @@ void UI_Constructor::updateButtonDisplay() {
     ui->queryButton->setText(
         emptyCallsign ? "Directed"
                       : QString("Directed to %1").arg(selectedCallsign));
-
-    // update mode button text
-    updateModeButtonText();
 }
 
 void UI_Constructor::updateHBButtonDisplay() {
@@ -5764,7 +5703,6 @@ void UI_Constructor::refreshTextDisplay() {
     m_txTextDirty = false;
 
     updateTextWordCheckerDisplay();
-    updateTextStatsDisplay(transmitText, count);
     updateTxButtonDisplay();
 
 #else
@@ -5791,7 +5729,6 @@ void UI_Constructor::refreshTextDisplay() {
                 m_txTextDirty = false;
 
                 updateTextWordCheckerDisplay();
-                updateTextStatsDisplay(transmitText, m_txFrameCountEstimate);
                 updateTxButtonDisplay();
             });
     t->start();
@@ -5804,20 +5741,6 @@ void UI_Constructor::updateTextWordCheckerDisplay() {
     }
 
     JSCChecker::checkRange(ui->extFreeTextMsgEdit, 0, -1);
-}
-
-void UI_Constructor::updateTextStatsDisplay(QString text, int count) {
-    const double fpm = 60.0 / m_TRperiod;
-    if (count > 0) {
-        auto words = text.split(" ", Qt::SkipEmptyParts).length();
-        auto wpm = QString::number(words / (count / fpm), 'f', 1);
-        auto cpm = QString::number(text.length() / (count / fpm), 'f', 1);
-        wpm_label.setText(QString("%1wpm / %2cpm").arg(wpm).arg(cpm));
-        wpm_label.setVisible(true);
-    } else {
-        wpm_label.setVisible(false);
-        wpm_label.clear();
-    }
 }
 
 void UI_Constructor::updateTxButtonDisplay() {
@@ -6742,8 +6665,6 @@ void UI_Constructor::sendNetworkMessage(QString const &type,
 
 void UI_Constructor::pskReporterError(QString const &message) {
     qCDebug(mainwindow_js8) << "PSK Reporter Error:" << message;
-
-    showStatusMessage(tr("Spotting to PSK Reporter unavailable"));
 }
 
 void UI_Constructor::setRig(Frequency f) {
@@ -7039,3 +6960,4 @@ QByteArray UI_Constructor::wisdomFileName() const {
 
 Q_LOGGING_CATEGORY(decoder_js8, "decoder.js8", QtWarningMsg)
 Q_LOGGING_CATEGORY(mainwindow_js8, "mainwindow.js8", QtWarningMsg)
+

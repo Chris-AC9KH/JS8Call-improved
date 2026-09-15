@@ -26,34 +26,14 @@
 Q_DECLARE_LOGGING_CATEGORY(activitystoragecontroller_js8)
 
 namespace {
-/**
- * @brief Order two timestamps, treating an invalid one as the older.
- * @param lhs The candidate timestamp.
- * @param rhs The timestamp it must beat.
- * @return true if lhs is valid and strictly newer than rhs.
- *
- * Explicit rather than QDateTime's operators: since Qt 6.8 a comparison
- * involving an invalid QDateTime is unordered, so both < and <= return
- * false and a row carrying no timestamp - every manually added station,
- * and every legacy-imported row - would win. Shared by the seed and by
- * persistCallActivity()'s cache merge, so both resolve a stored row
- * against a live one identically.
- */
+/// @brief True if lhs is valid and strictly newer than rhs (invalid = oldest).
 bool newerThan(QDateTime const &lhs, QDateTime const &rhs) {
     if (!lhs.isValid()) return false;
     if (!rhs.isValid()) return true;
     return rhs < lhs;
 }
 
-/**
- * @brief Carry a displaced row's enrichment onto the row that won.
- * @param winner The newer row, enriched in place.
- * @param loser The row it replaces.
- *
- * Mirrors the UPSERT's own CASE guards: a bare re-hearing carries no
- * grid and neither timestamp, so taking them from the row it displaces
- * keeps what the database correctly kept.
- */
+/// @brief Carry a displaced row's grid/ACK/CQ enrichment onto the winner.
 void carryEnrichment(CallDetail &winner, CallDetail const &loser) {
     if (winner.grid.isEmpty()) winner.grid = loser.grid;
     if (!winner.ackTimestamp.isValid())
@@ -74,17 +54,7 @@ ActivityStorageController::ActivityStorageController(Context context,
 
 ActivityStorageController::~ActivityStorageController() = default;
 
-/**
- * @brief Wire up the debounced write-on-change persistence of the RX pane.
- *
- * Any change re-arms the short debounce, so the stored copy trails the
- * pane by at most a few seconds instead of being written only at
- * shutdown. The second timer is armed once and deliberately not
- * restarted by further changes: sustained sub-interval traffic (fast
- * submodes, busy nets) would otherwise re-arm the debounce faster than
- * it can fire, deferring the write - and growing the crash-loss window -
- * indefinitely.
- */
+/// @brief Wire up the debounced write-on-change persistence of the RX pane.
 void ActivityStorageController::setupRxTextAutosave() {
     auto const flushRxText = [this]() {
         m_rxTextSaveTimer.stop();
@@ -102,13 +72,7 @@ void ActivityStorageController::setupRxTextAutosave() {
             });
 }
 
-/**
- * @brief Start the grace period for an as-yet unconfirmed bucket.
- *
- * While it runs, RX text for the startup guess is held in the pane rather
- * than filed under a band the rig has not reported; see
- * saveRxTextForBand().
- */
+/// @brief Start the grace period for an as-yet unconfirmed bucket.
 void ActivityStorageController::beginStartupGrace() {
     m_activityStartupTimer.start();
 }
@@ -116,14 +80,9 @@ void ActivityStorageController::beginStartupGrace() {
 /**
  * @brief Show the legacy ini RX text on a degraded or disabled start.
  *
- * Purely for display, and only on a degraded start or a disabled
- * session: nothing here can reach the store either way. The window's
- * startup already restored that copy from the ini and never rewrites it,
- * so showing it beats showing an empty pane.
- *
- * The copy's extent is recorded in m_rxTextLegacyBand and
- * m_rxTextLegacyBlocks, because the recovery seed and the close-time
- * sweep treat only the text below it as this session's own.
+ * Display only. Records the copy's extent in m_rxTextLegacyBand /
+ * m_rxTextLegacyBlocks so later saves/seeds treat only session text
+ * below it as the session's own.
  */
 void ActivityStorageController::showLegacyRxTextIfDegraded() {
     if ((activityDB()->isOpen() && !m_activityStoreDisabled) ||
@@ -151,13 +110,6 @@ void ActivityStorageController::showLegacyRxTextIfDegraded() {
 /**
  * @brief The rig reported the band the window already believes it is on.
  * @param band The band reported.
- *
- * Confirms the bucket, moving the panes first if they are still showing
- * the startup guess. The confirmed flag is set only after
- * switchActivityBucket(), so the flush inside that switch still sees the
- * outgoing bucket as unconfirmed - otherwise the startup guess's pane,
- * which by then holds this band's decodes too, is written under the
- * guessed band.
  */
 void ActivityStorageController::bandUnchanged(QString const &band) {
     if (m_activityBandLoaded && m_activityBand != band) {
@@ -170,11 +122,6 @@ void ActivityStorageController::bandUnchanged(QString const &band) {
 /**
  * @brief The rig reported a different band from the one on screen.
  * @param band The band reported.
- *
- * The confirmed flag is set after switchActivityBucket(), so the flush
- * inside it still treats the outgoing bucket as the startup guess it is.
- * The band is also recorded as confirmed, so the close-time sweep does
- * not skip its RX text.
  */
 void ActivityStorageController::bandChanged(QString const &band) {
     switchActivityBucket(band);
@@ -186,21 +133,10 @@ void ActivityStorageController::bandChanged(QString const &band) {
  * @brief Move the activity panes from one storage bucket to another.
  * @param band The bucket to show: a band name, or "" for out-of-plan.
  *
- * Every caller - a band change, and the rig's first report correcting the
- * startup guess - goes through here, so no path can leave one bucket's
- * activity on screen under another's name, which is issue #267 itself.
- *
- * The outgoing bucket, when it is still the startup guess, has its cached
- * panes dropped rather than parked: its pane may hold text and stations
- * heard on the band the rig has just reported, and restoring that cache
- * on a later visit would file them under the guessed band. The bucket
- * reloads from the store at its next visit. Where the rig has not
- * reported at all only the two per-bucket panes move; clearActivity()
- * would also empty the compose box and the decode, command and spot
- * queues the session has accumulated. That state is the confirmation
- * flag, not an empty bucket name: "" is also the out-of-plan bucket,
- * whose Band Activity must not follow the panes to a band the rig later
- * reports.
+ * Sole path for changing the displayed bucket (issue #267). If the
+ * outgoing bucket is still just the startup guess, its cache is dropped
+ * rather than parked, since it may hold activity heard on the
+ * newly-reported band.
  */
 void ActivityStorageController::switchActivityBucket(QString const &band) {
     if (m_activityBandLoaded && m_activityBand == band) {
@@ -235,16 +171,8 @@ void ActivityStorageController::switchActivityBucket(QString const &band) {
 /**
  * @brief Take up the bucket the window has just restored on screen.
  * @param band The bucket now displayed.
- * @param paneReloaded True when the panes were actually reloaded from the
- *        RAM band caches; false when re-entering the bucket already on
- *        screen, where the live panes are newer than any cache entry.
- *
- * A reload disarms the saver and resyncs its change tracking, since what
- * was restored is what the cache holds. A band whose last flush failed is
- * the exception: its tracking is left at the -1 sentinel so it keeps
- * reporting unsaved, and its debounce is restarted here, because only
- * document activity would otherwise arm it and a quiet band would never
- * retry.
+ * @param paneReloaded True when panes were reloaded from the RAM band
+ *        caches; false when re-entering the bucket already on screen.
  */
 void ActivityStorageController::bucketRestored(QString const &band,
                                                bool paneReloaded) {
@@ -269,10 +197,7 @@ void ActivityStorageController::bucketRestored(QString const &band,
     }
 }
 
-/**
- * @brief Path of the per-band activity store, beside the message inbox.
- * @return The absolute native path of activity.db3.
- */
+/// @brief Path of the per-band activity store, beside the message inbox.
 QString ActivityStorageController::activityPath() const {
     return QDir::toNativeSeparators(
         m_ctx.config->writeable_data_dir().absoluteFilePath("activity.db3"));
@@ -281,20 +206,9 @@ QString ActivityStorageController::activityPath() const {
 /**
  * @brief The activity store, opened on first use.
  *
- * A store that fails to open - or that closed itself after repeated
- * failures - is retried on a throttle rather than per call. Callers may
- * always use the returned object: every method on it is a no-op while it
- * is closed. The throttle is armed however the handle ended up closed, so
- * a store that breaks mid-session is retried too, and discovering that
- * self-close here is its one operator-visible signal, the per-write
- * warnings being suppressed once the handle is closed.
- *
- * The status message is emitted once per failure episode rather than once
- * per retry because a blink every thirty seconds would be a distracting
- * nuisance to the operator for a condition that, once known, doesn't need
- * repeating. The handle is never replaced while a batch holds it, or
- * callers inside beginBatch() and endBatch() would be left with a dangling
- * pointer and a vanished transaction.
+ * Reopen attempts are throttled rather than retried per call. Callers
+ * may always use the returned pointer: every method is a no-op while
+ * closed. Never replaced mid-batch.
  */
 ActivityDB *ActivityStorageController::activityDB() {
     if (m_activityDB && !m_activityDB->isOpen() &&
@@ -303,10 +217,6 @@ ActivityDB *ActivityStorageController::activityDB() {
         qCWarning(activitystoragecontroller_js8)
             << "activity store closed after repeated failures:"
             << m_activityDB->error();
-        m_ctx.showStatusMessage(
-            tr("Activity database unavailable - activity is not being "
-               "saved (%1)")
-                .arg(m_activityDB->error()));
     }
     bool const retrying = m_activityDB && !m_activityDB->isOpen() &&
                           m_activityDBRetryTimer.isValid() &&
@@ -321,12 +231,6 @@ ActivityDB *ActivityStorageController::activityDB() {
             qCWarning(activitystoragecontroller_js8)
                 << "could not open" << activityPath() << ":"
                 << m_activityDB->error();
-            if (!retrying) {
-                m_ctx.showStatusMessage(
-                    tr("Activity database unavailable - activity will "
-                       "not be saved (%1)")
-                        .arg(m_activityDB->error()));
-            }
             m_activityDBRetryTimer.start();
         } else {
             m_activityDBRetryTimer.invalidate();
@@ -346,17 +250,7 @@ ActivityDB *ActivityStorageController::activityDB() {
     return m_activityDB.get();
 }
 
-/**
- * @brief Open a write batch; nested batches share one transaction.
- *
- * Batches are lazy: opening one records only the intent and the
- * transaction starts at the first write inside it, so a decode cycle that
- * persists nothing costs nothing - no BEGIN IMMEDIATE taking the write
- * lock on the GUI thread with its 5 s busy timeout, and no store-reopen
- * probe on behalf of a caller that never writes. The outermost begin also
- * clears the previous batch's failed-BEGIN mark, so a batch whose
- * transaction could not be opened does not suppress the next one's.
- */
+/// @brief Open a write batch; nested batches share one lazily-started transaction.
 void ActivityStorageController::beginBatch() {
     if (m_activityBatchDepth == 0) {
         m_activityBatchBeginFailed = false;
@@ -364,14 +258,7 @@ void ActivityStorageController::beginBatch() {
     ++m_activityBatchDepth;
 }
 
-/**
- * @brief Start the transaction a batch deferred, at its first write.
- *
- * A BEGIN that fails is attempted once per batch rather than once per
- * write, each attempt being able to block the GUI thread for the busy
- * timeout. That batch's writes then run as autocommits, as they do after
- * any failed BEGIN, and the failure counts toward the store's self-close.
- */
+/// @brief Start the transaction a batch deferred, at its first write.
 void ActivityStorageController::startActivityBatchIfPending() {
     if (m_activityBatchDepth > 0 && !m_activityBatchBeginFailed &&
         m_activityDB && m_activityDB->isOpen() &&
@@ -400,17 +287,9 @@ void ActivityStorageController::endBatch() {
  * @brief The storage key for this MultiSettings configuration.
  * @return A UUID generated once into the configuration's own settings.
  *
- * Activity is keyed by that id rather than by the configuration name: it
- * follows the configuration through renames automatically, is purged
- * with the settings by MultiSettings' "Reset Configuration" - orphaning
- * the old rows and starting clean, with no wipe heuristics that could
- * misfire - and a clone, arriving with a marker naming its source in
- * place of an id, mints a fresh one here and takes a copy of its
- * source's rows under it at its first start, so the two then diverge.
- * The id is captured once, because during a configuration switch
- * MultiSettings updates its state before this window closes and the
- * outgoing configuration's final flush must not land under the incoming
- * configuration's key.
+ * Keyed by id rather than name so it survives renames, is purged by
+ * "Reset Configuration", and lets a clone diverge from its source after
+ * its first-start copy.
  */
 QString ActivityStorageController::activityConfigId() const {
     if (m_activityConfigId.isEmpty()) {
@@ -467,26 +346,14 @@ CallDetail ActivityStorageController::fromCallRecord(
 /**
  * @brief Write one call-activity row to the store.
  * @param d The row to persist.
- * @param fallbackToCurrentBand File a row carrying no dial under the
- *        bucket on screen; passed only where that is genuinely where it
- *        belongs (a manually added station, a logbook grid backfill, and
- *        qsy()'s offset write-back for those same rows).
+ * @param fallbackToCurrentBand File a dial-less row under the bucket on
+ *        screen; only for manual adds, grid backfills, and qsy()'s
+ *        write-back for those same rows.
  *
- * Rows are filed under the band of their own dial frequency, because
- * processDecodeEvent() deliberately stamps records with the capture-time
- * dial so that decodes completing after a QSY, and inbox senders, keep
- * the band they were heard on - keying by the live band would be issue
- * #267 all over again. A dial that resolves to no band files under "",
- * the out-of-plan bucket.
- *
- * A row filed under a bucket other than the one on screen is merged into
- * that bucket's cached table rather than forcing a re-seed of it: the
- * seed's RX-text merge is not idempotent against a pane restored from the
- * RAM cache, so un-seeding a bucket to refresh its call table would
- * splice that bucket's stored history in behind itself on every return
- * visit. The merge follows the seed's own rules - a cached row with a
- * strictly newer timestamp stands, otherwise the incoming row replaces it
- * and carries the cached row's enrichment across.
+ * Filed under the band of the row's own dial (not the live band), so
+ * post-QSY decodes and inbox senders keep the band they were heard on.
+ * If that's a different bucket than the one displayed, the row is merged
+ * into that bucket's RAM cache instead of forcing a re-seed.
  */
 void ActivityStorageController::persistCallActivity(
     CallDetail const &d, bool fallbackToCurrentBand) {
@@ -531,12 +398,9 @@ void ActivityStorageController::persistCallActivity(
  * @brief Rewrite every displayed offset after a waterfall nudge.
  * @param hzDelta The shift applied to the receiver's offsets.
  *
- * Only rows whose own dial belongs to the current band are written back:
- * entries displayed here but keyed to another band (post-QSY stragglers,
- * inbox senders carrying their message's dial) did not QSY, and dial-less
- * RAM-only entries must not be promoted into the store by a nudge. The
- * dial-less rows this bucket does store - manual adds - take the
- * fallback path instead, since Bands::find(0) resolves to "".
+ * Only writes back rows whose own dial belongs to the current band;
+ * cross-band stragglers and dial-less RAM-only entries are skipped
+ * (dial-less manual adds go through the fallback path instead).
  */
 void ActivityStorageController::adjustCallActivityOffsets(int hzDelta) {
     if (m_ctx.callActivity->isEmpty()) {
@@ -574,27 +438,13 @@ ActivityStorageController::htmlBelowLegacyCopy(QTextDocument *doc) const {
 }
 
 /**
- * @brief Merge a bucket's stored history into the session, once.
+ * @brief Merge a bucket's stored history into the session, once per session.
  * @param band The bucket to seed.
  *
- * Runs at a bucket's first visit each session. Stored rows are merged
- * under whatever the session already holds - the newer of the two wins
- * per callsign, and stored enrichment (grid, ACK and CQ marks) survives a
- * bare re-hearing - and the stored RX text is placed behind the pane's
- * own lines. Until a bucket has been seeded its RX-text saves are
- * suppressed, so a document that does not contain the stored history can
- * never overwrite it; a failed seed is retried at the flush cadence, at
- * the next visit to the bucket, and after the store reopens. A failed
- * load returns without touching the RX pane, or the retry would splice
- * the stored text in a second time.
- *
- * The callsign-aging setting is applied to what the store contributes,
- * mirroring master's save-time prune: it bounds what a session can load,
- * while the store itself keeps everything, and without it stale rows
- * reach consumers that put an SNR on the air. Rows the session has
- * already heard are never pruned. The enrichment carried across from a
- * stored row mirrors the UPSERT's own CASE guards, so a bare re-hearing
- * cannot drop from the table what the database correctly kept.
+ * Newer row wins per callsign; enrichment (grid/ACK/CQ) survives a bare
+ * re-hearing. Stored RX text is placed behind the pane's own lines.
+ * Saves are suppressed until seeded, and a failed seed retries at the
+ * flush cadence, next visit, and after the store reopens.
  */
 void ActivityStorageController::seedActivityForBand(QString const &band) {
     if (m_activityStoreDisabled || !activityDB()->isOpen()) {
@@ -719,24 +569,10 @@ void ActivityStorageController::seedActivityForBand(QString const &band) {
  * @brief Persist the RX pane for a bucket, if it is safe to do so.
  * @param band The bucket the pane's contents belong to.
  *
- * Declines while the bucket is only the startup guess (RX text carries no
- * per-line frequency, so it could be filed under a band it was never
- * heard on) or while the bucket is unseeded, marking it for the
- * close-time sweep in both cases. An empty pane removes the stored row
- * rather than storing an empty one, or the debounced save after a Clear
- * would resurrect it. The startup grace period covers a station running
- * without CAT, and an unseeded bucket retries its seed at this flush
- * cadence, so one transient store failure cannot disable persistence for
- * a whole parked session.
- *
- * After a failed save the debounce is re-armed here, because the flush
- * stopped both timers before calling and only new document activity would
- * otherwise restart them - a band that fell quiet after one failed save
- * would never try again. It is re-armed at sixty seconds rather than
- * five, the thirty-second cap timer then setting the actual retry
- * cadence: a store that stays unwritable would otherwise serialise the
- * whole unbounded RX document on the GUI thread every five seconds
- * forever. That back-off lasts until the next successful save.
+ * Declines (and marks the bucket dirty for the close-time sweep) while
+ * it's only the startup guess or still unseeded. An empty pane deletes
+ * the stored row rather than storing an empty one. A failed save
+ * re-arms the debounce at a 60s back-off until the next success.
  */
 void ActivityStorageController::saveRxTextForBand(QString const &band) {
     if (m_activityStoreDisabled) {
@@ -801,14 +637,7 @@ void ActivityStorageController::saveRxTextForBand(QString const &band) {
     }
 }
 
-/**
- * @brief Erase the legacy [CallActivity] group and RXActivity key.
- *
- * Master's writeSettings() rewrote both at every close, so a reset
- * genuinely destroyed the old data; leaving them in place would keep a
- * full, readable copy of everything the user asked to erase, and would
- * let an older build or a later un-tick resurrect it.
- */
+/// @brief Erase the legacy [CallActivity] group and RXActivity ini key.
 void ActivityStorageController::purgeLegacyActivityIni() {
     m_ctx.settings->beginGroup("CallActivity");
     m_ctx.settings->remove("");
@@ -819,28 +648,15 @@ void ActivityStorageController::purgeLegacyActivityIni() {
 }
 
 /**
- * @brief One-time import of the legacy .ini activity data into
- *        activity.db3, following the inbox_v1 -> inbox_v2 pattern: the
- *        legacy [CallActivity] group and RXActivity key are read once and
- *        left in place for older versions of the software.
+ * @brief One-time import of legacy .ini activity data into activity.db3.
  * @return True when the configuration needs no further import.
  *
- * Rows are attributed to the band each record was heard on, via its
- * stored dial; the RX text blob has no per-line frequency, so it goes to
- * the band of the last-known dial. The fire-once marker is a row in the
- * store keyed by the configuration id, so it follows the data it gates;
- * one that cannot be read defers the import rather than risk a re-import.
- *
- * A clone arrives with a marker naming its source in place of an id of
- * its own; the source's rows are copied under the fresh id first, and the
- * marker is removed only once that copy has run, so a failure retries at
- * the next start rather than losing the inherited history. The import is
- * one transaction with the marker inside it: marking a partial import
- * done would lose the failed rows, the ini group never being re-read.
- *
- * A requested reset that cannot run disables the session, and the legacy
- * ini keys are purged even then: they hold a copy of the same activity,
- * which a later reopen or un-tick would otherwise splice back.
+ * Rows go to the band of their stored dial; the RX text blob (no
+ * per-line frequency) goes to the last-known dial's band. Gated by a
+ * fire-once marker row keyed by configuration id, written in the same
+ * transaction as the import so a failure retries cleanly. A clone
+ * (carrying a source marker instead of its own id) copies its source's
+ * rows first.
  */
 bool ActivityStorageController::importLegacyActivityIfNeeded() {
     auto *db = activityDB();
@@ -856,10 +672,6 @@ bool ActivityStorageController::importLegacyActivityIfNeeded() {
             m_activityStoreDisabled = true;
             qCWarning(activitystoragecontroller_js8)
                 << "clone copy deferred: the activity store is closed";
-            m_ctx.showStatusMessage(
-                tr("Activity database unavailable - the cloned "
-                   "configuration's history will be copied at the next "
-                   "start"));
         }
         return false;
     }
@@ -880,10 +692,6 @@ bool ActivityStorageController::importLegacyActivityIfNeeded() {
             qCWarning(activitystoragecontroller_js8)
                 << "could not copy the cloned configuration's activity:"
                 << db->error();
-            m_ctx.showStatusMessage(
-                tr("Could not copy the cloned configuration's activity - "
-                   "activity will not be saved this session (%1)")
-                    .arg(db->error()));
             m_activityStoreDisabled = true;
             return false;
         }
@@ -893,10 +701,6 @@ bool ActivityStorageController::importLegacyActivityIfNeeded() {
         if (!db->clearConfig(config)) {
             qCWarning(activitystoragecontroller_js8)
                 << "could not reset stored activity:" << db->error();
-            m_ctx.showStatusMessage(
-                tr("Could not reset stored activity - activity will not "
-                   "be saved this session (%1)")
-                    .arg(db->error()));
             m_activityStoreDisabled = true;
             purgeLegacyActivityIni();
             return false;
@@ -995,33 +799,17 @@ bool ActivityStorageController::importLegacyActivityIfNeeded() {
 /**
  * @brief Storage half of the "Clear All Activity" action.
  *
- * Called after the window has cleared the panes: clearActivity()'s inbox
- * refresh re-persists every unread sender and would otherwise repopulate
- * the store the wipe had just emptied.
- *
- * "All" spans every band and the session's RAM band caches, not just the
- * bucket on screen: dropping only the current band's rows would let the
- * others reload as if never cleared, and a hop back to a previously
- * visited band would restore its pre-clear snapshot for the next
- * debounced save to write straight back into the store. Every bucket is
- * then marked unseeded - on success because the store is empty, on
- * failure because the panes no longer hold the stored history and a save
- * would destroy it. A session whose store is disabled empties the panes
- * and says so, rather than reporting a delete that did not happen.
+ * Spans every band, including RAM band caches, not just the bucket on
+ * screen. Every bucket is marked unseeded afterward so nothing reloads
+ * stale pre-clear history. Called after the window clears its panes, to
+ * avoid the inbox refresh repopulating what was just wiped.
  */
 void ActivityStorageController::clearAllActivity() {
-    if (m_activityStoreDisabled) {
-        m_ctx.showStatusMessage(
-            tr("Activity is not being saved this session - the stored "
-               "history was not cleared"));
-    }
     bool const stored = m_activityStoreDisabled ||
                         activityDB()->clearConfig(activityConfigId());
     if (!stored) {
         qCWarning(activitystoragecontroller_js8)
             << "clear all activity failed:" << lastStoreError();
-        m_ctx.showStatusMessage(tr("Could not clear stored activity (%1)")
-                                    .arg(lastStoreError()));
         m_rxTextSaveTimer.stop();
         m_rxTextSaveMaxTimer.stop();
         m_seedRetryTimer.start();
@@ -1042,21 +830,12 @@ void ActivityStorageController::clearAllActivity() {
 /**
  * @brief The "Clear RX Activity" action, store and pane.
  *
- * The store is cleared before the pane: if the delete fails the pane
- * keeps its text, so no later seed can splice the stored history back in
- * and re-persist it, silently undoing the clear. On that failure the
- * bucket is forced unseeded before saves resume - the pane no longer
- * holds the stored text, so a save would overwrite it - and the debounce
- * the pane clear arms is stopped, or its retry would seed the bucket and
- * put the "cleared" text back on screen. A session whose store is
- * disabled clears the pane and says so, rather than reporting a delete
- * that did not happen.
+ * Store is cleared before the pane, so a delete failure leaves the pane
+ * intact rather than risking a later seed splicing the stored text back
+ * in. On failure the bucket is forced unseeded and its debounce stopped.
  */
 void ActivityStorageController::clearRxActivity() {
     if (m_activityStoreDisabled) {
-        m_ctx.showStatusMessage(
-            tr("Activity is not being saved this session - the stored "
-               "history was not cleared"));
     }
     bool const stored =
         m_activityStoreDisabled ||
@@ -1064,8 +843,6 @@ void ActivityStorageController::clearRxActivity() {
     if (!stored) {
         qCWarning(activitystoragecontroller_js8)
             << "clear RX activity failed:" << lastStoreError();
-        m_ctx.showStatusMessage(tr("Could not clear stored RX text (%1)")
-                                    .arg(lastStoreError()));
         m_activitySeeded.remove(m_activityBand);
         m_rxTextSaveTimer.stop();
         m_rxTextSaveMaxTimer.stop();
@@ -1086,32 +863,16 @@ void ActivityStorageController::clearRxActivity() {
 /**
  * @brief The "Clear Call Activity" action, store and pane.
  *
- * Bucket-scoped by design: a row displayed here but stored under another
- * band (its own dial's band - e.g. a decode that completed just after a
- * QSY) is that band's history, which this action cannot see and must not
- * destroy. Unread inbox senders reappear regardless - they are
- * re-synthesized from inbox.db3, the source of truth for unread mail.
- *
- * On a failed delete the bucket is deliberately not un-seeded: the RX
- * pane is untouched and still contains this bucket's stored text, so
- * forcing a re-seed would splice that history in a second time. The rows
- * simply return at the next session, which the message above reports. A
- * session whose store is disabled clears the pane and says so, rather
- * than reporting a delete that did not happen.
+ * Bucket-scoped: rows stored under another band (e.g. a post-QSY
+ * decode) are untouched. Unread inbox senders reappear regardless,
+ * re-synthesized from inbox.db3. On failure the bucket is left seeded,
+ * since the pane still holds its stored text.
  */
 void ActivityStorageController::clearCallActivity() {
-    if (m_activityStoreDisabled) {
-        m_ctx.showStatusMessage(
-            tr("Activity is not being saved this session - the stored "
-               "history was not cleared"));
-    }
     if (!m_activityStoreDisabled &&
         !activityDB()->deleteCalls(activityConfigId(), m_activityBand)) {
         qCWarning(activitystoragecontroller_js8)
             << "clear call activity failed:" << lastStoreError();
-        m_ctx.showStatusMessage(
-            tr("Could not clear stored call activity (%1)")
-                .arg(lastStoreError()));
     }
     m_ctx.clearCallActivityPane();
 }
@@ -1120,16 +881,9 @@ void ActivityStorageController::clearCallActivity() {
  * @brief Drop one station's stored row for the bucket on screen.
  * @param call The callsign the operator removed from the table.
  *
- * Bucket-scoped: only the on-screen bucket's stored row is deleted. A row
- * the same station holds on another band is that band's history, which
- * this context cannot see and must not destroy; an unread inbox sender
- * reappears regardless, re-synthesized from inbox.db3. Rows are stored
- * under the trimmed callsign. A closed store is reported as such, rather
- * than as the row being filed under another band; that state is read
- * before the delete, so a delete whose own failure closes the handle
- * still reports only the removal. That message is read off the handle
- * directly, as endBatch() does, so a third-strike self-close cannot add
- * the accessor's own status message on top of this one.
+ * Bucket-scoped; a row on another band is untouched. Whether the store
+ * was open is read before the delete, so a self-close triggered by the
+ * delete itself doesn't get misreported as the row being on another band.
  */
 void ActivityStorageController::removeStoredCall(QString const &call) {
     if (m_activityStoreDisabled || !m_activityBandLoaded) {
@@ -1141,38 +895,18 @@ void ActivityStorageController::removeStoredCall(QString const &call) {
         return;
     }
     if (!wasOpen) {
-        m_ctx.showStatusMessage(
-            tr("Activity database unavailable - %1 was not removed from "
-               "stored activity")
-                .arg(call));
         return;
     }
-    auto const why = lastStoreError();
-    m_ctx.showStatusMessage(
-        why.isEmpty()
-            ? tr("%1 is stored under another band and will return there")
-                  .arg(call)
-            : tr("Could not remove %1 from stored activity (%2)")
-                  .arg(call, why));
 }
 
 /**
  * @brief Final flush of everything the session has not written yet.
  *
- * Covers anything the debounced save timer has not written. A bucket that
- * was never seeded - the store was unusable at its first visit - gets one
- * last seed attempt first, because saves are suppressed while unseeded
- * and the whole session's RX text would otherwise be discarded, where the
- * legacy ini path always wrote it. m_activityShuttingDown is then set so
- * that the flush cannot re-enter the seed's own retry, and its table
- * rebuild, while the window is tearing down.
- *
- * Bands whose text never reached the store - visited while it was down,
- * or left before a seed succeeded - survive only in the RAM band cache,
- * and this is their last chance. A seeded bucket's cached document
- * already contains that bucket's stored history, so it replaces the
- * stored row; an unseeded one does not, so it is appended to whatever is
- * stored rather than replacing it.
+ * Seeds the current bucket once more if it never seeded, then flushes
+ * its RX text. Other dirty bands that only exist in the RAM cache get
+ * one last write too: appended to stored text if never seeded, or
+ * replacing it if already seeded (since the cached doc then already
+ * contains that history).
  */
 void ActivityStorageController::flushOnClose() {
     if (!m_activitySeeded.contains(m_activityBand) &&

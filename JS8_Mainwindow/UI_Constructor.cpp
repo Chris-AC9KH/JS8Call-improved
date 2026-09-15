@@ -85,9 +85,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         context.inboxCounts = &m_rxInboxCountCache;
         context.callActivityBandCache = &m_callActivityBandCache;
         context.rxTextBandCache = &m_rxTextBandCache;
-        context.showStatusMessage = [this](QString const &message) {
-            showStatusMessage(message);
-        };
         context.displayActivity = [this]() { displayActivity(true); };
         context.clearRxFrameBlockNumbers = [this]() {
             m_rxFrameBlockNumbers.clear();
@@ -128,6 +125,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->labUTC->setStyleSheet(Styles::LabUTCStyle);
     updateCallActivityHeaderLabel();
 
+    createHeaderBar();
     createControlBar();
     add_child_to_event_filter(this);
 
@@ -318,7 +316,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     connect(m_soundInput, &SoundInput::error, &m_config,
             &Configuration::invalidate_audio_input_device);
     // connect(m_soundInput, &SoundInput::status, this,
-    // &UI_Constructor::showStatusMessage);
     connect(&m_audioThread, &QThread::finished, m_soundInput,
             &QObject::deleteLater);
 
@@ -575,8 +572,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             });
     connect(&m_config, &Configuration::manual_band_hop_requested, this,
             &UI_Constructor::manualBandHop);
-    connect(&m_config, &Configuration::enumerating_audio_devices,
-            [this]() { showStatusMessage(tr("Enumerating audio devices")); });
 
     // set up configurations menu
     connect(m_multi_settings, &MultiSettings::configurationNameChanged,
@@ -763,7 +758,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     }
 
     ui->actionModeAutoreply->setChecked(m_config.autoreply_on_at_startup());
-    spotButton.setChecked(m_config.spot_to_reporting_networks());
+    ui->spotButton->setChecked(m_config.spot_to_reporting_networks());
 
     QActionGroup *modeActionGroup = new QActionGroup(this);
     ui->actionModeJS8Normal->setActionGroup(modeActionGroup);
@@ -1456,12 +1451,12 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     // period
     m_lastTxStopTime = nextTransmitCycle().addSecs(-m_TRperiod / 2);
 
-    for (QPushButton *b : {&monitorTxButton, &monitorButton, &logQSOButton,
-                          &tuneButton, &spotButton, &auto_reply_button,
-                          &multi_button, &hb_button, &hb_ack_button}) {
+    for (QPushButton *b : {ui->monitorTxButton, ui->monitorButton, ui->logQSOButton,
+                        ui->tuneButton, ui->spotButton, ui->auto_reply_button,
+                        ui->multi_button, ui->hb_button, ui->hb_ack_button}) {
         b->setCursor(QCursor(Qt::PointingHandCursor));
     }
-    mode_button.setCursor(QCursor(Qt::PointingHandCursor));
+    ui->mode_button->setCursor(QCursor(Qt::PointingHandCursor));
 
     // dial up and down buttons sizes
     ui->dialFreqUpButton->setFixedSize(30, 24);
