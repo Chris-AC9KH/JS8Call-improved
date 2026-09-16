@@ -1510,8 +1510,6 @@ background-color: #22ff22;
         <property name="title">
           <string>&amp;View</string>
         </property>
-        <addaction name="actionShow_Frequency_Clock"/>
-        <addaction name="separator"/>
         <addaction name="actionShow_Band_Activity"/>
         <addaction name="actionShow_Band_Heartbeats_and_ACKs"/>
         <addaction name="actionShow_Band_Activity_Columns"/>
@@ -1744,20 +1742,6 @@ background-color: #22ff22;
       </property>
       <property name="shortcutContext">
         <enum>Qt::ShortcutContext::WindowShortcut</enum>
-      </property>
-    </action>
-    <action name="actionShow_Frequency_Clock">
-      <property name="checkable">
-        <bool>true</bool>
-      </property>
-      <property name="checked">
-        <bool>true</bool>
-      </property>
-      <property name="text">
-        <string>Show &amp;Frequency &amp;&amp; Clock</string>
-      </property>
-      <property name="shortcut">
-        <string>F3</string>
       </property>
     </action>
     <action name="actionShow_Tooltips">

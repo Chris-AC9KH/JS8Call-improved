@@ -677,7 +677,6 @@ void UI_Constructor::on_menuWindow_aboutToShow() {
         callIdx >= 0 && ui->topSplitter->sizes().at(callIdx) > 0);
 
     auto vsizes = ui->mainSplitter->sizes();
-    ui->actionShow_Frequency_Clock->setChecked(vsizes.first() > 0);
     ui->actionShow_Waterfall->setChecked(vsizes.last() > 0);
     ui->actionShow_Waterfall_Controls->setChecked(
         ui->actionShow_Waterfall->isChecked() &&
@@ -789,13 +788,6 @@ void UI_Constructor::on_actionShow_Fullscreen_triggered(bool checked) {
         state &= ~Qt::WindowFullScreen;
     }
     setWindowState(state);
-}
-
-void UI_Constructor::on_actionShow_Frequency_Clock_triggered(bool checked) {
-    auto vsizes = ui->mainSplitter->sizes();
-    vsizes[0] = checked ? ui->logHorizontalWidget->minimumHeight() : 0;
-    ui->logHorizontalWidget->setVisible(checked);
-    ui->mainSplitter->setSizes(vsizes);
 }
 
 void UI_Constructor::on_actionShow_Band_Activity_triggered(bool checked) {
@@ -1363,7 +1355,7 @@ void UI_Constructor::createControlBar()
         },
         this));
 
-    // On/off control buttons
+    // On/off control buttons that use a QAction state
     bindStatusButtonToAction(ui->auto_reply_button, ui->actionModeAutoreply, "Auto Reply");
     ui->auto_reply_button->setToolTip(tr("Turn on/off Auto Reply"));
     bindStatusButtonToAction(ui->multi_button, ui->actionModeMultiDecoder, "Multi Decode");
@@ -1373,21 +1365,23 @@ void UI_Constructor::createControlBar()
     bindStatusButtonToAction(ui->hb_ack_button, ui->actionHeartbeatAcknowledgements, "HB ACK");
     ui->hb_ack_button->setToolTip(tr("Turn on/off automatic heartbeat acknowledgements"));
 
-    // Tx, Rx, Tune
+    // Tx
     ui->monitorTxButton->setToolTip(tr("Enable or disable the transmitter"));
     ui->monitorTxButton->setText("TX");
     ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
     connect(ui->monitorTxButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorTxButton_toggled);
-
+    
+    // Rx
     ui->monitorButton->setToolTip(tr("Enable or disable the receiver"));
     ui->monitorButton->setText("RX");
-    ui->monitorButton->setStyleSheet(Styles::MonitorButtonStyle);
+    ui->monitorButton->setStyleSheet(Styles::ControlButtonStyle);
     connect(ui->monitorButton, &QPushButton::clicked, this,
             &UI_Constructor::on_monitorButton_clicked);
     connect(ui->monitorButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorButton_toggled);
-
+    
+    // Tune
     ui->tuneButton->setToolTip(tr("Transmit a tuning tone"));
     ui->tuneButton->setText("TUNE");
     ui->tuneButton->setStyleSheet(Styles::TuneButtonStyle);
@@ -1399,13 +1393,13 @@ void UI_Constructor::createControlBar()
     // Spot
     ui->spotButton->setToolTip(tr("Spot to reporting networks"));
     ui->spotButton->setText("SPOT");
-    ui->spotButton->setStyleSheet(Styles::MonitorButtonStyle);
+    ui->spotButton->setStyleSheet(Styles::ControlButtonStyle);
     connect(ui->spotButton, &QPushButton::clicked, this,
             &UI_Constructor::on_spotButton_clicked);
     connect(ui->spotButton, &QPushButton::toggled, this,
             &UI_Constructor::on_spotButton_toggled);
 
-    // Log QSO button
+    // Log QSO
     ui->logQSOButton->setToolTip(tr("Insert a new entry into the log"));
     ui->logQSOButton->setText("LOG");
     ui->logQSOButton->setStyleSheet(Styles::LogQSOButtonStyle);
@@ -1416,7 +1410,7 @@ void UI_Constructor::createControlBar()
 void UI_Constructor::bindStatusButtonToAction(QPushButton *button, QAction *action,
                                               QString const &label) {
     button->setText(label);
-    button->setStyleSheet(Styles::MonitorButtonStyle);
+    button->setStyleSheet(Styles::ControlButtonStyle);
     button->setChecked(action->isChecked());
     button->setEnabled(action->isEnabled());
 
