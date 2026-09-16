@@ -676,25 +676,12 @@ class UI_Constructor : public QMainWindow {
 
     char m_msg[100][80];
 
-    // labels and widgets in control bar
+    // widgets in control bar grid and label in header bar
+    // Chris: delete these
     QLabel config_label;
-    QLabel frequency_label;
-    QLabel wpm_label;
 
-    QPushButton mode_button;
     QMenu *modeSpeedMenu = nullptr;
 
-    QPushButton auto_reply_button;
-    QPushButton multi_button;
-    QPushButton hb_button;
-    QPushButton hb_ack_button;
-
-    // buttons relocated here from the former top-bar button grid
-    QPushButton monitorTxButton;  // TX
-    QPushButton monitorButton;    // RX
-    QPushButton logQSOButton;     // LOG
-    QPushButton tuneButton;       // TUNE
-    QPushButton spotButton;       // SPOT
     Styles::OffsetSliderWidget *freqOffsetWidget = nullptr;
     int m_sliderFreqBeforeHB = 0;
 
@@ -1003,8 +990,7 @@ class UI_Constructor : public QMainWindow {
     void updateCallActivityHeaderLabel();
     void createHeaderBar();
     void createControlBar();
-    void bindStatusButtonToAction(QPushButton &button, QAction *action,
-                                  QString const &label);
+    void bindStatusButtonToAction(QPushButton *button, QAction *action, QString const &label);
     void syncHeaderRowWidth();
     void statusChanged();
     void rigFailure(QString const &reason);
@@ -1031,7 +1017,6 @@ class UI_Constructor : public QMainWindow {
     void updateButtonDisplay();
     void updateTextDisplay();
     void updateTextWordCheckerDisplay();
-    void updateTextStatsDisplay(QString text, int count);
     void updateTxButtonDisplay();
     bool isMyCallIncluded(QString const &text);
     bool isAllCallIncluded(QString const &text);

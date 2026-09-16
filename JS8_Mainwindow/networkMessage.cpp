@@ -69,7 +69,7 @@ void UI_Constructor::networkMessage(Message const &message) {
         UI_Constructor::on_tuneButton_clicked(value.toBool());
           sendNetworkMessage("RIG.SET_TUNE", "", {
             {"_ID", id},
-            {"value", tuneButton.isChecked()}
+            {"value", ui->tuneButton->isChecked()}
           });
         return;
     }
@@ -83,7 +83,7 @@ void UI_Constructor::networkMessage(Message const &message) {
         UI_Constructor::on_stopTxButton_clicked();
           sendNetworkMessage("RIG.TX_HALT", "", {
             {"_ID", id},
-            {"value", monitorTxButton.isChecked()}
+            {"value", ui->monitorTxButton->isChecked()}
           });
         return;
     }
@@ -287,7 +287,7 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if(type == "STATION.GET_SPOT") {
         sendNetworkMessage("STATION.SPOT", "", {
-          {"value", spotButton.isChecked()},
+          {"value", ui->spotButton->isChecked()},
           {"_ID", id}
         });
         return;
@@ -299,11 +299,11 @@ void UI_Constructor::networkMessage(Message const &message) {
      *
      * Thanks to N0GQ Jeff Francis
      */
-if(type == "STATION.SET_SPOT") {
+    if(type == "STATION.SET_SPOT") {
         auto value = QVariant(message.value());
           UI_Constructor::on_spotButton_clicked(value.toBool());
           sendNetworkMessage("STATION.SPOT", "", {
-            {"value", spotButton.isChecked()},
+            {"value", ui->spotButton->isChecked()},
             {"_ID", id}
           });
           return;
@@ -324,8 +324,8 @@ if(type == "STATION.SET_SPOT") {
             {"MULTI_DECODER", QVariant(ui->actionModeMultiDecoder->isChecked())},
             {"HB_INTERVAL", QVariant(m_hbInterval)},
             {"HB_TIMER_ACTIVE", QVariant(m_hb_loop->isActive())},
-            {"MONITOR", QVariant(monitorButton.isChecked())},
-            {"TX_ENABLED", QVariant(monitorTxButton.isChecked())},
+            {"MONITOR", QVariant(ui->monitorButton->isChecked())},
+            {"TX_ENABLED", QVariant(ui->monitorTxButton->isChecked())},
             {"SPEED", QVariant(m_nSubMode)},
             {"CAN_HB", QVariant(canCurrentModeSendHeartbeat())},
             {"AUTOREPLY_CONFIRMATION", QVariant(m_config.autoreply_confirmation())},
