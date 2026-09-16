@@ -312,6 +312,7 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("TextHorizontalSplitter",
                          ui->textHorizontalSplitter->saveState());
     m_settings->setValue("TopSplitter", ui->topSplitter->saveState());
+    m_settings->setValue("LeftSplitter", ui->leftSplitter->saveState());
     m_settings->setValue("BandActivityVisible",
                          ui->tableWidgetRXAll->isVisible());
     m_settings->setValue("BandHBActivityVisible",
@@ -419,6 +420,11 @@ void UI_Constructor::readSettings() {
             ui->tableWidgetCalls->setVisible(
                 ui->topSplitter->sizes().at(callIdx) > 0);
         }
+    }
+    
+    auto const leftSplitterState = m_settings->value("LeftSplitter").toByteArray();
+    if (!leftSplitterState.isEmpty()) {
+        ui->leftSplitter->restoreState(leftSplitterState);
     }
 
     m_bandActivityWasVisible =
@@ -677,7 +683,6 @@ void UI_Constructor::on_menuWindow_aboutToShow() {
         callIdx >= 0 && ui->topSplitter->sizes().at(callIdx) > 0);
 
     auto vsizes = ui->mainSplitter->sizes();
-    ui->actionShow_Frequency_Clock->setChecked(vsizes.first() > 0);
     ui->actionShow_Waterfall->setChecked(vsizes.last() > 0);
     ui->actionShow_Waterfall_Controls->setChecked(
         ui->actionShow_Waterfall->isChecked() &&
@@ -789,13 +794,6 @@ void UI_Constructor::on_actionShow_Fullscreen_triggered(bool checked) {
         state &= ~Qt::WindowFullScreen;
     }
     setWindowState(state);
-}
-
-void UI_Constructor::on_actionShow_Frequency_Clock_triggered(bool checked) {
-    auto vsizes = ui->mainSplitter->sizes();
-    vsizes[0] = checked ? ui->logHorizontalWidget->minimumHeight() : 0;
-    ui->logHorizontalWidget->setVisible(checked);
-    ui->mainSplitter->setSizes(vsizes);
 }
 
 void UI_Constructor::on_actionShow_Band_Activity_triggered(bool checked) {
@@ -1302,25 +1300,6 @@ void UI_Constructor::updateCallActivityHeaderLabel() {
             .arg(m_config.callsign_aging()));
 }
 
-/**
- * @brief Populate the header bar's widgets.
- *
- * config_label sits in the static slot between the frequency and
- * clock displays. It only displays for non-default configurations
- */
-void UI_Constructor::createHeaderBar()
-{
-    config_label.setAlignment(Qt::AlignCenter);
-    {
-        QFont headerFont = config_label.font();
-        headerFont.setPointSize(14);
-        headerFont.setBold(true);
-        config_label.setFont(headerFont);
-    }
-    ui->horizontalLayout_17->insertWidget(2, &config_label);
-    config_label.hide(); // only shown for non-default configuration
-}
-
 void UI_Constructor::createControlBar()
 {
     statusBar()->hide();
@@ -1363,7 +1342,7 @@ void UI_Constructor::createControlBar()
         },
         this));
 
-    // On/off control buttons
+    // On/off control buttons that use a QAction state
     bindStatusButtonToAction(ui->auto_reply_button, ui->actionModeAutoreply, "Auto Reply");
     ui->auto_reply_button->setToolTip(tr("Turn on/off Auto Reply"));
     bindStatusButtonToAction(ui->multi_button, ui->actionModeMultiDecoder, "Multi Decode");
@@ -1373,21 +1352,23 @@ void UI_Constructor::createControlBar()
     bindStatusButtonToAction(ui->hb_ack_button, ui->actionHeartbeatAcknowledgements, "HB ACK");
     ui->hb_ack_button->setToolTip(tr("Turn on/off automatic heartbeat acknowledgements"));
 
-    // Tx, Rx, Tune
+    // Tx
     ui->monitorTxButton->setToolTip(tr("Enable or disable the transmitter"));
     ui->monitorTxButton->setText("TX");
     ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
     connect(ui->monitorTxButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorTxButton_toggled);
-
+    
+    // Rx
     ui->monitorButton->setToolTip(tr("Enable or disable the receiver"));
     ui->monitorButton->setText("RX");
-    ui->monitorButton->setStyleSheet(Styles::MonitorButtonStyle);
+    ui->monitorButton->setStyleSheet(Styles::ControlButtonStyle);
     connect(ui->monitorButton, &QPushButton::clicked, this,
             &UI_Constructor::on_monitorButton_clicked);
     connect(ui->monitorButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorButton_toggled);
-
+    
+    // Tune
     ui->tuneButton->setToolTip(tr("Transmit a tuning tone"));
     ui->tuneButton->setText("TUNE");
     ui->tuneButton->setStyleSheet(Styles::TuneButtonStyle);
@@ -1399,13 +1380,13 @@ void UI_Constructor::createControlBar()
     // Spot
     ui->spotButton->setToolTip(tr("Spot to reporting networks"));
     ui->spotButton->setText("SPOT");
-    ui->spotButton->setStyleSheet(Styles::MonitorButtonStyle);
+    ui->spotButton->setStyleSheet(Styles::ControlButtonStyle);
     connect(ui->spotButton, &QPushButton::clicked, this,
             &UI_Constructor::on_spotButton_clicked);
     connect(ui->spotButton, &QPushButton::toggled, this,
             &UI_Constructor::on_spotButton_toggled);
 
-    // Log QSO button
+    // Log QSO
     ui->logQSOButton->setToolTip(tr("Insert a new entry into the log"));
     ui->logQSOButton->setText("LOG");
     ui->logQSOButton->setStyleSheet(Styles::LogQSOButtonStyle);
@@ -1416,7 +1397,7 @@ void UI_Constructor::createControlBar()
 void UI_Constructor::bindStatusButtonToAction(QPushButton *button, QAction *action,
                                               QString const &label) {
     button->setText(label);
-    button->setStyleSheet(Styles::MonitorButtonStyle);
+    button->setStyleSheet(Styles::ControlButtonStyle);
     button->setChecked(action->isChecked());
     button->setEnabled(action->isEnabled());
 
@@ -1429,19 +1410,8 @@ void UI_Constructor::bindStatusButtonToAction(QPushButton *button, QAction *acti
     });
 }
 
-void UI_Constructor::syncHeaderRowWidth() {
-    if (!ui->textHorizontalSplitter || !ui->logWidget) {
-        return;
-    }
-    auto const sizes = ui->textHorizontalSplitter->sizes();
-    if (sizes.size() >= 2) {
-        ui->logWidget->setMaximumWidth(sizes.at(0) + sizes.at(1));
-    }
-}
-
 void UI_Constructor::resizeEvent(QResizeEvent *e) {
     QMainWindow::resizeEvent(e);
-    syncHeaderRowWidth();
 }
 
 void UI_Constructor::closeEvent(QCloseEvent *e) {
