@@ -187,6 +187,7 @@ constexpr int ND = 58;           // Data symbols
 constexpr int NS = 21;           // Sync symbols (3 @ Costas 7x7)
 constexpr int NN = NS + ND;      // Total channel symbols (79)
 constexpr float ASYNCMIN = 1.5f; // Minimum sync
+constexpr float SOFT_COSTAS_MIN = 1.5f; // Minimum soft Costas power ratio
 constexpr int NFSRCH = 5; // Search frequency range in Hz (i.e., +/- 2.5 Hz)
 constexpr std::size_t NMAXCAND = 300; // Maxiumum number of candidate signals
 constexpr int NFILT = 1400;           // Filter length
@@ -645,7 +646,7 @@ constexpr std::array<CheckNode, M> Nm = {{{6, {0, 29, 59, 88, 117, 146, 0}},
                                           {6, {5, 33, 65, 94, 123, 150, 0}},
                                           {6, {6, 34, 66, 95, 119, 151, 0}},
                                           {6, {7, 35, 67, 96, 124, 152, 0}},
-                                          {6, {8, 36, 68, 97, 125, 151, 0}},
+                                          {6, {8, 36, 68, 97, 124, 152, 0}},
                                           {6, {9, 37, 69, 98, 126, 153, 0}},
                                           {6, {10, 38, 70, 99, 125, 154, 0}},
                                           {6, {11, 39, 60, 100, 127, 144, 0}},
@@ -1162,19 +1163,24 @@ template <typename Mode> class DecodeMode {
 
         js8_downsample(f1);
 
-        // Initial guess for the start of the signal.
+        // Jointly search timing and coarse residual frequency. Coherent
+        // integration across seven symbols is much more sensitive to residual
+        // frequency error than the legacy per-symbol metric, so timing cannot
+        // safely be selected at delf=0 alone.
 
         int i0 = static_cast<int>(std::round((xdt + Mode::ASTART) * FS2));
         float smax = 0.0f;
 
-        // Search for the best synchronization offset.
-
         for (int idt = i0 - Mode::NQSYMBOL; idt <= i0 + Mode::NQSYMBOL; ++idt) {
-            float const sync = syncjs8d(idt, 0.0f);
+            for (int ifr = -NFSRCH; ifr <= NFSRCH; ++ifr) {
+                float const delf = ifr * 0.5f;
+                float const candidateSync = syncjs8d(idt, delf);
 
-            if (sync > smax) {
-                smax = sync;
-                ibest = idt;
+                if (candidateSync > smax) {
+                    smax = candidateSync;
+                    ibest = idt;
+                    delfbest = delf;
+                }
             }
         }
 
@@ -1182,17 +1188,19 @@ template <typename Mode> class DecodeMode {
 
         float const xdt2 = ibest * DT2;
 
-        // Fine frequency synchronization
+        // Refine frequency around the best 0.5 Hz grid point with 0.1 Hz
+        // spacing, keeping timing fixed at the jointly selected offset.
 
         i0 = static_cast<int>(std::round(xdt2 * FS2));
+        float const coarseDelf = delfbest;
         smax = 0.0f;
 
-        for (int ifr = -NFSRCH; ifr <= NFSRCH; ++ifr) {
-            float const delf = ifr * 0.5f;
-            float const sync = syncjs8d(i0, delf);
+        for (int ifr = -5; ifr <= 5; ++ifr) {
+            float const delf = coarseDelf + ifr * 0.1f;
+            float const candidateSync = syncjs8d(i0, delf);
 
-            if (sync > smax) {
-                smax = sync;
+            if (candidateSync > smax) {
+                smax = candidateSync;
                 delfbest = delf;
             }
         }
@@ -1401,35 +1409,55 @@ template <typename Mode> class DecodeMode {
             }
         }
 
-        // Sync quality check using Costas tone patterns.
+        // Compute a soft Costas quality metric using all pilot-bin power. Keep
+        // the legacy winner count for UI/debugging, but do not use it as the
+        // acceptance gate.
 
         int nsync = 0;
+        double expectedPower = 0.0;
+        double alternativePower = 0.0;
 
         for (std::size_t costas = 0; costas < Costas.size(); ++costas) {
             auto const offset = costas * 36;
 
             for (std::size_t column = 0; column < 7; ++column) {
-                // Find the row containing the maximum value in the
-                // current column.
+                auto const symbolIndex = offset + column;
+                int const expectedTone = Costas[costas][column];
 
                 auto const max_row = std::distance(
                     s2.begin(),
                     std::max_element(s2.begin(), s2.end(),
-                                     [index = offset + column](
-                                         auto const &rowA, auto const &rowB) {
-                                         return rowA[index] < rowB[index];
+                                     [symbolIndex](auto const &rowA,
+                                                   auto const &rowB) {
+                                         return rowA[symbolIndex] <
+                                                rowB[symbolIndex];
                                      }));
 
-                // Check if the max row matches the Costas pattern.
-
-                if (Costas[costas][column] == max_row)
+                if (expectedTone == max_row)
                     ++nsync;
+
+                for (int tone = 0; tone < NROWS; ++tone) {
+                    double const magnitude = s2[tone][symbolIndex];
+                    double const power = magnitude * magnitude;
+
+                    if (tone == expectedTone)
+                        expectedPower += power;
+                    else
+                        alternativePower += power;
+                }
             }
         }
 
-        // If the sync quality isn't at least 7, this one's a loser.
+        float const softCostas = static_cast<float>(
+            expectedPower / (alternativePower / 7.0 + 1e-12));
 
-        if (nsync <= 6) {
+        if (decoder_js8().isDebugEnabled()) {
+            qCDebug(decoder_js8)
+                << "coherent sync" << sync << "residualHz" << delfbest
+                << "nsync" << nsync << "softCostas" << softCostas;
+        }
+
+        if (!std::isfinite(softCostas) || softCostas < SOFT_COSTAS_MIN) {
             logTracker("sync_fail");
             return std::nullopt;
         }
@@ -1779,7 +1807,7 @@ template <typename Mode> class DecodeMode {
     // frequency-domain filtering process for downsampling the JS8 signal.
     // After the FFT, the resulting frequency-domain data (ds_cx) can be
     // manipulated (e.g., band-pass filtered or shifted). Subsequent inverse
-    // FFT operations convert the filtered data back to the time domain at
+    // FFT operations convert the filtered data back into the time domain at
     // a lower sample rate, achieving the desired downsampling.
 
     void computeBasebandFFT() {
@@ -1902,10 +1930,10 @@ template <typename Mode> class DecodeMode {
     //     synchronization
     //       power using a Costas waveform.
     //     - Sync metric is computed over the index range, considering all
-    //     combinations
+    //       combinations
     //       of Costas patterns.
     //     - The maximum sync value and its corresponding offset are recorded
-    //     for each
+    //       for each
     //       frequency bin.
     //
     // 5.  Normalization:
@@ -1920,7 +1948,7 @@ template <typename Mode> class DecodeMode {
     //     - Candidates with a strong sync metric (above a defined threshold)
     //     are extracted.
     //     - Near-duplicate candidates of lesser synchronization power, based on
-    //     frequency
+    //       frequency
     //       proximity, are eliminated.
     //
     // 7.  Output:
@@ -2113,59 +2141,43 @@ template <typename Mode> class DecodeMode {
     // decoding.
 
     float syncjs8d(int const i0, float const delf) {
-        constexpr float BASE_DPHI = TAU * (1.0f / (12000.0f / Mode::NDOWN));
+        constexpr float FS2 = 12000.0f / Mode::NDOWN;
+        float const dphi = TAU * delf / FS2;
+        std::complex<float> const freqStep = std::polar(1.0f, dphi);
+        float syncPower = 0.0f;
 
-        // If delta frequency is non-zero, compute the frequency
-        // adjustment array, otherwise, use what'll be an identity
-        // transfrom when multiplied.
+        // Correlate coherently across each full 7-symbol Costas block. Reset
+        // the residual-frequency phase between blocks, then combine the three
+        // block powers noncoherently because phase across the intervening data
+        // symbols is not known reliably enough to preserve.
+        for (int block = 0; block < 3; ++block) {
+            std::complex<float> blockCorrelation{0.0f, 0.0f};
+            std::complex<float> freqPhase{1.0f, 0.0f};
+            bool complete = true;
 
-        std::array<std::complex<float>, Mode::NDOWNSPS> freqAdjust;
+            for (int symbol = 0; symbol < 7; ++symbol) {
+                int const offset =
+                    36 * block * Mode::NDOWNSPS + i0 + symbol * Mode::NDOWNSPS;
 
-        if (delf != 0.0f) {
-            float const dphi = BASE_DPHI * delf;
-            float phi = 0.0f;
+                if (offset < 0 || offset + Mode::NDOWNSPS > Mode::NP2) {
+                    complete = false;
+                    break;
+                }
 
-            // std::fmod() is almost like Fortran's mod(), but not quite;
-            // Since delf can be negative, we must ensure that phi stays
-            // within [0, TAU), which Fortran's mod() handles by itself.
-
-            for (int i = 0; i < Mode::NDOWNSPS; ++i) {
-                freqAdjust[i] = std::polar(1.0f, phi);
-                if (phi = std::fmod(phi + dphi, TAU); phi < 0.0f) {
-                    phi += TAU;
+                for (int sample = 0; sample < Mode::NDOWNSPS; ++sample) {
+                    auto const reference =
+                        freqPhase * csyncs[block][symbol][sample];
+                    blockCorrelation +=
+                        cd0[offset + sample] * std::conj(reference);
+                    freqPhase *= freqStep;
                 }
             }
-        } else {
-            freqAdjust.fill(std::complex<float>{1.0f, 0.0f});
+
+            if (complete)
+                syncPower += std::norm(blockCorrelation);
         }
 
-        // Compute sync power by looping over the Costas indices for
-        // each of the 3 Costas blocks, accumulating as we go.
-
-        float sync = 0.0f;
-
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 7; ++j) {
-                if (auto const offset =
-                        36 * i * Mode::NDOWNSPS + i0 + j * Mode::NDOWNSPS;
-                    offset >= 0 && offset + Mode::NDOWNSPS <= Mode::NP2) {
-                    sync += std::norm(std::transform_reduce(
-                        freqAdjust.begin(),    // Range start
-                        freqAdjust.end(),      // Range end
-                        cd0.begin() + offset,  // Data start
-                        std::complex<float>{}, // Initial reduction value
-                        std::plus<>{},         // Reduction by accumulation
-                        [&](auto const &fa,    // Conjugate and multiply
-                            auto const &cd) {
-                            return cd *
-                                   std::conj(
-                                       fa * csyncs[i][j][&fa - &freqAdjust[0]]);
-                        }));
-                }
-            }
-        }
-
-        return sync;
+        return syncPower;
     }
 
     // Generate a reference signal, based on the provided tone sequence and
