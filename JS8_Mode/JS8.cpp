@@ -602,7 +602,25 @@ class Decode {
 namespace {
 constexpr int BP_MAX_ROWS = 7;        // Max rows per column in Nm
 constexpr int BP_MAX_CHECKS = 3;      // Max checks per bit in Mn
-constexpr int BP_MAX_ITERATIONS = 30; // Max iterations in BP decoder
+constexpr int BP_MAX_ITERATIONS = 30; // Max iterations in normal BP decoder
+constexpr int BP_RESCUE_ITERATIONS = 80; // Extended iterations for near misses
+constexpr int BP_RESCUE_MAX_CHECKS = 12; // Maximum best syndrome for rescue
+constexpr int BP_RESCUE_BUDGET = 4;      // Maximum rescued candidates per decode
+constexpr std::array<float, 3> BP_RESCUE_LLR_SCALES = {1.0f, 0.8f, 1.25f};
+
+struct BPOptions {
+    int maxIterations = BP_MAX_ITERATIONS;
+    bool earlyAbort = true;
+    float llrScale = 1.0f;
+};
+
+struct BPResult {
+    int hardErrors = -1;
+    int iterations = 0;
+    int finalChecks = M;
+    int bestChecks = M + 1;
+    bool earlyAborted = false;
+};
 
 constexpr std::array<std::array<int, BP_MAX_CHECKS>, N> Mn = {
     {{0, 24, 68},  {1, 4, 72},   {2, 31, 67},  {3, 50, 60},  {5, 62, 69},
@@ -736,108 +754,114 @@ constexpr std::array<CheckNode, M> Nm = {{{6, {0, 29, 59, 88, 117, 146, 0}},
 
 // Belief Propagation Decoder
 
-int bpdecode174(std::array<float, N> const &llr, std::array<int8_t, K> &decoded,
-                std::array<int8_t, N> &cw) {
-    // Initialize messages and variables
-    std::array<std::array<float, BP_MAX_CHECKS>, N> tov =
-        {}; // Messages to variable nodes
-    std::array<std::array<float, BP_MAX_ROWS>, M> toc =
-        {}; // Messages to check nodes
-    std::array<std::array<float, BP_MAX_ROWS>, M> tanhtoc =
-        {}; // Tanh of messages
+BPResult bpdecode174(std::array<float, N> const &llr,
+                     std::array<int8_t, K> &decoded,
+                     std::array<int8_t, N> &cw,
+                     BPOptions const options = {}) {
+    std::array<float, N> scaledLlr = {};
+    for (int i = 0; i < N; ++i)
+        scaledLlr[i] = llr[i] * options.llrScale;
 
-    std::array<float, N> zn = {}; // Bit log likelihood ratios
-    std::array<int, M> synd = {}; // Syndrome for checks
+    // Initialize messages and variables.
+    std::array<std::array<float, BP_MAX_CHECKS>, N> tov = {};
+    std::array<std::array<float, BP_MAX_ROWS>, M> toc = {};
+    std::array<std::array<float, BP_MAX_ROWS>, M> tanhtoc = {};
+    std::array<float, N> zn = {};
+    std::array<int, M> synd = {};
+    std::array<int8_t, N> bestCw = {};
 
+    BPResult result;
     int ncnt = 0;
     int nclast = 0;
 
-    // Initialize toc (messages from bits to checks)
+    // Initialize toc (messages from bits to checks).
     for (int i = 0; i < M; ++i) {
-        for (int j = 0; j < Nm[i].valid_neighbors; ++j) {
-            toc[i][j] = llr[Nm[i].neighbors[j]];
-        }
+        for (int j = 0; j < Nm[i].valid_neighbors; ++j)
+            toc[i][j] = scaledLlr[Nm[i].neighbors[j]];
     }
 
-    // Iterative decoding
-    for (int iter = 0; iter <= BP_MAX_ITERATIONS; ++iter) {
-        // Update bit log likelihood ratios
+    // Preserve the legacy inclusive iteration bound for the normal decoder.
+    for (int iter = 0; iter <= options.maxIterations; ++iter) {
+        result.iterations = iter;
+
+        // Update bit log likelihood ratios.
         for (int i = 0; i < N; ++i) {
-            zn[i] =
-                llr[i] + std::accumulate(tov[i].begin(),
-                                         tov[i].begin() + BP_MAX_CHECKS, 0.0f);
+            zn[i] = scaledLlr[i] +
+                    std::accumulate(tov[i].begin(),
+                                    tov[i].begin() + BP_MAX_CHECKS, 0.0f);
         }
 
-        // Check if we have a valid codeword
         for (int i = 0; i < N; ++i)
             cw[i] = zn[i] > 0 ? 1 : 0;
 
         int ncheck = 0;
         for (int i = 0; i < M; ++i) {
             synd[i] = 0;
-            for (int j = 0; j < Nm[i].valid_neighbors; ++j) {
+            for (int j = 0; j < Nm[i].valid_neighbors; ++j)
                 synd[i] += cw[Nm[i].neighbors[j]];
-            }
             if (synd[i] % 2 != 0)
                 ++ncheck;
         }
 
-        if (ncheck == 0) {
-            // Extract decoded bits (last N-M bits of codeword)
-            std::copy(cw.begin() + M, cw.end(), decoded.begin());
-
-            // Count errors
-            int nerr = 0;
-            for (int i = 0; i < N; ++i) {
-                if ((2 * cw[i] - 1) * llr[i] < 0.0f) {
-                    ++nerr;
-                }
-            }
-
-            return nerr;
+        result.finalChecks = ncheck;
+        if (ncheck < result.bestChecks) {
+            result.bestChecks = ncheck;
+            bestCw = cw;
         }
 
-        // Early stopping criterion
+        if (ncheck == 0) {
+            std::copy(cw.begin() + M, cw.end(), decoded.begin());
+
+            int nerr = 0;
+            for (int i = 0; i < N; ++i) {
+                if ((2 * cw[i] - 1) * llr[i] < 0.0f)
+                    ++nerr;
+            }
+
+            result.hardErrors = nerr;
+            return result;
+        }
+
+        // The normal decoder retains its legacy early stopping behavior. The
+        // bounded rescue decoder disables it so near-converged trapping states
+        // can continue iterating.
         if (iter > 0) {
-            int nd = ncheck - nclast;
+            int const nd = ncheck - nclast;
             ncnt = (nd < 0) ? 0 : ncnt + 1;
-            if (ncnt >= 5 && iter >= 10 && ncheck > 15) {
-                return -1;
+            if (options.earlyAbort && ncnt >= 5 && iter >= 10 && ncheck > 15) {
+                result.earlyAborted = true;
+                cw = bestCw;
+                return result;
             }
         }
         nclast = ncheck;
 
-        // Send messages from bits to check nodes
+        // Send messages from bits to check nodes.
         for (int i = 0; i < M; ++i) {
             for (int j = 0; j < Nm[i].valid_neighbors; ++j) {
-                int ibj = Nm[i].neighbors[j];
+                int const ibj = Nm[i].neighbors[j];
                 toc[i][j] = zn[ibj];
                 for (int k = 0; k < BP_MAX_CHECKS; ++k) {
-                    if (Mn[ibj][k] == i) {
+                    if (Mn[ibj][k] == i)
                         toc[i][j] -= tov[ibj][k];
-                    }
                 }
             }
         }
 
-        // Send messages from check nodes to variable nodes
+        // Send messages from check nodes to variable nodes.
         for (int i = 0; i < M; ++i) {
-            for (int j = 0; j < 7;
-                 ++j) { // Fixed range [0, 7) to match Fortran's 1:7, could be
-                        // nrw[j], or 7 logically
+            for (int j = 0; j < 7; ++j)
                 tanhtoc[i][j] = std::tanh(-toc[i][j] / 2.0f);
-            }
         }
 
         for (int i = 0; i < N; ++i) {
             for (int j = 0; j < BP_MAX_CHECKS; ++j) {
-                int ichk = Mn[i][j];
+                int const ichk = Mn[i][j];
                 if (ichk >= 0) {
                     float Tmn = 1.0f;
                     for (int k = 0; k < Nm[ichk].valid_neighbors; ++k) {
-                        if (Nm[ichk].neighbors[k] != i) {
+                        if (Nm[ichk].neighbors[k] != i)
                             Tmn *= tanhtoc[ichk][k];
-                        }
                     }
                     tov[i][j] = 2.0f * std::atanh(-Tmn);
                 }
@@ -845,7 +869,10 @@ int bpdecode174(std::array<float, N> const &llr, std::array<int8_t, K> &decoded,
         }
     }
 
-    return -1; // Decoding failed
+    // Feedback should use the closest codeword BP reached, not merely the
+    // state present on the final iteration.
+    cw = bestCw;
+    return result;
 }
 } // namespace
 
@@ -1092,6 +1119,7 @@ template <typename Mode> class DecodeMode {
     bool m_enableFreqTracking = true;
     bool m_enableTimingTracking = true;
     bool m_enableDeepSearch = true;
+    bool m_enableLdpcRescue = true;
     float m_llrErasureThreshold = js8::llrErasureThreshold();
     bool m_enableLdpcFeedback = js8::ldpcFeedbackEnabled();
     int m_maxLdpcPasses = js8::ldpcFeedbackMaxPasses();
@@ -1151,7 +1179,8 @@ template <typename Mode> class DecodeMode {
 
     std::optional<Decode> js8dec(bool const syncStats, bool const lsubtract,
                                  float &f1, float &xdt, int &nharderrors,
-                                 float &xsnr, JS8::Event::Emitter emitEvent) {
+                                 float &xsnr, int &ldpcRescueBudget,
+                                 JS8::Event::Emitter emitEvent) {
         constexpr float FR = 12000.0f / Mode::NFFT1; // Frequency resolution
         constexpr float FS2 = 12000.0f / Mode::NDOWN;
         constexpr float DT2 = 1.0f / FS2;
@@ -1570,19 +1599,39 @@ template <typename Mode> class DecodeMode {
         auto llr0Combined = combined.llr0;
         auto llr1Combined = combined.llr1;
 
-        std::array<int8_t, K> decoded;
-        std::array<int8_t, N> cw;
+        std::array<int8_t, K> decoded = {};
+        std::array<int8_t, N> cw = {};
+        std::array<float, N> bestRescueLlr = {};
 
         int totalLdpcPasses = 0;
         bool usedFeedbackPass = false;
         bool feedbackTurnedSuccess = false;
         int feedbackConfident = 0;
         int feedbackUncertain = 0;
+        int bestRescueChecks = M + 1;
+        int bestRescuePass = 0;
+        bool rescueAttempted = false;
+
+        auto const rememberRescueInput =
+            [&](std::array<float, N> const &llrInput, int ipass,
+                BPResult const &bp) {
+                if (bp.bestChecks < bestRescueChecks) {
+                    bestRescueChecks = bp.bestChecks;
+                    bestRescuePass = ipass;
+                    bestRescueLlr = llrInput;
+                }
+            };
 
         auto const tryDecode = [&](std::array<float, N> const &llrInput,
-                                   int ipass) -> std::optional<Decode> {
-            nharderrors = bpdecode174(llrInput, decoded, cw);
+                                   int ipass, BPOptions const options,
+                                   bool const rememberForRescue)
+            -> std::optional<Decode> {
+            BPResult const bp = bpdecode174(llrInput, decoded, cw, options);
+            nharderrors = bp.hardErrors;
             xsnr = -99.0f;
+
+            if (rememberForRescue)
+                rememberRescueInput(llrInput, ipass, bp);
 
             if (std::all_of(cw.begin(), cw.end(),
                             [](int x) { return x == 0; })) {
@@ -1616,9 +1665,8 @@ template <typename Mode> class DecodeMode {
 
                     float xsig = 0.0f;
 
-                    for (std::size_t i = 0; i < itone.size(); ++i) {
+                    for (std::size_t i = 0; i < itone.size(); ++i)
                         xsig += std::pow(s2[itone[i]][i], 2);
-                    }
 
                     xsnr =
                         std::max(10.0f * std::log10(std::max(
@@ -1638,12 +1686,13 @@ template <typename Mode> class DecodeMode {
             return std::nullopt;
         };
 
-        // Loop over decoding passes
+        // Run the existing decode and feedback sequence first. Failed BP runs
+        // now leave cw at the minimum-syndrome state, improving the quality of
+        // the existing feedback pass without adding any extra CPU cost.
         for (int ipass = 1; ipass <= 4 && totalLdpcPasses < m_maxLdpcPasses;
              ++ipass) {
             auto &llr = ipass == 2 ? llr1Combined : llr0Combined;
 
-            // Zero ranges for certain passes to mirror legacy behavior.
             if (ipass == 3)
                 std::fill(llr0Combined.begin(), llr0Combined.begin() + 24,
                           0.0f);
@@ -1652,14 +1701,13 @@ template <typename Mode> class DecodeMode {
                           0.0f);
 
             std::array<float, N> llrPrimary = llr;
-            if (auto result = tryDecode(llrPrimary, ipass)) {
+            if (auto result =
+                    tryDecode(llrPrimary, ipass, BPOptions{}, true)) {
                 ++totalLdpcPasses;
                 return result;
             }
             ++totalLdpcPasses;
 
-            // Feedback refinement and second attempt, if enabled and budget
-            // allows.
             if (m_enableLdpcFeedback && totalLdpcPasses < m_maxLdpcPasses) {
                 std::array<float, N> llrRefined;
                 int confident = 0;
@@ -1679,7 +1727,8 @@ template <typename Mode> class DecodeMode {
                 feedbackConfident += confident;
                 feedbackUncertain += uncertain;
 
-                if (auto result = tryDecode(llrRefined, ipass)) {
+                if (auto result =
+                        tryDecode(llrRefined, ipass, BPOptions{}, true)) {
                     ++totalLdpcPasses;
                     feedbackTurnedSuccess = true;
                     if (decoder_js8().isDebugEnabled()) {
@@ -1696,13 +1745,49 @@ template <typename Mode> class DecodeMode {
             }
         }
 
+        // Spend the bounded rescue budget only on a genuinely close near miss.
+        // We retry the single best LLR variant with a longer BP run, no early
+        // abort, and three modest LLR temperatures to escape trapping states.
+        if (m_enableLdpcRescue && ldpcRescueBudget > 0 &&
+            bestRescuePass > 0 && bestRescueChecks <= BP_RESCUE_MAX_CHECKS) {
+            --ldpcRescueBudget;
+            rescueAttempted = true;
+
+            if (decoder_js8().isDebugEnabled()) {
+                qCDebug(decoder_js8)
+                    << "LDPC rescue start"
+                    << "bestChecks" << bestRescueChecks
+                    << "ipass" << bestRescuePass
+                    << "budgetRemaining" << ldpcRescueBudget;
+            }
+
+            for (float const scale : BP_RESCUE_LLR_SCALES) {
+                BPOptions options;
+                options.maxIterations = BP_RESCUE_ITERATIONS;
+                options.earlyAbort = false;
+                options.llrScale = scale;
+
+                if (auto result = tryDecode(bestRescueLlr, bestRescuePass,
+                                            options, false)) {
+                    if (decoder_js8().isDebugEnabled()) {
+                        qCDebug(decoder_js8)
+                            << "LDPC rescue succeeded"
+                            << "scale" << scale
+                            << "bestChecks" << bestRescueChecks;
+                    }
+                    return result;
+                }
+            }
+        }
+
         if (decoder_js8().isDebugEnabled()) {
             qCDebug(decoder_js8)
                 << "LDPC feedback summary"
                 << "used" << usedFeedbackPass << "success"
                 << feedbackTurnedSuccess << "confident" << feedbackConfident
                 << "uncertain" << feedbackUncertain << "passes"
-                << totalLdpcPasses;
+                << totalLdpcPasses << "bestChecks" << bestRescueChecks
+                << "rescueAttempted" << rescueAttempted;
         }
 
         logTracker("fail");
@@ -2294,6 +2379,8 @@ template <typename Mode> class DecodeMode {
             std::getenv("JS8_DISABLE_TIMING_TRACKING") == nullptr;
         m_enableDeepSearch =
             std::getenv("JS8_DISABLE_DEEP_SEARCH") == nullptr;
+        m_enableLdpcRescue =
+            std::getenv("JS8_DISABLE_LDPC_RESCUE") == nullptr;
 
         // Intialize the Nuttal window. In theory, we can do this as a
         // constexpr function at compile time, but doing so yield results
@@ -2501,6 +2588,8 @@ template <typename Mode> class DecodeMode {
         auto const ttl = std::chrono::seconds{Mode::NTXDUR * 2};
         m_softCombiner.flush(ttl);
 
+        int ldpcRescueBudget = BP_RESCUE_BUDGET;
+
         for (int ipass = 1; ipass <= 3; ++ipass) {
             // Determine if there's anything worth considering in the signal.
             // If not, then we can just bail completely; more passes will not
@@ -2548,7 +2637,8 @@ template <typename Mode> class DecodeMode {
 
                     if (auto decode =
                             js8dec(data.params.syncStats, subtract, f1, xdt,
-                                   nharderrors, xsnr, emitEvent)) {
+                                   nharderrors, xsnr, ldpcRescueBudget,
+                                   emitEvent)) {
                         // We don't need to be emitting duplicate events for
                         // something that's effectively the same SNR as a
                         // previous event.
