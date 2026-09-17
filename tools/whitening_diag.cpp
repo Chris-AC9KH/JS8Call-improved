@@ -2,15 +2,24 @@
 // This is a standalone command-line tool that synthesizes a Mode A frame,
 // runs the decoder twice (whitening OFF vs ON), and prints a concise summary.
 //
+// With --coherent-benchmark it instead sweeps SNRs -24..-32 dB with the
+// coherent data likelihood path ON vs OFF, reporting valid decodes,
+// CRC-valid false positives (payload mismatches), wall time, and observed
+// LDPC rescue syndromes (min/count; successes imply a zero syndrome).
+//
 // Build example (adjust Qt/FFTW paths as needed):
 //   g++ -std=c++17 -O2 -I.. tools/whitening_diag.cpp FrequencyTracker.cpp -lQt5Core -lfftw3f -lpthread
 //
 // Note: this links only the pieces needed for decoding; it defines the
 // globals (dec_data, specData, fftw_mutex) that JS8 expects.
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <random>
+#include <sstream>
+#include <string>
 #include <vector>
 #include <iostream>
 #include <mutex>
@@ -40,12 +49,13 @@ namespace
     using Mode = ModeA; // Fixed to Mode A for this diagnostic.
 
     std::size_t
-    synth_frame(double snrDb)
+    synth_frame(double snrDb, unsigned seed = 0xBEEF)
     {
         constexpr char message[] = "TESTTEST1234"; // 12 chars
 
         int tones[NN] = {};
-        JS8::encode(0, Costas, message, tones);
+        JS8::encode(0, JS8::Costas::array(JS8::Costas::Type::ORIGINAL),
+                    message, tones);
 
         constexpr double fs   = 12000.0;
         constexpr double baud = fs / Mode::NSPS;
@@ -55,7 +65,7 @@ namespace
 
         double snrLin   = std::pow(10.0, snrDb / 10.0);
         double noiseVar = (snrLin > 0.0) ? (1.0 / snrLin) : 1.0;
-        std::mt19937 rng(0xBEEF);
+        std::mt19937 rng(seed);
         std::normal_distribution<double> noise(0.0, std::sqrt(noiseVar));
 
         for (int sym = 0; sym < NN; ++sym)
@@ -101,18 +111,62 @@ namespace
         bool decoded = false;
         int  nhard   = -1;
         float snr    = -99.0f;
+        std::vector<std::string> payloads;
+        std::vector<int> bestChecks;
+        long long wallMs = 0;
     };
 
+    // Message-handler target for bestChecks capture. qInstallMessageHandler
+    // requires a plain function pointer, so the active sink is set through
+    // this pointer around each benchmark run.
+    std::vector<int> *g_checksSink = nullptr;
+
+    void benchmarkMessageHandler(QtMsgType type, QMessageLogContext const &ctx,
+                                 QString const &msg) {
+        (void)type;
+        if (std::strcmp(ctx.category, "decoder.js8") != 0)
+            return;
+        std::string s = msg.toStdString();
+        std::cerr << s << "\n";
+        if (g_checksSink == nullptr)
+            return;
+        std::istringstream iss(s);
+        std::string tok;
+        while (iss >> tok) {
+            if (tok == "bestChecks") {
+                int v = 0;
+                if (iss >> v)
+                    g_checksSink->push_back(v);
+            }
+        }
+    }
+
     Result
-    run_decode(bool disableWhitening)
+    run_decode(bool disableWhitening, bool coherentEnabled,
+               bool captureChecks = false)
     {
         if (disableWhitening) {
             ::setenv("JS8_DISABLE_WHITENING", "1", 1);
         } else {
             ::unsetenv("JS8_DISABLE_WHITENING");
         }
+        if (coherentEnabled) {
+            ::unsetenv("JS8_DISABLE_COHERENT_DATA");
+        } else {
+            ::setenv("JS8_DISABLE_COHERENT_DATA", "1", 1);
+        }
 
         Result r;
+        std::vector<int> checks;
+        auto prevHandler = qInstallMessageHandler(
+            +[](QtMsgType, QMessageLogContext const &, QString const &) {});
+        if (captureChecks) {
+            QLoggingCategory::setFilterRules(
+                QStringLiteral("decoder.js8.debug=true\n"));
+            g_checksSink = &checks;
+            qInstallMessageHandler(benchmarkMessageHandler);
+        }
+        auto const started = std::chrono::steady_clock::now();
         JS8::Decoder decoder;
         QEventLoop loop;
 
@@ -123,6 +177,7 @@ namespace
             {
                 r.decoded = true;
                 r.snr     = dec->snr;
+                r.payloads.push_back(dec->data);
             }
             else if (auto fin = std::get_if<JS8::Event::DecodeFinished>(&ev))
             {
@@ -136,8 +191,53 @@ namespace
         decoder.decode();
         loop.exec();
         decoder.quit();
+        r.wallMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - started)
+                       .count();
+        r.bestChecks = checks;
+        g_checksSink = nullptr;
+        qInstallMessageHandler(prevHandler);
 
         return r;
+    }
+
+    void
+    run_coherent_benchmark()
+    {
+        constexpr char expected[] = "TESTTEST1234";
+        std::printf("%-8s %-9s %-8s %-8s %-12s %-10s %s\n", "snrDb",
+                    "coherent", "decoded", "exact", "falsePos", "wallMs",
+                    "bestChecks");
+        int trial = 0;
+        for (double snrDb : {-24.0, -26.0, -28.0, -30.0, -32.0}) {
+            for (bool coherent : {true, false}) {
+                // Same noise seed for both settings: fair A/B comparison.
+                synth_frame(snrDb, 0xBEEF + trial);
+                auto r = run_decode(false, coherent, true);
+                int exact = 0;
+                for (auto const &payload : r.payloads)
+                    if (payload == expected)
+                        ++exact;
+                int falsePos =
+                    static_cast<int>(r.payloads.size()) - exact;
+                std::string checks = "n/a";
+                if (!r.bestChecks.empty()) {
+                    int mn = *std::min_element(r.bestChecks.begin(),
+                                               r.bestChecks.end());
+                    checks = std::to_string(mn) + "/" +
+                             std::to_string(r.bestChecks.size());
+                }
+                // CRC-valid decodes carry a zero-syndrome codeword; failures
+                // report the best observed rescue syndrome as min/count.
+                if (r.decoded && r.bestChecks.empty())
+                    checks = "0/success";
+                std::printf("%-8.1f %-9s %-8d %-8d %-12d %-10lld %s\n", snrDb,
+                            coherent ? "on" : "off",
+                            r.decoded ? 1 : 0, exact, falsePos, r.wallMs,
+                            checks.c_str());
+            }
+            ++trial;
+        }
     }
 }
 
@@ -146,11 +246,18 @@ main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
 
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--coherent-benchmark") {
+            run_coherent_benchmark();
+            return 0;
+        }
+    }
+
     constexpr double snrDb = 0.0;
     synth_frame(snrDb);
 
-    auto off = run_decode(true);
-    auto on  = run_decode(false);
+    auto off = run_decode(true, true);
+    auto on  = run_decode(false, true);
 
     std::cout << "Whitening OFF: decoded=" << off.decoded
               << " iterations=" << off.nhard

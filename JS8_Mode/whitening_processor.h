@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "coherent_likelihood.h"
+
 #include <QDebug>
 #include <QLoggingCategory>
 
@@ -68,11 +70,21 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
      * @param erasureThreshold When > 0.0, magnitudes below this threshold
      *        (after whitening) are erased (set to zero).
      * @param debug When true, emits extra debug logging about noise metrics.
+     * @param coherentToneScores Optional per-tone coherent scores in
+     *        `s1` orientation (`[tone][symbol]`), already rotated to the
+     *        predicted carrier phase. When absent (or when `coherentAlpha`
+     *        is not positive) the legacy noncoherent scores are used exactly.
+     * @param coherentAlpha Blend weight in [0,1] applied after per-symbol
+     *        moment matching of both score families. `0` recovers the
+     *        noncoherent path bit-identically.
      * @return A `Result` containing `llr0`, `llr1` and processing statistics.
      */
     static Result process(std::array<std::array<float, ND>, NROWS> const &s1,
-                          std::array<int, ND> const &symbolWinners,
-                          float erasureThreshold, bool debug) {
+                           std::array<int, ND> const &symbolWinners,
+                           float erasureThreshold, bool debug,
+                           std::optional<std::array<std::array<float, ND>, NROWS>> const
+                               &coherentToneScores = std::nullopt,
+                           float coherentAlpha = 0.0f) {
         auto const median =
             [](std::vector<float> &values) -> std::optional<float> {
             if (values.empty())
@@ -215,6 +227,22 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
             for (int i = 0; i < NROWS; ++i) {
                 float const power = ps[i] * ps[i];
                 w[i] = 0.5f * power * invSigma2;
+            }
+
+            // Optionally blend conservatively estimated coherent scores. Both
+            // families are mapped to zero mean/unit variance first so that
+            // amplitude and noise-scale differences cannot mix incompatible
+            // units; with alpha <= 0 (or invalid coherent data) `w` above is
+            // used untouched, preserving the legacy path exactly.
+            if (coherentToneScores && coherentAlpha > 0.0f &&
+                std::isfinite(coherentAlpha)) {
+                std::array<float, NROWS> coherentScores;
+                for (int i = 0; i < NROWS; ++i)
+                    coherentScores[i] = (*coherentToneScores)[i][j];
+                std::array<float, NROWS> blended{};
+                if (js8::blendToneScores(w, coherentScores, coherentAlpha,
+                                         blended))
+                    w = blended;
             }
 
             // Stable log-sum-exp of the tones whose natural-binary encoding has
