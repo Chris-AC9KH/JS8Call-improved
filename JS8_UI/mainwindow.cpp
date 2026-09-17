@@ -5596,9 +5596,6 @@ void UI_Constructor::updateButtonDisplay() {
     ui->queryButton->setText(
         emptyCallsign ? "Directed"
                       : QString("Directed to %1").arg(selectedCallsign));
-
-    // update mode button text
-    updateModeButtonText();
 }
 
 void UI_Constructor::updateHBButtonDisplay() {
