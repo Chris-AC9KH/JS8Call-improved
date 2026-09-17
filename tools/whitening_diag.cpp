@@ -14,7 +14,8 @@
 //
 // The synthesizer keeps carrier phase continuous across all 79 symbols and
 // uses a non-round base frequency so symbol boundaries are not exact integer
-// carrier cycles.
+// carrier cycles. Timing impairments genuinely displace symbol boundaries in
+// time (fractional source-coordinate evaluation), not just tone phase.
 //
 // Build example (adjust Qt/FFTW paths as needed):
 //   g++ -std=c++17 -O2 -I.. tools/whitening_diag.cpp FrequencyTracker.cpp -lQt5Core -lfftw3f -lpthread
@@ -63,7 +64,9 @@ namespace
         double startPhase = 0.0;
         double freqOffsetHz = 0.0;
         double driftHzPerSec = 0.0;
-        double timingShiftSmpl = 0.0; // Fractional symbol-start displacement.
+        double timingShiftSmpl = 0.0; // Real symbol-boundary displacement in
+                                      // 12 kHz samples (may be fractional or
+                                      // negative); see synth_frame.
         unsigned seed = 0xBEEF;
     };
 
@@ -83,28 +86,32 @@ namespace
         std::mt19937 rng(cfg.seed);
         std::normal_distribution<double> noise(0.0, std::sqrt(noiseVar));
 
-        // Continuous carrier phase across all 79 symbols: never reset per
-        // symbol, so coherent structure is preserved end to end. A fractional
-        // timing shift displaces sampling instants, which for a constant
-        // within-symbol frequency is exactly a phase advance dphi*shift.
+        // Real timing displacement: each output sample is evaluated at the
+        // shifted source coordinate s = idx - timingShiftSmpl, so FSK symbol
+        // boundaries genuinely move in time (fractional shifts supported,
+        // positive and negative). Carrier phase accumulates sequentially and
+        // stays continuous; the tone phase advances fractionally within the
+        // symbol, which is exact for pure tones, with no phase reset at
+        // boundaries (an integer tone advances by a multiple of 2*pi per
+        // symbol). Out-of-frame edges extend the edge symbols.
         double phi = cfg.startPhase;
 
-        for (int sym = 0; sym < NN; ++sym)
+        for (std::size_t idx = 0; idx < samples.size(); ++idx)
         {
-            double const centerTime =
-                (sym * Mode::NSPS + Mode::NSPS / 2) / fs;
+            double const s = static_cast<double>(idx) - cfg.timingShiftSmpl;
+            long sym = static_cast<long>(
+                std::floor(s / static_cast<double>(Mode::NSPS)));
+            if (sym < 0)
+                sym = 0;
+            if (sym >= NN)
+                sym = NN - 1;
+            double const centerTime = (s >= 0.0 ? s : 0.0) / fs;
             double const freq = cfg.baseHz + tones[sym] * baud +
                                 cfg.freqOffsetHz +
                                 cfg.driftHzPerSec * centerTime;
             double const dphi = 2.0 * M_PI * freq / fs;
-
-            for (int n = 0; n < Mode::NSPS; ++n)
-            {
-                double s = std::cos(phi + dphi * cfg.timingShiftSmpl);
-                phi      = std::fmod(phi + dphi, 2.0 * M_PI);
-                std::size_t idx = sym * Mode::NSPS + n;
-                if (idx < samples.size()) samples[idx] = static_cast<float>(s + noise(rng));
-            }
+            phi = std::fmod(phi + dphi, 2.0 * M_PI);
+            samples[idx] = static_cast<float>(std::cos(phi) + noise(rng));
         }
 
         auto const count = std::min(samples.size(), std::size_t(JS8_RX_SAMPLE_SIZE));
@@ -193,7 +200,8 @@ namespace
     Result
     run_decode(bool disableWhitening, bool coherentEnabled,
                bool captureChecks = false, bool redemodEnabled = true,
-               std::vector<std::string> *aidedLines = nullptr)
+               std::vector<std::string> *aidedLines = nullptr,
+               bool ldpcRescueEnabled = true)
     {
         if (disableWhitening) {
             ::setenv("JS8_DISABLE_WHITENING", "1", 1);
@@ -209,6 +217,11 @@ namespace
             ::unsetenv("JS8_DISABLE_REDEMOD");
         } else {
             ::setenv("JS8_DISABLE_REDEMOD", "1", 1);
+        }
+        if (ldpcRescueEnabled) {
+            ::unsetenv("JS8_DISABLE_LDPC_RESCUE");
+        } else {
+            ::setenv("JS8_DISABLE_LDPC_RESCUE", "1", 1);
         }
 
         Result r;
@@ -566,6 +579,118 @@ namespace
                     decodedOff, decodedOn, attempts, rescues, falsePos,
                     totalWallOff, totalWallOn);
     }
+
+    // Rescue-budget behavior test (Fix 9.E): run fixed near-miss-prone cells
+    // with LDPC rescue enabled vs disabled and verify per aided attempt:
+    // - extended scales run only when rescue is enabled and budget remains
+    // - an aided scale group consumes exactly one budget unit, never more
+    // - budget never increases and is unchanged when no scales run
+    // - re-demodulation (normal BP, always allowed) is observable via a set
+    //   aidedBestChecks independently of the scale group
+    // Returns the number of invariant violations (0 = PASS).
+    int verifyBudgetLine(std::string const &line, bool rescueEnabled) {
+        auto const field = [&](char const *key, long long fallback) {
+            std::istringstream iss(line);
+            std::string tok;
+            while (iss >> tok) {
+                if (tok == key) {
+                    long long v = fallback;
+                    if (iss >> v)
+                        return v;
+                    return fallback;
+                }
+            }
+            return fallback;
+        };
+        long long const scales = field("aidedScales", -1);
+        long long const before = field("budgetBefore", -1);
+        long long const after = field("budgetAfter", -2);
+        long long const bestChecks = field("aidedBestChecks", -999);
+        int violations = 0;
+        auto const violation = [&](char const *what) {
+            std::printf("    BUDGET-VIOLATION %s: %s\n", what, line.c_str());
+            ++violations;
+        };
+        if (scales < 0 || scales > 3)
+            violation("scales out of range");
+        if (before < 0)
+            violation("missing budgetBefore");
+        if (!rescueEnabled && scales != 0)
+            violation("scales ran with rescue disabled");
+        if (scales > 0) {
+            if (before <= 0)
+                violation("scales ran with no budget");
+            if (after != before - 1)
+                violation("group did not consume exactly one unit");
+        } else if (after != before) {
+            violation("budget changed without scales");
+        }
+        // Re-demodulation ran iff LDPC saw the fresh LLRs.
+        bool const redemodRan = bestChecks >= 0;
+        if (redemodRan && scales < 0)
+            violation("re-demod without scale accounting");
+        (void)redemodRan;
+        return violations;
+    }
+
+    void run_aided_budget() {
+        constexpr char const *messages[] = {
+            "TESTTEST1234", "TESTTEST1235", "AAAAAAAAAAAA", "ZZZZZZZZZZZZ",
+        };
+        int violations = 0;
+        int redemods = 0;
+        int scaleGroups = 0;
+        int normalOnlyAtZeroBudget = 0;
+        for (bool rescueEnabled : {true, false}) {
+            for (char const *message : messages) {
+                for (double snrDb : {-16.0, -17.0, -18.0}) {
+                    for (unsigned seed : {0xC11u, 0xC22u, 0xC33u}) {
+                        SynthConfig cfg;
+                        cfg.snrDb = snrDb;
+                        cfg.seed = seed;
+                        cfg.startPhase = 1.1 + 0.7 * (seed & 0xF);
+                        cfg.freqOffsetHz = 0.35;
+                        cfg.driftHzPerSec = 0.02;
+                        cfg.timingShiftSmpl = 0.03 * ModeA::NSPS;
+                        auto count = synth_frame<ModeA>(cfg, message);
+                        set_mode_params(0, static_cast<int>(count),
+                                        cfg.baseHz);
+                        std::vector<std::string> aidedLines;
+                        auto r = run_decode(false, true, true, true,
+                                            &aidedLines, rescueEnabled);
+                        (void)r;
+                        for (auto const &line : aidedLines) {
+                            std::istringstream iss(line);
+                            std::string tok;
+                            long long scales = -1;
+                            long long before = -1;
+                            long long best = -999;
+                            while (iss >> tok) {
+                                if (tok == "aidedScales")
+                                    iss >> scales;
+                                else if (tok == "budgetBefore")
+                                    iss >> before;
+                                else if (tok == "aidedBestChecks")
+                                    iss >> best;
+                            }
+                            if (best >= 0)
+                                ++redemods;
+                            if (scales > 0)
+                                ++scaleGroups;
+                            if (best >= 0 && scales == 0 && before == 0)
+                                ++normalOnlyAtZeroBudget;
+                            violations += verifyBudgetLine(line,
+                                                           rescueEnabled);
+                        }
+                    }
+                }
+            }
+        }
+        std::printf("aided-budget: re-demodulations=%d scaleGroups=%d "
+                    "normalOnlyAtZeroBudget=%d violations=%d %s\n",
+                    redemods, scaleGroups, normalOnlyAtZeroBudget, violations,
+                    violations == 0 ? "PASS" : "FAIL");
+    }
 }
 
 int
@@ -588,6 +713,10 @@ main(int argc, char **argv)
         }
         if (std::string(argv[i]) == "--aided-benchmark") {
             run_aided_benchmark();
+            return 0;
+        }
+        if (std::string(argv[i]) == "--aided-budget") {
+            run_aided_budget();
             return 0;
         }
     }

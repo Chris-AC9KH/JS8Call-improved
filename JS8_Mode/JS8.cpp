@@ -622,6 +622,13 @@ struct BPResult {
     int finalChecks = M;
     int bestChecks = M + 1;
     bool earlyAborted = false;
+    // Minimum-syndrome hard word observed during this call (first minimum
+    // wins ties deterministically). Exposed for decoder-aided
+    // re-demodulation WITHOUT changing the normal `cw` output: on failure
+    // `cw` keeps last-iteration semantics while `bestCw` carries the best
+    // word, so ordinary LDPC feedback never depends on it.
+    std::array<int8_t, N> bestCw{};
+    bool bestCwValid = false;
 };
 
 constexpr std::array<std::array<int, BP_MAX_CHECKS>, N> Mn = {
@@ -770,7 +777,6 @@ BPResult bpdecode174(std::array<float, N> const &llr,
     std::array<std::array<float, BP_MAX_ROWS>, M> tanhtoc = {};
     std::array<float, N> zn = {};
     std::array<int, M> synd = {};
-    std::array<int8_t, N> bestCw = {};
 
     BPResult result;
     int ncnt = 0;
@@ -808,7 +814,8 @@ BPResult bpdecode174(std::array<float, N> const &llr,
         result.finalChecks = ncheck;
         if (ncheck < result.bestChecks) {
             result.bestChecks = ncheck;
-            bestCw = cw;
+            result.bestCw = cw;
+            result.bestCwValid = true;
         }
 
         if (ncheck == 0) {
@@ -821,6 +828,8 @@ BPResult bpdecode174(std::array<float, N> const &llr,
             }
 
             result.hardErrors = nerr;
+            result.bestCw = cw;
+            result.bestCwValid = true;
             return result;
         }
 
@@ -832,7 +841,9 @@ BPResult bpdecode174(std::array<float, N> const &llr,
             ncnt = (nd < 0) ? 0 : ncnt + 1;
             if (options.earlyAbort && ncnt >= 5 && iter >= 10 && ncheck > 15) {
                 result.earlyAborted = true;
-                cw = bestCw;
+                // Deliberately leave `cw` at the last-iteration state: the
+                // minimum-syndrome word is available via `result.bestCw`
+                // without changing normal output semantics.
                 return result;
             }
         }
@@ -871,9 +882,9 @@ BPResult bpdecode174(std::array<float, N> const &llr,
         }
     }
 
-    // Feedback should use the closest codeword BP reached, not merely the
-    // state present on the final iteration.
-    cw = bestCw;
+    // Exhausted iterations without converging: `cw` intentionally keeps the
+    // last-iteration state (legacy semantics for ordinary LDPC feedback).
+    // Callers needing the closest word use `result.bestCw` instead.
     return result;
 }
 } // namespace
@@ -1826,10 +1837,12 @@ template <typename Mode> class DecodeMode {
                     bestRescueChecks = bp.bestChecks;
                     bestRescuePass = ipass;
                     bestRescueLlr = llrInput;
-                    // bpdecode174 leaves cw at this call's minimum-syndrome
-                    // state, so this snapshot is the word that earned
-                    // bestChecks (first minimum wins ties deterministically).
-                    bestRescueCw = cw;
+                    // The tentative word is the minimum-syndrome word reported
+                    // by this call (first minimum wins ties
+                    // deterministically), independent of the normal `cw`
+                    // output semantics.
+                    if (bp.bestCwValid)
+                        bestRescueCw = bp.bestCw;
                 }
             };
 
@@ -1901,8 +1914,8 @@ template <typename Mode> class DecodeMode {
         };
 
         // Run the existing decode and feedback sequence first. Failed BP runs
-        // now leave cw at the minimum-syndrome state, improving the quality of
-        // the existing feedback pass without adding any extra CPU cost.
+        // leave cw at the last-iteration state; the existing feedback pass
+        // uses that word with no extra CPU cost.
         for (int ipass = 1; ipass <= 4 && totalLdpcPasses < m_maxLdpcPasses;
              ++ipass) {
             auto &llr = ipass == 2 ? llr1Combined : llr0Combined;
@@ -2003,12 +2016,15 @@ template <typename Mode> class DecodeMode {
         // sequence fails with a genuinely close near miss (best syndrome in
         // (0, 4]), the best tentative codeword becomes a waveform hypothesis:
         // its 58 data tones plus the 21 known Costas tones refine
-        // timing/residual-frequency/drift against this candidate's received
-        // samples (cd0, i.e. the current SIC-pass buffer after coarse
-        // correction), and the refined sync drives ONE fresh 8-tone
-        // re-demodulation producing new LLRs for a final LDPC attempt. Only a
-        // valid CRC can accept the result; any failure falls through to the
-        // normal failure path with the original outputs restored.
+        // timing/residual-frequency/drift relative to the ACTUAL first-pass
+        // tracked extraction (recorded starts plus tracker corrections) using
+        // this candidate's received samples (cd0, i.e. the current SIC-pass
+        // buffer after coarse correction), and the refined sync drives ONE
+        // fresh 8-tone re-demodulation producing new LLRs for a final LDPC
+        // attempt. Extended rescue scales obey the existing rescue enable and
+        // budget (one unit per aided group). Only a valid CRC can accept the
+        // result; any failure falls through to the normal failure path with
+        // the original outputs restored.
         if (m_enableAidedRedemod && bestRescueChecks > 0 &&
             bestRescueChecks <= js8::aided::kMaxSyndrome) {
             static_assert(js8::aided::kCodeBits == N &&
@@ -2025,10 +2041,24 @@ template <typename Mode> class DecodeMode {
             for (float v : bestRescueLlr)
                 tentValid = tentValid && std::isfinite(v);
 
+            // Recorded first-pass extraction per symbol: nominal base plus the
+            // TimingTracker integer shift actually applied, with the
+            // FrequencyTracker estimate applied to that symbol. The
+            // refinement baseline replays this tracked extraction exactly;
+            // search hypotheses refine relative to it.
+            std::array<js8::aided::SymbolBaseline, NN> aidedBaselines{};
+            for (int k = 0; k < NN; ++k) {
+                aidedBaselines[static_cast<std::size_t>(k)].startSamples =
+                    symbolBaseStarts[static_cast<std::size_t>(k)] +
+                    symbolTimingShifts[static_cast<std::size_t>(k)];
+                aidedBaselines[static_cast<std::size_t>(k)].trackerHz =
+                    symbolTrackerHz[static_cast<std::size_t>(k)];
+            }
+
             bool const boundsOk =
-                tentValid && js8::aided::sampleBoundsValid(
-                                 ibest, NN, Mode::NDOWNSPS, Mode::NDOWNSPS,
-                                 NP2, js8::aided::kTimingDeltaMax);
+                tentValid && js8::aided::symbolBoundsValid(
+                                 aidedBaselines, Mode::NDOWNSPS, NP2,
+                                 js8::aided::kTimingDeltaMax);
             // Gate reason for telemetry: 0 = searched, 1 = tentative
             // word/LLRs unusable, 2 = candidate sample bounds invalid.
             int const skipCode =
@@ -2046,6 +2076,9 @@ template <typename Mode> class DecodeMode {
             int aidedBoundary = 0;
             int aidedBestChecks = -1;
             int aidedAccepted = 0;
+            int aidedScales = 0;
+            int const aidedBudgetBefore = ldpcRescueBudget;
+            int aidedBudgetAfter = ldpcRescueBudget;
             double const initLlrNorm = js8::aided::llrNorm(bestRescueLlr);
             double aidedLlrNorm = 0.0;
 
@@ -2062,9 +2095,8 @@ template <typename Mode> class DecodeMode {
 
                 js8::aided::Refinement const refinement =
                     js8::aided::refineSync(
-                        cd0.data(), NP2, ibest, Mode::NDOWNSPS,
-                        Mode::NDOWNSPS, static_cast<double>(FS2),
-                        expectedTones, symWeights);
+                        cd0.data(), NP2, aidedBaselines, Mode::NDOWNSPS,
+                        static_cast<double>(FS2), expectedTones, symWeights);
                 aidedBase = refinement.baselineMetric;
                 aidedRef = refinement.best.metric;
                 aidedBoundary = refinement.atBoundary ? 1 : 0;
@@ -2077,14 +2109,16 @@ template <typename Mode> class DecodeMode {
 
                 if (js8::aided::refinementAccepted(refinement)) {
 
-                    // Fresh full 79-symbol re-demodulation from cd0 with the
-                    // refined sync: fixed timing offset plus a continuous
-                    // complex derotation phase(t) = 2*pi*df*t + pi*dd*t^2
-                    // (negative-exponent convention matches the coarse cd0
-                    // correction), then the same in-place FFT and magnitude
-                    // scaling as the first pass. No per-symbol trackers: the
-                    // refined base replaces them, and the Costas-only
-                    // coherent fit downstream absorbs small leftovers.
+                    // Fresh full 79-symbol re-demodulation from cd0: recorded
+                    // first-pass start plus the refined timing delta, exact
+                    // replay of the recorded tracker correction, then the
+                    // refined residual derotation phase(t) = 2*pi*df*t +
+                    // pi*dd*t^2 (negative-exponent convention matches the
+                    // coarse cd0 correction), then the same in-place FFT and
+                    // magnitude scaling as the first pass. The Costas-only
+                    // coherent fit downstream absorbs small leftovers; the
+                    // recorded trackerHz metadata is passed through unchanged
+                    // so its model stays consistent with the first pass.
                     std::array<std::array<float, NN>, NROWS> s2Aided{};
                     std::array<std::array<std::complex<float>, NN>, NROWS>
                         complexAided{};
@@ -2093,26 +2127,38 @@ template <typename Mode> class DecodeMode {
                     std::array<float, NN> trackerHzAided{};
                     double const rateHz = static_cast<double>(FS2);
                     for (int k = 0; k < NN; ++k) {
-                        int const i1Base = ibest + k * Mode::NDOWNSPS;
-                        int i1 = i1Base + aidedDt;
+                        std::size_t const kk = static_cast<std::size_t>(k);
+                        int const firstStart =
+                            aidedBaselines[kk].startSamples;
+                        int i1 = firstStart + aidedDt;
                         if (i1 < 0) {
                             i1 = 0;
                         } else if (i1 + Mode::NDOWNSPS > NP2) {
                             i1 = NP2 - Mode::NDOWNSPS;
                         }
-                        baseStartsAided[static_cast<std::size_t>(k)] = i1Base;
-                        shiftsAided[static_cast<std::size_t>(k)] = i1 - i1Base;
-                        for (int n = 0; n < Mode::NDOWNSPS; ++n) {
-                            std::complex<float> const x =
+                        baseStartsAided[kk] = symbolBaseStarts[kk];
+                        shiftsAided[kk] = i1 - symbolBaseStarts[kk];
+                        trackerHzAided[kk] = symbolTrackerHz[kk];
+                        for (int n = 0; n < Mode::NDOWNSPS; ++n)
+                            csymb[static_cast<std::size_t>(n)] =
                                 cd0[static_cast<std::size_t>(i1 + n)];
+                        if (!js8::aided::replayTrackerCorrection(
+                                csymb.data(), Mode::NDOWNSPS,
+                                aidedBaselines[kk].trackerHz, rateHz)) {
+                            // Corrupt window: zero-fill so downstream
+                            // finite/magnitude guards handle it
+                            // deterministically.
+                            csymb.fill(ZERO);
+                        }
+                        for (int n = 0; n < Mode::NDOWNSPS; ++n) {
                             double const t =
                                 static_cast<double>(i1 + n) / rateHz;
                             double const angle =
                                 2.0 * std::numbers::pi * aidedDf * t +
                                 std::numbers::pi * aidedDd * t * t;
                             float const ang = static_cast<float>(angle);
-                            csymb[static_cast<std::size_t>(n)] =
-                                x * std::polar(1.0f, -ang);
+                            csymb[static_cast<std::size_t>(n)] *=
+                                std::polar(1.0f, -ang);
                         }
 
                         fftwf_execute(plans[Plan::CS]);
@@ -2157,26 +2203,37 @@ template <typename Mode> class DecodeMode {
                         aidedResult = res;
                     } else {
                         aidedBest = std::min(aidedBest, aidedBp.bestChecks);
-                        for (float const scale : BP_RESCUE_LLR_SCALES) {
-                            BPOptions options;
-                            options.maxIterations = BP_RESCUE_ITERATIONS;
-                            options.earlyAbort = false;
-                            options.llrScale = scale;
-                            BPResult retryBp;
-                            if (auto retry = tryDecode(aidedBins.llr0, 1,
-                                                       options, false,
-                                                       &retryBp)) {
+                        // Extended rescue scales stay inside the decoder's
+                        // existing bounded rescue policy: one normal BP is
+                        // always allowed on the fresh LLRs, but the scale
+                        // group runs only with rescue enabled and budget
+                        // remaining, consuming exactly one unit for the whole
+                        // aided group like the normal rescue group.
+                        if (m_enableLdpcRescue && ldpcRescueBudget > 0) {
+                            --ldpcRescueBudget;
+                            for (float const scale : BP_RESCUE_LLR_SCALES) {
+                                ++aidedScales;
+                                BPOptions options;
+                                options.maxIterations = BP_RESCUE_ITERATIONS;
+                                options.earlyAbort = false;
+                                options.llrScale = scale;
+                                BPResult retryBp;
+                                if (auto retry =
+                                        tryDecode(aidedBins.llr0, 1, options,
+                                                  false, &retryBp)) {
+                                    aidedBest = std::min(aidedBest,
+                                                         retryBp.bestChecks);
+                                    aidedAccepted = 1;
+                                    aidedResult = retry;
+                                    break;
+                                }
                                 aidedBest = std::min(aidedBest,
                                                      retryBp.bestChecks);
-                                aidedAccepted = 1;
-                                aidedResult = retry;
-                                break;
                             }
-                            aidedBest =
-                                std::min(aidedBest, retryBp.bestChecks);
                         }
                     }
                     aidedBestChecks = aidedBest <= M ? aidedBest : -1;
+                    aidedBudgetAfter = ldpcRescueBudget;
 
                     if (!aidedResult) {
                         // Failed aided attempts leave no trace: original
@@ -2200,6 +2257,8 @@ template <typename Mode> class DecodeMode {
                     << js8::aided::metricGainDb(aidedRef, aidedBase)
                     << "atBoundary" << aidedBoundary << "aidedBestChecks"
                     << aidedBestChecks << "crcAccepted" << aidedAccepted
+                    << "aidedScales" << aidedScales << "budgetBefore"
+                    << aidedBudgetBefore << "budgetAfter" << aidedBudgetAfter
                     << "initLlrNorm" << initLlrNorm << "aidedLlrNorm"
                     << aidedLlrNorm;
             }

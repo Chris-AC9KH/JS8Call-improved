@@ -1,13 +1,17 @@
 // Deterministic unit tests for decoder-aided re-demodulation helpers.
 //
-// Covers: codeword->tones mapping (A), confidence weighting (B), baseline
-// refinement (C), known timing error (D), known residual frequency (E),
-// timing+frequency (F), wrong tentative codeword (G), bounds/clipping (H),
-// NaN/Inf safety (I), plus a helper-level rescue demonstration.
+// Covers: codeword->tones mapping, confidence weighting, baseline
+// refinement, known timing error (incl. fractional true shifts), known
+// residual frequency, timing+frequency, interior gate acceptance, drift
+// handling, other-seven-tones contrast (Fix 9.A), tracked baseline (Fix
+// 9.B), wrong tentative codeword, bounds/clipping, NaN/Inf safety, plus a
+// helper-level rescue demonstration.
 //
 // The synthetic 79-symbol waveform uses continuous FSK phase (boundary phase
 // jumps are multiples of 2*pi) with absolute-time residual/drift terms, the
-// same physical model the refinement search assumes.
+// same physical model the refinement search assumes. Timing shifts displace
+// actual symbol boundaries (fractional shifts supported); interferers are
+// optional extra tones with continuous phase.
 //
 // Build (no Qt/FFTW needed; header is dependency-free):
 //   clang++ -std=c++20 -O2 -Wall -I. tools/decoder_aided_redemod_test.cpp \
@@ -51,33 +55,50 @@ constexpr js8::aided::CostasTones kModified = {{
 
 constexpr int kWindow = 32;
 constexpr double kRate = 200.0; // Mode-A-like downsampled rate.
+constexpr int kFrameStart = 64;
+
+enum class Interferer { NONE, UNUSED_BIN, COMPETITOR };
 
 // Continuous-phase 79-symbol FSK line. injShift displaces the true symbol
-// timing relative to frameStart; resFreq/drift use absolute sample time, the
-// same convention as the search derotation.
+// timing (fractional values supported: the tone phase advances fractionally,
+// which is exact for pure tones); resFreq/drift use absolute sample time.
+// Optional interferer (added as a complex sum, not a phase shift):
+// UNUSED_BIN adds a unit tone at DFT bin 12 (integer, hence orthogonal to
+// bins 0..7: zero leakage into the valid tones); COMPETITOR adds a unit tone
+// at (expected+4)%8 per symbol.
 std::vector<std::complex<float>>
-synthLine(std::array<int, 79> const &tones, int frameStart, int injShift,
-          double startPhase, double resFreq, double drift) {
+synthLine(std::array<int, 79> const &tones, int frameStart, double injShift,
+          double startPhase, double resFreq, double drift,
+          Interferer interferer = Interferer::NONE) {
     constexpr int kPad = 16;
     int const total = frameStart + 79 * kWindow + kPad;
     std::vector<std::complex<float>> line(static_cast<std::size_t>(total));
     constexpr double twoPi = 2.0 * std::numbers::pi;
     for (int idx = 0; idx < total; ++idx) {
-        long const rel = static_cast<long>(idx) - frameStart - injShift;
-        long sym = rel >= 0 ? rel / kWindow : -(((-rel) + kWindow - 1) /
-                                                kWindow);
+        double const rel = static_cast<double>(idx) - frameStart - injShift;
+        long sym = static_cast<long>(std::floor(rel / kWindow));
         if (sym < 0)
             sym = 0;
         if (sym > 78)
             sym = 78;
-        long const local = rel - sym * kWindow;
+        double const local = rel - static_cast<double>(sym) * kWindow;
         double const t = static_cast<double>(idx) / kRate;
-        double const phase =
-            startPhase + twoPi * resFreq * t +
-            std::numbers::pi * drift * t * t +
-            twoPi * tones[static_cast<std::size_t>(sym)] * local / kWindow;
-        line[static_cast<std::size_t>(idx)] =
+        int const tone = tones[static_cast<std::size_t>(sym)];
+        double const phase = startPhase + twoPi * resFreq * t +
+                             std::numbers::pi * drift * t * t +
+                             twoPi * tone * local / kWindow;
+        std::complex<float> sample =
             std::polar(1.0f, static_cast<float>(phase));
+        if (interferer == Interferer::UNUSED_BIN) {
+            double const iphase =
+                startPhase + twoPi * 12.0 * local / kWindow;
+            sample += std::polar(1.0f, static_cast<float>(iphase));
+        } else if (interferer == Interferer::COMPETITOR) {
+            double const iphase = startPhase +
+                                  twoPi * ((tone + 4) % 8) * local / kWindow;
+            sample += std::polar(1.0f, static_cast<float>(iphase));
+        }
+        line[static_cast<std::size_t>(idx)] = sample;
     }
     return line;
 }
@@ -94,6 +115,26 @@ std::array<float, 79> unitDataWeights() {
     for (int k = 0; k < 79; ++k)
         w[static_cast<std::size_t>(k)] = 1.0f;
     return w;
+}
+
+// Untracked baselines: nominal starts, zero tracker correction.
+std::array<js8::aided::SymbolBaseline, 79>
+makeBaselines(int frameStart, int extraShift = 0, float trackerHz = 0.0f) {
+    std::array<js8::aided::SymbolBaseline, 79> b{};
+    for (int k = 0; k < 79; ++k) {
+        b[static_cast<std::size_t>(k)].startSamples =
+            frameStart + k * kWindow + extraShift;
+        b[static_cast<std::size_t>(k)].trackerHz = trackerHz;
+    }
+    return b;
+}
+
+js8::aided::Refinement runSearch(std::vector<std::complex<float>> const &line,
+                                 std::array<js8::aided::SymbolBaseline, 79> const &b,
+                                 std::array<int, 79> const &tones,
+                                 std::array<float, 79> const &weights) {
+    return js8::aided::refineSync(line.data(), static_cast<int>(line.size()),
+                                  b, kWindow, kRate, tones, weights);
 }
 
 void runCodewordToTones() {
@@ -190,11 +231,9 @@ void runBaselineRefinement() {
     for (int i = 0; i < 174; i += 3)
         cw[static_cast<std::size_t>(i)] = 1; // varied tones, not all zero
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
-    auto const line = synthLine(tones, frameStart, 0, 0.7, 0.0, 0.0);
-    auto const out = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-        kWindow, kRate, tones, unitDataWeights());
+    auto const line = synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, 0.0);
+    auto const out =
+        runSearch(line, makeBaselines(kFrameStart), tones, unitDataWeights());
     check(out.searched, "perfect sync input is searched");
     check(out.baselineFinite, "baseline metric finite");
     check(out.best.deltaSamples == 0 && out.best.deltaHz == 0.0 &&
@@ -217,16 +256,14 @@ void runKnownTimingError() {
         cw[static_cast<std::size_t>(i)] =
             static_cast<int8_t>((i * 2654435761u >> 13) & 1);
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
-    for (int inj : {2, -2}) {
+    for (double inj : {2.0, -2.0, 1.5, -1.5}) {
         auto const line =
-            synthLine(tones, frameStart, inj, 0.7, 0.0, 0.0);
-        auto const out = js8::aided::refineSync(
-            line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-            kWindow, kRate, tones, unitDataWeights());
+            synthLine(tones, kFrameStart, inj, 0.7, 0.0, 0.0);
+        auto const out = runSearch(line, makeBaselines(kFrameStart), tones,
+                                   unitDataWeights());
         char name[96];
         std::snprintf(name, sizeof(name),
-                      "injected %+d samples recovered onside (got %+d)", inj,
+                      "injected %+.1f samples recovered onside (got %+d)", inj,
                       out.best.deltaSamples);
         check(out.searched && (out.best.deltaSamples > 0) == (inj > 0) &&
                   std::abs(out.best.deltaSamples) >= 1 &&
@@ -242,13 +279,11 @@ void runKnownResidualFrequency() {
         cw[static_cast<std::size_t>(i)] =
             static_cast<int8_t>((i * 40503u >> 7) & 1);
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
     for (double inj : {0.4, -0.4}) {
         auto const line =
-            synthLine(tones, frameStart, 0, 0.7, inj, 0.0);
-        auto const out = js8::aided::refineSync(
-            line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-            kWindow, kRate, tones, unitDataWeights());
+            synthLine(tones, kFrameStart, 0.0, 0.7, inj, 0.0);
+        auto const out = runSearch(line, makeBaselines(kFrameStart), tones,
+                                   unitDataWeights());
         char name[96];
         std::snprintf(name, sizeof(name),
                       "injected %+.1f Hz recovered (got %+.1f Hz)", inj,
@@ -267,11 +302,9 @@ void runTimingPlusFrequency() {
         cw[static_cast<std::size_t>(i)] =
             static_cast<int8_t>((i * 2654435761u >> 13) & 1);
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
-    auto const line = synthLine(tones, frameStart, 2, 0.7, 0.3, 0.0);
-    auto const out = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-        kWindow, kRate, tones, unitDataWeights());
+    auto const line = synthLine(tones, kFrameStart, 2.0, 0.7, 0.3, 0.0);
+    auto const out = runSearch(line, makeBaselines(kFrameStart), tones,
+                               unitDataWeights());
     check(out.searched && out.best.deltaSamples >= 1 &&
               out.best.deltaSamples <= 2 &&
               std::abs(out.best.deltaHz - 0.3) < 0.051 &&
@@ -294,11 +327,9 @@ void runInteriorGateAcceptance() {
         cw[static_cast<std::size_t>(i)] =
             static_cast<int8_t>((i * 40503u >> 7) & 1);
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
-    auto const line = synthLine(tones, frameStart, 0, 0.7, 0.4, 0.0);
-    auto const out = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-        kWindow, kRate, tones, unitDataWeights());
+    auto const line = synthLine(tones, kFrameStart, 0.0, 0.7, 0.4, 0.0);
+    auto const out = runSearch(line, makeBaselines(kFrameStart), tones,
+                               unitDataWeights());
     check(out.searched && std::abs(out.best.deltaHz - 0.4) < 0.051 &&
               std::abs(out.best.deltaSamples) <= 1,
           "interior frequency impairment recovered");
@@ -318,12 +349,10 @@ void runDriftHandling() {
         cw[static_cast<std::size_t>(i)] =
             static_cast<int8_t>((i * 40503u >> 7) & 1);
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
     for (double inj : {0.02, -0.02}) {
-        auto const line = synthLine(tones, frameStart, 0, 0.7, 0.0, inj);
-        auto const out = js8::aided::refineSync(
-            line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-            kWindow, kRate, tones, unitDataWeights());
+        auto const line = synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, inj);
+        auto const out = runSearch(line, makeBaselines(kFrameStart), tones,
+                                   unitDataWeights());
         char name[96];
         std::snprintf(name, sizeof(name),
                       "injected %+.2f Hz/s drift selected (got %+.2f)", inj,
@@ -334,6 +363,94 @@ void runDriftHandling() {
         check(!js8::aided::refinementAccepted(out),
               "drift-only optimum fails the safety gate");
     }
+}
+
+void runOtherSevenTones() {
+    std::printf("[other seven tones]\n");
+    // Direct contract: contrast uses the actual 8 valid bins only.
+    double const low[7] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+    double const hot[7] = {50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0};
+    check(js8::aided::contrastEight(100.0, low) == 99.0,
+          "contrast = expected - mean(other 7)");
+    check(js8::aided::contrastEight(100.0, hot) == 50.0,
+          "energy in valid other tones lowers contrast");
+    check(js8::aided::contrastEight(100.0, low) >
+              js8::aided::contrastEight(100.0, hot),
+          "valid-tone competition decreases contrast");
+    check(!std::isfinite(js8::aided::contrastEight(
+              std::numeric_limits<double>::quiet_NaN(), low)),
+          "contrast rejects NaN expected power");
+    check(!std::isfinite(js8::aided::contrastEight(100.0, nullptr)),
+          "contrast rejects null other-tones");
+    // End to end: energy at an UNUSED integer DFT bin (12 of 32) is
+    // orthogonal to bins 0..7, so it must barely affect the metric. A total
+    // time-domain power (Parseval) implementation would fold it into the
+    // alternative-tone estimate and drop ~14%.
+    std::array<int8_t, 174> cw{};
+    for (int i = 0; i < 174; ++i)
+        cw[static_cast<std::size_t>(i)] =
+            static_cast<int8_t>((i * 2654435761u >> 13) & 1);
+    auto const tones = tonesFromBits(cw);
+    auto const clean = synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, 0.0);
+    auto const withUnused =
+        synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, 0.0,
+                  Interferer::UNUSED_BIN);
+    auto const base = makeBaselines(kFrameStart);
+    auto const w = unitDataWeights();
+    auto const mClean =
+        runSearch(clean, base, tones, w).baselineMetric;
+    auto const mUnused =
+        runSearch(withUnused, base, tones, w).baselineMetric;
+    check(std::isfinite(mClean) && std::isfinite(mUnused) && mClean > 0.0,
+          "both frames score finite positive metrics");
+    check(mUnused / mClean > 0.95,
+          "unused-bin energy barely affects contrast");
+    // Sanity: per-symbol competitor energy DOES move the metric.
+    auto const withCompetitor =
+        synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, 0.0,
+                  Interferer::COMPETITOR);
+    auto const mComp =
+        runSearch(withCompetitor, base, tones, w).baselineMetric;
+    double const ratio = mComp / mClean;
+    char info[96];
+    std::snprintf(info, sizeof(info),
+                  "valid-tone competition moves metric (ratio %.3f)", ratio);
+    check(std::isfinite(ratio) && ratio < 0.95 && ratio > 0.5, info);
+}
+
+void runTrackedBaseline() {
+    std::printf("[tracked baseline]\n");
+    // Frame with true (+2 samples, +0.4 Hz) impairment. With UNTRACKED
+    // baselines the search must recover it (control). With baselines that
+    // already contain the correction (starts pre-shifted by +2, trackerHz
+    // set to the mirror-correcting value that re-centers the tone peak),
+    // the baseline is already optimal: the search must select a
+    // (0,0,0)-relative hypothesis and claim no gain.
+    std::array<int8_t, 174> cw{};
+    for (int i = 0; i < 174; ++i)
+        cw[static_cast<std::size_t>(i)] =
+            static_cast<int8_t>((i * 40503u >> 7) & 1);
+    auto const tones = tonesFromBits(cw);
+    auto const line = synthLine(tones, kFrameStart, 2.0, 0.7, 0.4, 0.0);
+    auto const w = unitDataWeights();
+    auto const untracked = runSearch(line, makeBaselines(kFrameStart), tones,
+                                     w);
+    check(untracked.searched &&
+              untracked.best.deltaSamples >= 1 &&
+              std::abs(untracked.best.deltaHz - 0.4) < 0.051,
+          "control: untracked baseline recovers impairment");
+    check(untracked.best.metric > untracked.baselineMetric * 1.005,
+          "control: untracked baseline shows real gain");
+    auto const tracked =
+        runSearch(line, makeBaselines(kFrameStart, 2, -0.4f), tones, w);
+    check(tracked.searched, "tracked baseline is searched");
+    check(tracked.best.deltaSamples >= -1 && tracked.best.deltaSamples <= 1 &&
+              tracked.best.deltaHz == 0.0 &&
+              tracked.best.driftHzPerSec == 0.0,
+          "tracked baseline selects relative (0, 0, 0)");
+    check(!tracked.atBoundary, "tracked selection not at boundary");
+    check(!js8::aided::refinementAccepted(tracked),
+          "no fake gain over the already-tracked baseline");
 }
 
 void runWrongCodeword() {
@@ -351,11 +468,9 @@ void runWrongCodeword() {
         wrongTones[static_cast<std::size_t>(k)] =
             (wrongTones[static_cast<std::size_t>(k)] + 4) % 8;
     }
-    constexpr int frameStart = 64;
-    auto const line = synthLine(trueTones, frameStart, 0, 0.7, 0.0, 0.0);
-    auto const out = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-        kWindow, kRate, wrongTones, unitDataWeights());
+    auto const line = synthLine(trueTones, kFrameStart, 0.0, 0.7, 0.0, 0.0);
+    auto const out = runSearch(line, makeBaselines(kFrameStart), wrongTones,
+                               unitDataWeights());
     check(out.searched, "wrong-word input still searches safely");
     check(!js8::aided::refinementAccepted(out),
           "wrong tentative word cannot pass the gain gate");
@@ -366,28 +481,43 @@ void runBoundsClipping() {
     std::array<int8_t, 174> cw{};
     cw[0] = 1;
     auto const tones = tonesFromBits(cw);
-    constexpr int need = 64 + 79 * kWindow + 16;
-    check(js8::aided::sampleBoundsValid(64, 79, kWindow, kWindow, need, 2),
+    auto good = makeBaselines(kFrameStart);
+    check(js8::aided::symbolBoundsValid(good, kWindow,
+                                        kFrameStart + 79 * kWindow + 16, 2),
           "interior frame bounds valid");
-    check(!js8::aided::sampleBoundsValid(-1, 79, kWindow, kWindow, need, 2),
+    auto negStart = makeBaselines(kFrameStart);
+    negStart[0].startSamples = -5;
+    check(!js8::aided::symbolBoundsValid(negStart, kWindow,
+                                         kFrameStart + 79 * kWindow + 16, 2),
           "negative start rejected");
-    check(!js8::aided::sampleBoundsValid(64, 79, kWindow, kWindow,
-                                         64 + 79 * kWindow - 1, 2),
+    check(!js8::aided::symbolBoundsValid(
+              good, kWindow, kFrameStart + 79 * kWindow - 1, 2),
           "end overflow rejected");
-    check(!js8::aided::sampleBoundsValid(64, 79, kWindow, 0, need, 2),
+    check(!js8::aided::symbolBoundsValid(good, 0,
+                                         kFrameStart + 79 * kWindow + 16, 2),
           "zero window rejected");
-    // Search with an out-of-bounds frame refuses instead of reading OOB.
-    auto const line = synthLine(tones, 64, 0, 0.7, 0.0, 0.0);
-    auto const bad = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), 0, kWindow, kWindow,
-        kRate, tones, unitDataWeights());
-    check(!bad.searched, "OOB frame start refuses search");
+    // Search with out-of-bounds baselines refuses instead of reading OOB.
+    auto const line = synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, 0.0);
+    auto const bad = runSearch(line, negStart, tones, unitDataWeights());
+    check(!bad.searched, "OOB baseline start refuses search");
+    // Non-finite tracker metadata on a USED symbol refuses; on an unused
+    // symbol it is ignored.
+    auto badFreq = makeBaselines(kFrameStart);
+    badFreq[10].trackerHz = std::numeric_limits<float>::quiet_NaN();
+    auto const badF =
+        runSearch(line, badFreq, tones, unitDataWeights());
+    check(!badF.searched, "non-finite tracker metadata refuses search");
+    std::array<float, 79> sparse{};
+    sparse[0] = 1.0f; // only Costas symbol 0 used
+    auto const okF = js8::aided::refineSync(
+        line.data(), static_cast<int>(line.size()), badFreq, kWindow, kRate,
+        tones, sparse);
+    check(okF.searched && std::isfinite(okF.baselineMetric),
+          "unused corrupt metadata is ignored");
     // Tight-but-valid edge frame runs cleanly with finite metrics.
-    int const edgeStart = 2;
-    auto const edge = synthLine(tones, edgeStart, 0, 0.7, 0.0, 0.0);
-    auto const ok = js8::aided::refineSync(
-        edge.data(), static_cast<int>(edge.size()), edgeStart, kWindow,
-        kWindow, kRate, tones, unitDataWeights());
+    auto const edge = synthLine(tones, 2, 0.0, 0.7, 0.0, 0.0);
+    auto const ok =
+        runSearch(edge, makeBaselines(2), tones, unitDataWeights());
     check(ok.searched && std::isfinite(ok.best.metric) &&
               std::isfinite(ok.baselineMetric),
           "edge-valid frame searches with finite metrics");
@@ -409,25 +539,30 @@ void runNonFiniteSafety() {
     std::array<int8_t, 174> cw{};
     cw[0] = 1;
     auto const tones = tonesFromBits(cw);
-    constexpr int frameStart = 64;
-    auto line = synthLine(tones, frameStart, 0, 0.7, 0.0, 0.0);
-    line[static_cast<std::size_t>(frameStart + 10 * kWindow + 3)] =
+    auto line = synthLine(tones, kFrameStart, 0.0, 0.7, 0.0, 0.0);
+    line[static_cast<std::size_t>(kFrameStart + 10 * kWindow + 3)] =
         std::complex<float>(std::numeric_limits<float>::quiet_NaN(), 0.0f);
-    auto const out = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-        kWindow, kRate, tones, unitDataWeights());
+    auto const out = runSearch(line, makeBaselines(kFrameStart), tones,
+                               unitDataWeights());
     check(!std::isnan(out.best.metric) &&
               !std::isnan(out.baselineMetric),
           "NaN samples never propagate into metrics");
     check(!js8::aided::refinementAccepted(out),
           "corrupted frame cannot pass the gate");
-    // Direct metric guards.
-    check(!std::isfinite(js8::aided::contrastMetric(
-              std::numeric_limits<double>::quiet_NaN(), 1.0, kWindow)),
-          "contrast rejects NaN power");
-    check(!std::isfinite(js8::aided::expectedBinPower(
-              nullptr, 100, 0, kWindow, 0, 0.0, 0.0, kRate)),
-          "bin power rejects null samples");
+    // Direct tracker-replay guards.
+    std::complex<float> win[4] = {};
+    check(!js8::aided::replayTrackerCorrection(nullptr, 4, 0.0, kRate),
+          "replay rejects null window");
+    check(!js8::aided::replayTrackerCorrection(
+              win, 4, std::numeric_limits<double>::quiet_NaN(), kRate),
+          "replay rejects non-finite correction");
+    // Tracker replay is a no-op at 0 Hz (matches disabled-tracker path).
+    win[0] = {1.0f, 0.5f};
+    win[1] = {-0.25f, 2.0f};
+    check(js8::aided::replayTrackerCorrection(win, 2, 0.0, kRate) &&
+              win[0] == std::complex<float>{1.0f, 0.5f} &&
+              win[1] == std::complex<float>{-0.25f, 2.0f},
+          "zero-Hz replay is bit-exact no-op");
 }
 
 void runRescueDemonstration() {
@@ -444,8 +579,7 @@ void runRescueDemonstration() {
     auto const trueTones = tonesFromBits(trueCw);
     auto tentTones = tonesFromBits(tentCw);
     // Impaired frame: +2 samples, +0.3 Hz, plus fixed-seed noise.
-    constexpr int frameStart = 64;
-    auto line = synthLine(trueTones, frameStart, 2, 0.7, 0.3, 0.0);
+    auto line = synthLine(trueTones, kFrameStart, 2.0, 0.7, 0.3, 0.0);
     {
         std::uint32_t state = 0x12345678u;
         auto const randn = [&] {
@@ -471,9 +605,8 @@ void runRescueDemonstration() {
     auto const conf = js8::aided::tentativeConfidences(llr);
     std::array<float, 79> weights{};
     js8::aided::buildSymbolWeights(conf, weights);
-    auto const out = js8::aided::refineSync(
-        line.data(), static_cast<int>(line.size()), frameStart, kWindow,
-        kWindow, kRate, tentTones, weights);
+    auto const out =
+        runSearch(line, makeBaselines(kFrameStart), tentTones, weights);
     check(out.searched, "impaired near-miss frame is searched");
     check(out.best.deltaSamples >= 1 && out.best.deltaSamples <= 2 &&
               std::abs(out.best.deltaHz - 0.3) < 0.051,
@@ -498,6 +631,8 @@ int main() {
     runTimingPlusFrequency();
     runInteriorGateAcceptance();
     runDriftHandling();
+    runOtherSevenTones();
+    runTrackedBaseline();
     runWrongCodeword();
     runBoundsClipping();
     runNonFiniteSafety();

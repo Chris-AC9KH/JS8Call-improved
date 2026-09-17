@@ -31,6 +31,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -207,108 +208,96 @@ buildSymbolWeights(ConfidenceSummary const &conf,
 }
 
 /**
+ * @brief First-pass per-symbol extraction metadata for the refinement baseline.
+ *
+ * `startSamples` is the ACTUAL first-pass window start (nominal base plus the
+ * recorded TimingTracker integer shift, exactly as extracted), and
+ * `trackerHz` is the recorded FrequencyTracker estimate applied to that
+ * symbol. The refinement baseline replays this tracked extraction, so the
+ * gate compares refined hypotheses against the real first-pass
+ * synchronization rather than an untracked approximation.
+ */
+struct SymbolBaseline {
+    int startSamples = 0;  ///< First-pass window start (base + shift).
+    float trackerHz = 0.0f; ///< Recorded tracker estimate for the symbol.
+};
+
+/**
  * @brief Validate candidate sample bounds for the aided search/extraction.
  *
- * Every hypothesis start (frameStart + k*stride + delta, clamped only inside
- * the decoder loop) must lie in [0, numSamples - window] WITHOUT clamping for
- * the extreme deltas, so no hypothesis reads out of bounds and no symbol is
- * degenerately clamped onto its neighbor.
+ * Every baseline start plus/minus the maximum hypothesis delta must lie in
+ * [0, numSamples - window] WITHOUT clamping, so no hypothesis reads out of
+ * bounds and no symbol is degenerately clamped onto its neighbor.
  */
-inline bool sampleBoundsValid(int frameStart, int symbolCount, int stride,
-                              int window, int numSamples, int maxAbsDelta) {
-    if (symbolCount <= 0 || stride <= 0 || window <= 0 || numSamples <= 0 ||
-        maxAbsDelta < 0)
+inline bool
+symbolBoundsValid(std::array<SymbolBaseline, kTotalSymbols> const &baselines,
+                  int window, int numSamples, int maxAbsDelta) {
+    if (window <= 0 || numSamples <= 0 || maxAbsDelta < 0)
         return false;
-    long const first = static_cast<long>(frameStart) - maxAbsDelta;
-    long const last = static_cast<long>(frameStart) +
-                      static_cast<long>(symbolCount - 1) * stride +
-                      maxAbsDelta;
-    if (first < 0 || last < 0)
-        return false;
-    if (last + window > static_cast<long>(numSamples))
-        return false;
+    for (auto const &base : baselines) {
+        long const first = static_cast<long>(base.startSamples) - maxAbsDelta;
+        long const last =
+            static_cast<long>(base.startSamples) + maxAbsDelta;
+        if (first < 0 || last < 0)
+            return false;
+        if (last + window > static_cast<long>(numSamples))
+            return false;
+    }
     return true;
 }
 
 /**
- * @brief Time-domain energy of one symbol window (frequency-blind).
+ * @brief Replay one symbol's recorded FrequencyTracker correction.
  *
- * Computed once per (symbol, timing) and reused across frequency/drift
- * hypotheses, since derotation preserves magnitudes. Returns NaN on any
- * invalid input so callers can exclude the symbol.
- */
-inline double
-symbolTotalPower(std::complex<float> const *samples, int numSamples,
-                 int start, int window) {
-    if (samples == nullptr || window <= 0 || start < 0 ||
-        start + window > numSamples)
-        return std::numeric_limits<double>::quiet_NaN();
-    double power = 0.0;
-    for (int n = 0; n < window; ++n) {
-        std::complex<float> const x = samples[start + n];
-        if (!std::isfinite(x.real()) || !std::isfinite(x.imag()))
-            return std::numeric_limits<double>::quiet_NaN();
-        power += std::norm(x);
-    }
-    return power;
-}
-
-/**
- * @brief Single-bin forward-DFT power at `tone` with continuous derotation.
+ * This mirrors FrequencyTracker::apply() operation-for-operation (positive
+ * rotation `wstep^(n+1)` with `wstep = exp(j*2*pi*trackerHz/sampleRateHz)`,
+ * fresh phase every window, float arithmetic) so the aided baseline
+ * reproduces the first-pass per-symbol extraction bit-faithfully for finite
+ * inputs. The added finiteness guard only rejects corrupt input the decoder
+ * would discard downstream anyway.
  *
- * Computes |X|^2 for X = sum_n x[start+n] *
- * exp(-j*(2*pi*deltaHz*t + pi*drift*t^2 + 2*pi*tone*n/window)) with absolute
- * time t = (start+n)/sampleRateHz. The negative-exponent derotation matches
- * the decoder's coarse residual correction convention (cd0 phase ramp), so a
- * hypothesis deltaHz equal to the signal's true residual maximizes power.
- * Returns NaN on any invalid/non-finite input.
+ * @return False on any invalid/non-finite input (caller must skip the
+ *         symbol); true with `window` rotated in place otherwise.
  */
-inline double expectedBinPower(std::complex<float> const *samples,
-                               int numSamples, int start, int window, int tone,
-                               double deltaHz, double driftHzPerSec,
-                               double sampleRateHz) {
-    if (samples == nullptr || window <= 0 || start < 0 ||
-        start + window > numSamples || tone < 0 || tone >= kTones ||
-        !std::isfinite(deltaHz) || !std::isfinite(driftHzPerSec) ||
+inline bool replayTrackerCorrection(std::complex<float> *window, int count,
+                                    double trackerHz, double sampleRateHz) {
+    if (window == nullptr || count <= 0 || !std::isfinite(trackerHz) ||
         !std::isfinite(sampleRateHz) || !(sampleRateHz > 0.0))
-        return std::numeric_limits<double>::quiet_NaN();
-    constexpr double twoPi = 2.0 * std::numbers::pi;
-    double re = 0.0, im = 0.0;
-    for (int n = 0; n < window; ++n) {
-        std::complex<float> const x = samples[start + n];
-        if (!std::isfinite(x.real()) || !std::isfinite(x.imag()))
-            return std::numeric_limits<double>::quiet_NaN();
-        double const t =
-            static_cast<double>(start + n) / sampleRateHz;
-        double const angle = twoPi * deltaHz * t +
-                             std::numbers::pi * driftHzPerSec * t * t +
-                             twoPi * tone * n / window;
-        re += static_cast<double>(x.real()) * std::cos(angle) +
-              static_cast<double>(x.imag()) * std::sin(angle);
-        im += static_cast<double>(x.imag()) * std::cos(angle) -
-              static_cast<double>(x.real()) * std::sin(angle);
+        return false;
+    double const dphi = 2.0 * std::numbers::pi * (trackerHz / sampleRateHz);
+    auto const wstep = std::polar(1.0f, static_cast<float>(dphi));
+    auto w = std::complex<float>{1.0f, 0.0f};
+    for (int i = 0; i < count; ++i) {
+        if (!std::isfinite(window[i].real()) ||
+            !std::isfinite(window[i].imag()))
+            return false;
+        w *= wstep;
+        window[i] *= w;
     }
-    return re * re + im * im;
+    return true;
 }
 
 /**
- * @brief Tone-CONTRAST metric for one symbol.
+ * @brief Tone-CONTRAST metric from the actual 8 JS8 FSK bins.
  *
- * contrast = P_expected - (W*P_total - P_expected)/7: power at the expected
- * tone minus the Parseval-implied mean of the other 7 tones. A pure expected
- * tone scores W*P_total; broadband energy scores ~0 (it raises both terms),
- * so the metric answers "is the tentative waveform present?" rather than
- * "is there more RF energy?". Returns NaN on invalid input.
+ * contrast = P[expected] - mean(P[other 7 valid tones]). Broadband energy
+ * raises all eight bins together and scores ~0, so the metric answers "is
+ * the tentative waveform present?" rather than "is there more RF energy?".
+ * Unused FFT bins outside the 8 valid tones never enter the estimate.
+ * Returns NaN on invalid input.
  */
-inline double contrastMetric(double expectedPower, double totalPower,
-                             int window) {
-    if (!std::isfinite(expectedPower) || !std::isfinite(totalPower) ||
-        window <= 0 || expectedPower < 0.0 || totalPower < 0.0)
+inline double contrastEight(double expectedPower,
+                            double const *otherPowers) {
+    if (otherPowers == nullptr || !std::isfinite(expectedPower) ||
+        expectedPower < 0.0)
         return std::numeric_limits<double>::quiet_NaN();
-    double const alternative =
-        (static_cast<double>(window) * totalPower - expectedPower) /
-        (kTones - 1);
-    return expectedPower - alternative;
+    double sum = 0.0;
+    for (int t = 0; t < kTones - 1; ++t) {
+        if (!std::isfinite(otherPowers[t]) || otherPowers[t] < 0.0)
+            return std::numeric_limits<double>::quiet_NaN();
+        sum += otherPowers[t];
+    }
+    return expectedPower - sum / (kTones - 1);
 }
 
 /** Best sync hypothesis from the bounded search. */
@@ -331,25 +320,34 @@ struct Refinement {
 /**
  * @brief Bounded local sync refinement around the first-pass solution.
  *
- * Scores baseline (delta 0,0,0) plus the full timing x frequency x drift grid
- * with the weighted tone-contrast metric. Total powers are precomputed per
- * (symbol, timing) since derotation preserves magnitudes. Ties keep the
- * earliest (baseline wins all ties: grid entries must STRICTLY beat it), so
- * perfectly synchronized input selects (0,0,0) with zero gain. Any invalid
- * input (null samples, bad geometry, OOB frame, non-finite rate) yields
- * searched=false rather than partial garbage.
+ * The baseline (delta 0,0,0) replays the ACTUAL first-pass per-symbol
+ * extraction: recorded window starts plus the recorded FrequencyTracker
+ * correction for each symbol. Search hypotheses are refinements RELATIVE to
+ * that baseline (trial start = recorded start + deltaSamples, recorded
+ * tracker rotation followed by the candidate residual freq/drift
+ * derotation), so the gate can never claim a fake gain by rediscovering a
+ * correction the first pass already applied.
+ *
+ * Each hypothesis scores every useful symbol with the tone contrast of the
+ * actual 8 JS8 FSK bins: the window is derotated once, all 8 bins are
+ * computed together with a tiny direct DFT (no FFTW plan per hypothesis),
+ * and contrast = P[expected] - mean(P[other 7]). Unused FFT bins never
+ * enter the estimate. Ties keep the earliest (baseline wins all ties: grid
+ * entries must STRICTLY beat it). Any invalid input yields searched=false
+ * rather than partial garbage.
  */
 inline Refinement refineSync(std::complex<float> const *samples,
-                             int numSamples, int frameStart, int stride,
+                             int numSamples,
+                             std::array<SymbolBaseline, kTotalSymbols> const
+                                 &baselines,
                              int window, double sampleRateHz,
                              std::array<int, kTotalSymbols> const &tones,
                              std::array<float, kTotalSymbols> const &weights) {
     Refinement out{};
-    if (samples == nullptr || numSamples <= 0 || stride <= 0 || window <= 0 ||
+    if (samples == nullptr || numSamples <= 0 || window <= 0 || window > 32 ||
         !std::isfinite(sampleRateHz) || !(sampleRateHz > 0.0))
         return out;
-    if (!sampleBoundsValid(frameStart, kTotalSymbols, stride, window,
-                           numSamples, kTimingDeltaMax))
+    if (!symbolBoundsValid(baselines, window, numSamples, kTimingDeltaMax))
         return out;
     for (int k = 0; k < kTotalSymbols; ++k) {
         if (tones[static_cast<std::size_t>(k)] < 0 ||
@@ -358,39 +356,83 @@ inline Refinement refineSync(std::complex<float> const *samples,
         float const w = weights[static_cast<std::size_t>(k)];
         if (!std::isfinite(w) || w < 0.0f)
             return out;
+        // Used symbols need usable baseline metadata; unused ones are never
+        // touched, so their metadata may be anything.
+        if (w > 0.0f &&
+            !std::isfinite(
+                static_cast<double>(baselines[static_cast<std::size_t>(k)]
+                                        .trackerHz)))
+            return out;
     }
 
-    // Sanitize: negative weights are rejected above; keep local copy.
-    // Total power per (timing delta, symbol); NaN marks an unusable symbol.
-    constexpr int kDeltas = kTimingDeltaMax - kTimingDeltaMin + 1;
-    double total[kDeltas][kTotalSymbols];
-    for (int d = 0; d < kDeltas; ++d) {
-        int const dt = kTimingDeltaMin + d;
-        for (int k = 0; k < kTotalSymbols; ++k) {
-            int const start = frameStart + k * stride + dt;
-            total[d][k] =
-                symbolTotalPower(samples, numSamples, start, window);
+    // Forward-DFT twiddles for the 8 valid tones, computed once per call so
+    // the inner loop performs no per-tone trigonometry.
+    constexpr double twoPi = 2.0 * std::numbers::pi;
+    double twRe[kTones][32];
+    double twIm[kTones][32];
+    for (int tone = 0; tone < kTones; ++tone) {
+        for (int n = 0; n < window; ++n) {
+            double const angle =
+                -twoPi * static_cast<double>(tone * n) / window;
+            twRe[tone][n] = std::cos(angle);
+            twIm[tone][n] = std::sin(angle);
         }
     }
 
+    // Score one (timing, freq, drift) hypothesis with the weighted 8-tone
+    // contrast. The recorded tracker rotation is replayed first (baseline),
+    // then the candidate refinement derotation (absolute-time, matching the
+    // decoder's coarse correction sign convention).
     auto const scoreHypothesis = [&](int dt, double df, double dd) {
-        int const d = dt - kTimingDeltaMin;
         double metric = 0.0;
+        std::complex<float> replayed[32];
         for (int k = 0; k < kTotalSymbols; ++k) {
             float const w = weights[static_cast<std::size_t>(k)];
             if (!(w > 0.0f))
                 continue;
-            double const tot = total[d][k];
-            if (!std::isfinite(tot) || !(tot > 0.0))
+            int const start =
+                baselines[static_cast<std::size_t>(k)].startSamples + dt;
+            for (int n = 0; n < window; ++n)
+                replayed[n] = samples[start + n];
+            if (!replayTrackerCorrection(
+                    replayed, window,
+                    baselines[static_cast<std::size_t>(k)].trackerHz,
+                    sampleRateHz))
                 continue;
-            int const start = frameStart + k * stride + dt;
-            double const expPower = expectedBinPower(
-                samples, numSamples, start, window,
-                tones[static_cast<std::size_t>(k)], df, dd, sampleRateHz);
-            double const c = contrastMetric(expPower, tot, window);
-            if (!std::isfinite(c))
+            double binRe[kTones] = {};
+            double binIm[kTones] = {};
+            for (int n = 0; n < window; ++n) {
+                double const t =
+                    static_cast<double>(start + n) / sampleRateHz;
+                double const angle =
+                    twoPi * df * t + std::numbers::pi * dd * t * t;
+                double const c = std::cos(angle);
+                double const s = std::sin(angle);
+                double const yr = static_cast<double>(replayed[n].real()) * c +
+                                  static_cast<double>(replayed[n].imag()) * s;
+                double const yi = static_cast<double>(replayed[n].imag()) * c -
+                                  static_cast<double>(replayed[n].real()) * s;
+                for (int tone = 0; tone < kTones; ++tone) {
+                    binRe[tone] += yr * twRe[tone][n] - yi * twIm[tone][n];
+                    binIm[tone] += yi * twRe[tone][n] + yr * twIm[tone][n];
+                }
+            }
+            int const expected = tones[static_cast<std::size_t>(k)];
+            double const expPower =
+                binRe[expected] * binRe[expected] +
+                binIm[expected] * binIm[expected];
+            double others[kTones - 1];
+            int oi = 0;
+            for (int tone = 0; tone < kTones; ++tone) {
+                if (tone == expected)
+                    continue;
+                others[oi++] =
+                    binRe[tone] * binRe[tone] + binIm[tone] * binIm[tone];
+            }
+            double const cont = contrastEight(expPower, others);
+            if (!std::isfinite(cont))
                 continue;
-            metric += static_cast<double>(w) * c;
+            metric += static_cast<double>(w) * cont;
         }
         return metric;
     };
@@ -405,14 +447,13 @@ inline Refinement refineSync(std::complex<float> const *samples,
     for (int dd = 0; dd < kDriftSteps; ++dd) {
         for (int f = 0; f < kFreqSteps; ++f) {
             double const df = kFreqStartHz + f * kFreqStepHz;
-            for (int d = 0; d < kDeltas; ++d) {
-                int const dt = kTimingDeltaMin + d;
-                if (dt == 0 && df == 0.0 && kDriftValues[dd] == 0.0)
+            for (int d = kTimingDeltaMin; d <= kTimingDeltaMax; ++d) {
+                if (d == 0 && df == 0.0 && kDriftValues[dd] == 0.0)
                     continue; // Baseline already scored.
                 double const metric =
-                    scoreHypothesis(dt, df, kDriftValues[dd]);
+                    scoreHypothesis(d, df, kDriftValues[dd]);
                 if (std::isfinite(metric) && metric > out.best.metric) {
-                    out.best.deltaSamples = dt;
+                    out.best.deltaSamples = d;
                     out.best.deltaHz = df;
                     out.best.driftHzPerSec = kDriftValues[dd];
                     out.best.metric = metric;
@@ -437,7 +478,8 @@ inline Refinement refineSync(std::complex<float> const *samples,
             if (kFreqStartHz + i * kFreqStepHz == out.best.deltaHz)
                 f = i;
         out.atBoundary =
-            (d == 0 || d == kDeltas - 1 || f == 0 || f == kFreqSteps - 1);
+            (d == 0 || d == (kTimingDeltaMax - kTimingDeltaMin) || f == 0 ||
+             f == kFreqSteps - 1);
     }
     return out;
 }
