@@ -94,9 +94,9 @@
                 </property>
                 <widget class="QWidget" name="logHorizontalWidget" native="true">
                   <property name="sizePolicy">
-                    <sizepolicy hsizetype="Expanding" vsizetype="Minimum">
+                    <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
                       <horstretch>0</horstretch>
-                      <verstretch>1</verstretch>
+                      <verstretch>0</verstretch>
                     </sizepolicy>
                   </property>
                   <property name="minimumSize">
@@ -105,10 +105,10 @@
                       <height>75</height>
                     </size>
                   </property>
-                  <property name="minimumSize">
+                  <property name="maximumSize">
                     <size>
                       <width>16777215</width>
-                      <height>75</height>
+                      <height>150</height>
                     </size>
                   </property>
                   <layout class="QHBoxLayout" name="horizontalLayout_16">
