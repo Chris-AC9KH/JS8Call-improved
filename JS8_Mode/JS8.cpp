@@ -10,6 +10,7 @@
 #include "JS8_Mode/FrequencyTracker.h"
 #include "JS8_Mode/coherent_likelihood.h"
 #include "JS8_Mode/whitening_processor.h"
+#include "decoder_aided_redemod.h"
 #include "ldpc_feedback.h"
 #include "soft_combiner.h"
 
@@ -1122,6 +1123,7 @@ template <typename Mode> class DecodeMode {
     bool m_enableDeepSearch = true;
     bool m_enableLdpcRescue = true;
     bool m_enableCoherentData = true;
+    bool m_enableAidedRedemod = true;
     float m_llrErasureThreshold = js8::llrErasureThreshold();
     bool m_enableLdpcFeedback = js8::ldpcFeedbackEnabled();
     int m_maxLdpcPasses = js8::ldpcFeedbackMaxPasses();
@@ -1177,6 +1179,254 @@ template <typename Mode> class DecodeMode {
             return static_cast<float>(baseline);
         }(x, std::make_integer_sequence<Eigen::Index,
                                         Coefficients::SizeAtCompileTime / 2>{});
+    }
+
+    /** First-pass and aided re-demodulation share these LLR outputs. */
+    struct ToneBinLlrs {
+        std::array<float, N> llr0; ///< Normalized LLRs (0-hypothesis vector).
+        std::array<float, N> llr1; ///< Normalized LLRs (1-hypothesis vector).
+        js8::CoherentLikelihoodTelemetry coherentTelemetry; ///< Coherent path.
+    };
+
+    // Shared tone-bin to LLR stack: magnitudes -> winners -> Costas-only
+    // coherent blend -> whitening -> LLRs -> erasure. Both the first-pass
+    // demodulation and the decoder-aided re-demodulation call this same
+    // implementation with their own freshly demodulated bins, so the aided
+    // pass regenerates likelihoods through the identical processing rather
+    // than a simplified copy.
+    ToneBinLlrs processToneBins(
+        std::array<std::array<float, NN>, NROWS> const &s2,
+        std::array<std::array<std::complex<float>, NN>, NROWS> const
+            &complexS2,
+        std::array<int, NN> const &symbolBaseStarts,
+        std::array<int, NN> const &symbolTimingShifts,
+        std::array<float, NN> const &symbolTrackerHz) {
+        constexpr float FS2 = 12000.0f / Mode::NDOWN;
+
+        std::array<std::array<float, ND>, NROWS> s1;
+
+        // Fill s1 from s2, excluding the Costas arrays.
+
+        for (int row = 0; row < NROWS; ++row) {
+            std::copy(s2[row].begin() + 7, s2[row].begin() + 36,
+                      s1[row].begin());
+            std::copy(s2[row].begin() + 43, s2[row].begin() + 72,
+                      s1[row].begin() + 29);
+        }
+
+        // Identify winning tones (max magnitude) for each data symbol.
+        std::array<int, ND> symbolWinners = {};
+
+        for (int j = 0; j < ND; ++j) {
+            int winner = 0;
+            float best = s1[0][j];
+
+            for (int i = 1; i < NROWS; ++i) {
+                if (s1[i][j] > best) {
+                    best = s1[i][j];
+                    winner = i;
+                }
+            }
+
+            symbolWinners[j] = winner;
+        }
+
+        std::optional<js8::CoherentBlend<NROWS, ND>> coherentBlend;
+        js8::CoherentLikelihoodTelemetry coherentTelemetry;
+
+        if (m_enableCoherentData) {
+            static_assert(NROWS == 8, "coherent path expects 8 FSK tones");
+            double const downsampledRate =
+                static_cast<double>(FS2);
+
+            // Known Costas pilot observations with full phase metadata.
+            // Coverage of at least four pilots per Costas block is required
+            // before trusting a fit.
+            std::vector<js8::CoherentPilot> pilots;
+            pilots.reserve(NS);
+            std::array<int, 3> blockValid{};
+            for (int block = 0; block < 3; ++block) {
+                for (int column = 0; column < 7; ++column) {
+                    int const symbolIndex = block * 36 + column;
+                    int const expectedTone = Costas[block][column];
+                    std::complex<float> const bin =
+                        complexS2[expectedTone][symbolIndex];
+                    double const magnitude = std::abs(bin);
+                    if (!std::isfinite(magnitude) || !(magnitude > 0.0f))
+                        continue;
+                    // The helper adds timingShiftSamples/sampleRateHz itself to
+                    // obtain the effective extraction timestamp.
+                    double const startSeconds =
+                        static_cast<double>(
+                            symbolBaseStarts[symbolIndex]) /
+                        downsampledRate;
+                    if (!std::isfinite(startSeconds))
+                        continue;
+                    pilots.push_back(js8::CoherentPilot{
+                        startSeconds,
+                        std::complex<double>{bin.real(), bin.imag()},
+                        expectedTone, symbolIndex,
+                        static_cast<double>(
+                            symbolTimingShifts[symbolIndex]),
+                        static_cast<double>(
+                            symbolTrackerHz[symbolIndex])});
+                    ++blockValid[static_cast<std::size_t>(block)];
+                }
+            }
+
+            bool const pilotCoverage = blockValid[0] >= 4 &&
+                                       blockValid[1] >= 4 &&
+                                       blockValid[2] >= 4;
+            if (pilotCoverage) {
+                // Data symbols use the same s1 layout as the magnitude path:
+                // globals 7..35 then 43..71.
+                std::vector<js8::CoherentDataSymbol> dataSymbols;
+                dataSymbols.reserve(ND);
+                bool dataValid = true;
+                for (int j = 0; j < ND && dataValid; ++j) {
+                    int const symbolIndex = j < 29 ? j + 7 : j + 14;
+                    // As for pilots, retain the nominal start here; the helper
+                    // adds timingShiftSamples/sampleRateHz itself to obtain
+                    // the effective extraction time.
+                    double const startSeconds =
+                        static_cast<double>(
+                            symbolBaseStarts[symbolIndex]) /
+                        downsampledRate;
+                    if (!std::isfinite(startSeconds)) {
+                        dataValid = false;
+                        break;
+                    }
+                    js8::CoherentDataSymbol dataSymbol;
+                    dataSymbol.baseTimeSeconds = startSeconds;
+                    dataSymbol.timingShiftSamples = static_cast<double>(
+                        symbolTimingShifts[symbolIndex]);
+                    dataSymbol.trackerHz = static_cast<double>(
+                        symbolTrackerHz[symbolIndex]);
+                    for (int tone = 0; tone < NROWS; ++tone) {
+                        dataSymbol.bins[static_cast<std::size_t>(tone)] =
+                            complexS2[tone][symbolIndex];
+                        if (!std::isfinite(
+                                dataSymbol.bins[static_cast<std::size_t>(tone)]
+                                    .real()) ||
+                            !std::isfinite(
+                                dataSymbol.bins[static_cast<std::size_t>(tone)]
+                                    .imag())) {
+                            dataValid = false;
+                            break;
+                        }
+                    }
+                    dataSymbols.push_back(dataSymbol);
+                }
+
+                if (dataValid) {
+                    double const frameSpanSeconds =
+                        (static_cast<double>(symbolBaseStarts[NN - 1]) +
+                         static_cast<double>(symbolTimingShifts[NN - 1]) -
+                         static_cast<double>(symbolBaseStarts[0]) -
+                         static_cast<double>(symbolTimingShifts[0])) /
+                        downsampledRate;
+                    if (std::isfinite(frameSpanSeconds) &&
+                        frameSpanSeconds > 0.0) {
+                        js8::CoherentToneResult const coherent =
+                            js8::computeCoherentToneScores(
+                                pilots, dataSymbols, 12,
+                                0.5 * frameSpanSeconds, Mode::NDOWNSPS,
+                                static_cast<double>(FS2));
+                        coherentTelemetry = coherent.telemetry;
+                        if (!coherent.coherentNumerators.empty() &&
+                            coherent.alpha > 0.0) {
+                            js8::CoherentBlend<NROWS, ND> blend;
+                            blend.amplitude = coherent.amplitude;
+                            blend.alpha =
+                                static_cast<float>(coherent.alpha);
+                            for (int tone = 0; tone < NROWS; ++tone)
+                                for (int j = 0; j < ND; ++j)
+                                    blend.numerators[static_cast<std::size_t>(tone)]
+                                                    [static_cast<std::size_t>(j)] =
+                                        coherent.coherentNumerators
+                                            [static_cast<std::size_t>(j)]
+                                            [static_cast<std::size_t>(tone)];
+                            coherentBlend = blend;
+                        }
+                    }
+                }
+            }
+        }
+
+        auto const whitening = js8::WhiteningProcessor<NROWS, ND, N>::process(
+            s1, symbolWinners, m_llrErasureThreshold,
+            decoder_js8().isDebugEnabled(), coherentBlend);
+
+        if (decoder_js8().isDebugEnabled()) {
+            qCDebug(decoder_js8)
+                << "coherent likelihood"
+                << "coherentEnabled" << coherentTelemetry.enabled
+                << "pilotCount" << coherentTelemetry.pilotCount
+                << "pilotPhaseRmsRad" << coherentTelemetry.phaseRmsRad
+                << "pilotPhaseRmsDeg" << coherentTelemetry.phaseRmsDeg
+                << "coherentWeight" << coherentTelemetry.alpha
+                << "fittedPhaseRad" << coherentTelemetry.phi0
+                << "fittedResidualHz" << coherentTelemetry.deltaF
+                << "fittedDriftHzPerSec" << coherentTelemetry.fdot
+                << "pilotAmplitude" << coherentTelemetry.pilotAmplitude
+                << "avgCoherentToneMargin"
+                << coherentTelemetry.avgCoherentToneMargin.value_or(-1.0)
+                << "avgNoncoherentToneMargin"
+                << coherentTelemetry.avgNoncoherentToneMargin.value_or(-1.0);
+        }
+
+        auto llr0 = whitening.llr0;
+        auto llr1 = whitening.llr1;
+
+        // Only apply a second erasure threshold pass if whitening didn't
+        // already zero low-magnitude LLRs using the configured threshold.
+        if (!whitening.erasureApplied) {
+            std::size_t erasuresAfterThreshold = 0;
+            double sumAbsPreErasure = 0.0;
+            double sumAbsPostErasure = 0.0;
+
+            auto const applyErasureThreshold = [&](auto &llr) {
+                for (auto const value : llr)
+                    sumAbsPreErasure += std::abs(value);
+
+                if (m_llrErasureThreshold > 0.0f) {
+                    for (auto &value : llr) {
+                        if (std::abs(value) < m_llrErasureThreshold) {
+                            value = 0.0f;
+                            ++erasuresAfterThreshold;
+                        }
+
+                        sumAbsPostErasure += std::abs(value);
+                    }
+                } else {
+                    for (auto const value : llr)
+                        sumAbsPostErasure += std::abs(value);
+                }
+            };
+
+            applyErasureThreshold(llr0);
+            applyErasureThreshold(llr1);
+
+            if (decoder_js8().isDebugEnabled()) {
+                auto const total =
+                    static_cast<double>(llr0.size() + llr1.size());
+                double const avgPre =
+                    total > 0.0 ? sumAbsPreErasure / total : 0.0;
+                double const avgPost =
+                    total > 0.0 ? sumAbsPostErasure / total : 0.0;
+
+                qCDebug(decoder_js8)
+                    << "LLR erasure threshold" << m_llrErasureThreshold
+                    << "erasures:" << erasuresAfterThreshold
+                    << "avg|LLR| pre/post:" << avgPre << avgPost;
+            }
+        }
+
+        ToneBinLlrs out;
+        out.llr0 = llr0;
+        out.llr1 = llr1;
+        out.coherentTelemetry = coherentTelemetry;
+        return out;
     }
 
     std::optional<Decode> js8dec(bool const syncStats, bool const lsubtract,
@@ -1532,224 +1782,14 @@ template <typename Mode> class DecodeMode {
                                       xdt,
                                       {.candidate = nsync}});
 
-        std::array<std::array<float, ND>, NROWS> s1;
-
-        // Fill s1 from s2, excluding the Costas arrays.
-
-        for (int row = 0; row < NROWS; ++row) {
-            std::copy(s2[row].begin() + 7, s2[row].begin() + 36,
-                      s1[row].begin());
-            std::copy(s2[row].begin() + 43, s2[row].begin() + 72,
-                      s1[row].begin() + 29);
-        }
-
-        // Identify winning tones (max magnitude) for each data symbol.
-        std::array<int, ND> symbolWinners = {};
-
-        for (int j = 0; j < ND; ++j) {
-            int winner = 0;
-            float best = s1[0][j];
-
-            for (int i = 1; i < NROWS; ++i) {
-                if (s1[i][j] > best) {
-                    best = s1[i][j];
-                    winner = i;
-                }
-            }
-
-            symbolWinners[j] = winner;
-        }
-
-        std::optional<js8::CoherentBlend<NROWS, ND>> coherentBlend;
-        js8::CoherentLikelihoodTelemetry coherentTelemetry;
-
-        if (m_enableCoherentData) {
-            static_assert(NROWS == 8, "coherent path expects 8 FSK tones");
-            double const downsampledRate =
-                static_cast<double>(FS2);
-
-            // Known Costas pilot observations with full phase metadata.
-            // Coverage of at least four pilots per Costas block is required
-            // before trusting a fit.
-            std::vector<js8::CoherentPilot> pilots;
-            pilots.reserve(NS);
-            std::array<int, 3> blockValid{};
-            for (int block = 0; block < 3; ++block) {
-                for (int column = 0; column < 7; ++column) {
-                    int const symbolIndex = block * 36 + column;
-                    int const expectedTone = Costas[block][column];
-                    std::complex<float> const bin =
-                        complexS2[expectedTone][symbolIndex];
-                    double const magnitude = std::abs(bin);
-                    if (!std::isfinite(magnitude) || !(magnitude > 0.0f))
-                        continue;
-                    // The helper adds timingShiftSamples/sampleRateHz itself to
-                    // obtain the effective extraction timestamp.
-                    double const startSeconds =
-                        static_cast<double>(
-                            symbolBaseStarts[symbolIndex]) /
-                        downsampledRate;
-                    if (!std::isfinite(startSeconds))
-                        continue;
-                    pilots.push_back(js8::CoherentPilot{
-                        startSeconds,
-                        std::complex<double>{bin.real(), bin.imag()},
-                        expectedTone, symbolIndex,
-                        static_cast<double>(
-                            symbolTimingShifts[symbolIndex]),
-                        static_cast<double>(
-                            symbolTrackerHz[symbolIndex])});
-                    ++blockValid[static_cast<std::size_t>(block)];
-                }
-            }
-
-            bool const pilotCoverage = blockValid[0] >= 4 &&
-                                       blockValid[1] >= 4 &&
-                                       blockValid[2] >= 4;
-            if (pilotCoverage) {
-                // Data symbols use the same s1 layout as the magnitude path:
-                // globals 7..35 then 43..71.
-                std::vector<js8::CoherentDataSymbol> dataSymbols;
-                dataSymbols.reserve(ND);
-                bool dataValid = true;
-                for (int j = 0; j < ND && dataValid; ++j) {
-                    int const symbolIndex = j < 29 ? j + 7 : j + 14;
-                    // As for pilots, retain the nominal start here; the helper
-                    // adds timingShiftSamples/sampleRateHz itself to obtain
-                    // the effective extraction time.
-                    double const startSeconds =
-                        static_cast<double>(
-                            symbolBaseStarts[symbolIndex]) /
-                        downsampledRate;
-                    if (!std::isfinite(startSeconds)) {
-                        dataValid = false;
-                        break;
-                    }
-                    js8::CoherentDataSymbol dataSymbol;
-                    dataSymbol.baseTimeSeconds = startSeconds;
-                    dataSymbol.timingShiftSamples = static_cast<double>(
-                        symbolTimingShifts[symbolIndex]);
-                    dataSymbol.trackerHz = static_cast<double>(
-                        symbolTrackerHz[symbolIndex]);
-                    for (int tone = 0; tone < NROWS; ++tone) {
-                        dataSymbol.bins[static_cast<std::size_t>(tone)] =
-                            complexS2[tone][symbolIndex];
-                        if (!std::isfinite(
-                                dataSymbol.bins[static_cast<std::size_t>(tone)]
-                                    .real()) ||
-                            !std::isfinite(
-                                dataSymbol.bins[static_cast<std::size_t>(tone)]
-                                    .imag())) {
-                            dataValid = false;
-                            break;
-                        }
-                    }
-                    dataSymbols.push_back(dataSymbol);
-                }
-
-                if (dataValid) {
-                    double const frameSpanSeconds =
-                        (static_cast<double>(symbolBaseStarts[NN - 1]) +
-                         static_cast<double>(symbolTimingShifts[NN - 1]) -
-                         static_cast<double>(symbolBaseStarts[0]) -
-                         static_cast<double>(symbolTimingShifts[0])) /
-                        downsampledRate;
-                    if (std::isfinite(frameSpanSeconds) &&
-                        frameSpanSeconds > 0.0) {
-                        js8::CoherentToneResult const coherent =
-                            js8::computeCoherentToneScores(
-                                pilots, dataSymbols, 12,
-                                0.5 * frameSpanSeconds, Mode::NDOWNSPS,
-                                static_cast<double>(FS2));
-                        coherentTelemetry = coherent.telemetry;
-                        if (!coherent.coherentNumerators.empty() &&
-                            coherent.alpha > 0.0) {
-                            js8::CoherentBlend<NROWS, ND> blend;
-                            blend.amplitude = coherent.amplitude;
-                            blend.alpha =
-                                static_cast<float>(coherent.alpha);
-                            for (int tone = 0; tone < NROWS; ++tone)
-                                for (int j = 0; j < ND; ++j)
-                                    blend.numerators[static_cast<std::size_t>(tone)]
-                                                    [static_cast<std::size_t>(j)] =
-                                        coherent.coherentNumerators
-                                            [static_cast<std::size_t>(j)]
-                                            [static_cast<std::size_t>(tone)];
-                            coherentBlend = blend;
-                        }
-                    }
-                }
-            }
-        }
-
-        auto const whitening = js8::WhiteningProcessor<NROWS, ND, N>::process(
-            s1, symbolWinners, m_llrErasureThreshold,
-            decoder_js8().isDebugEnabled(), coherentBlend);
-
-        if (decoder_js8().isDebugEnabled()) {
-            qCDebug(decoder_js8)
-                << "coherent likelihood"
-                << "coherentEnabled" << coherentTelemetry.enabled
-                << "pilotCount" << coherentTelemetry.pilotCount
-                << "pilotPhaseRmsRad" << coherentTelemetry.phaseRmsRad
-                << "pilotPhaseRmsDeg" << coherentTelemetry.phaseRmsDeg
-                << "coherentWeight" << coherentTelemetry.alpha
-                << "fittedPhaseRad" << coherentTelemetry.phi0
-                << "fittedResidualHz" << coherentTelemetry.deltaF
-                << "fittedDriftHzPerSec" << coherentTelemetry.fdot
-                << "pilotAmplitude" << coherentTelemetry.pilotAmplitude
-                << "avgCoherentToneMargin"
-                << coherentTelemetry.avgCoherentToneMargin.value_or(-1.0)
-                << "avgNoncoherentToneMargin"
-                << coherentTelemetry.avgNoncoherentToneMargin.value_or(-1.0);
-        }
-
-        auto llr0 = whitening.llr0;
-        auto llr1 = whitening.llr1;
-
-        // Only apply a second erasure threshold pass if whitening didn't
-        // already zero low-magnitude LLRs using the configured threshold.
-        if (!whitening.erasureApplied) {
-            std::size_t erasuresAfterThreshold = 0;
-            double sumAbsPreErasure = 0.0;
-            double sumAbsPostErasure = 0.0;
-
-            auto const applyErasureThreshold = [&](auto &llr) {
-                for (auto const value : llr)
-                    sumAbsPreErasure += std::abs(value);
-
-                if (m_llrErasureThreshold > 0.0f) {
-                    for (auto &value : llr) {
-                        if (std::abs(value) < m_llrErasureThreshold) {
-                            value = 0.0f;
-                            ++erasuresAfterThreshold;
-                        }
-
-                        sumAbsPostErasure += std::abs(value);
-                    }
-                } else {
-                    for (auto const value : llr)
-                        sumAbsPostErasure += std::abs(value);
-                }
-            };
-
-            applyErasureThreshold(llr0);
-            applyErasureThreshold(llr1);
-
-            if (decoder_js8().isDebugEnabled()) {
-                auto const total =
-                    static_cast<double>(llr0.size() + llr1.size());
-                double const avgPre =
-                    total > 0.0 ? sumAbsPreErasure / total : 0.0;
-                double const avgPost =
-                    total > 0.0 ? sumAbsPostErasure / total : 0.0;
-
-                qCDebug(decoder_js8)
-                    << "LLR erasure threshold" << m_llrErasureThreshold
-                    << "erasures:" << erasuresAfterThreshold
-                    << "avg|LLR| pre/post:" << avgPre << avgPost;
-            }
-        }
+        // Shared tone-bin to LLR stack (magnitudes -> winners -> Costas-only
+        // coherent blend -> whitening -> LLRs -> erasure). The first pass and
+        // the decoder-aided re-demodulation use this same implementation.
+        ToneBinLlrs const toneBins = processToneBins(
+            s2, complexS2, symbolBaseStarts, symbolTimingShifts,
+            symbolTrackerHz);
+        auto llr0 = toneBins.llr0;
+        auto llr1 = toneBins.llr1;
 
         auto const ttl = std::chrono::seconds{Mode::NTXDUR * 2};
 
@@ -1765,6 +1805,10 @@ template <typename Mode> class DecodeMode {
         std::array<int8_t, K> decoded = {};
         std::array<int8_t, N> cw = {};
         std::array<float, N> bestRescueLlr = {};
+        // Best tentative hard codeword across LDPC/rescue attempts, kept in
+        // lockstep with bestRescueChecks so decoder-aided re-demodulation can
+        // use the actual near-miss word as a waveform hypothesis.
+        std::array<int8_t, N> bestRescueCw = {};
 
         int totalLdpcPasses = 0;
         bool usedFeedbackPass = false;
@@ -1782,14 +1826,21 @@ template <typename Mode> class DecodeMode {
                     bestRescueChecks = bp.bestChecks;
                     bestRescuePass = ipass;
                     bestRescueLlr = llrInput;
+                    // bpdecode174 leaves cw at this call's minimum-syndrome
+                    // state, so this snapshot is the word that earned
+                    // bestChecks (first minimum wins ties deterministically).
+                    bestRescueCw = cw;
                 }
             };
 
         auto const tryDecode = [&](std::array<float, N> const &llrInput,
                                    int ipass, BPOptions const options,
-                                   bool const rememberForRescue)
+                                   bool const rememberForRescue,
+                                   BPResult *bpOut = nullptr)
             -> std::optional<Decode> {
             BPResult const bp = bpdecode174(llrInput, decoded, cw, options);
+            if (bpOut != nullptr)
+                *bpOut = bp;
             nharderrors = bp.hardErrors;
             xsnr = -99.0f;
 
@@ -1930,8 +1981,13 @@ template <typename Mode> class DecodeMode {
                 options.earlyAbort = false;
                 options.llrScale = scale;
 
+                // Remember rescue attempts as well so bestRescueChecks (and the
+                // associated bestRescueCw snapshot) reflect the best syndrome
+                // across all bounded LDPC/rescue attempts. This only updates
+                // the best-input bookkeeping with the same LLRs; no decode
+                // behavior changes.
                 if (auto result = tryDecode(bestRescueLlr, bestRescuePass,
-                                            options, false)) {
+                                            options, true)) {
                     if (decoder_js8().isDebugEnabled()) {
                         qCDebug(decoder_js8)
                             << "LDPC rescue succeeded"
@@ -1941,6 +1997,215 @@ template <typename Mode> class DecodeMode {
                     return result;
                 }
             }
+        }
+
+        // Decoder-aided re-demodulation. When the normal bounded LDPC/rescue
+        // sequence fails with a genuinely close near miss (best syndrome in
+        // (0, 4]), the best tentative codeword becomes a waveform hypothesis:
+        // its 58 data tones plus the 21 known Costas tones refine
+        // timing/residual-frequency/drift against this candidate's received
+        // samples (cd0, i.e. the current SIC-pass buffer after coarse
+        // correction), and the refined sync drives ONE fresh 8-tone
+        // re-demodulation producing new LLRs for a final LDPC attempt. Only a
+        // valid CRC can accept the result; any failure falls through to the
+        // normal failure path with the original outputs restored.
+        if (m_enableAidedRedemod && bestRescueChecks > 0 &&
+            bestRescueChecks <= js8::aided::kMaxSyndrome) {
+            static_assert(js8::aided::kCodeBits == N &&
+                              js8::aided::kDataSymbols == ND &&
+                              js8::aided::kTotalSymbols == NN &&
+                              js8::aided::kTones == NROWS,
+                          "aided helper sizes must match decoder");
+
+            // Tentative-word validity: an all-zero word carries no tone
+            // information, and non-finite LLRs must never steer the fit.
+            bool tentValid =
+                !std::all_of(bestRescueCw.begin(), bestRescueCw.end(),
+                             [](int8_t x) { return x == 0; });
+            for (float v : bestRescueLlr)
+                tentValid = tentValid && std::isfinite(v);
+
+            bool const boundsOk =
+                tentValid && js8::aided::sampleBoundsValid(
+                                 ibest, NN, Mode::NDOWNSPS, Mode::NDOWNSPS,
+                                 NP2, js8::aided::kTimingDeltaMax);
+            // Gate reason for telemetry: 0 = searched, 1 = tentative
+            // word/LLRs unusable, 2 = candidate sample bounds invalid.
+            int const skipCode =
+                !tentValid ? 1 : (!boundsOk ? 2 : 0);
+
+            std::optional<Decode> aidedResult;
+            int aidedUsed = 0;
+            double aidedMeanConf = 0.0;
+            int aidedDt = 0;
+            double aidedDf = 0.0;
+            double aidedDd = 0.0;
+            double aidedBase =
+                std::numeric_limits<double>::quiet_NaN();
+            double aidedRef = std::numeric_limits<double>::quiet_NaN();
+            int aidedBoundary = 0;
+            int aidedBestChecks = -1;
+            int aidedAccepted = 0;
+            double const initLlrNorm = js8::aided::llrNorm(bestRescueLlr);
+            double aidedLlrNorm = 0.0;
+
+            if (boundsOk) {
+                std::array<int, NN> expectedTones{};
+                js8::aided::codewordToTones(bestRescueCw, Costas,
+                                            expectedTones);
+                auto const conf =
+                    js8::aided::tentativeConfidences(bestRescueLlr);
+                std::array<float, NN> symWeights{};
+                js8::aided::buildSymbolWeights(conf, symWeights);
+                aidedUsed = conf.used;
+                aidedMeanConf = conf.mean;
+
+                js8::aided::Refinement const refinement =
+                    js8::aided::refineSync(
+                        cd0.data(), NP2, ibest, Mode::NDOWNSPS,
+                        Mode::NDOWNSPS, static_cast<double>(FS2),
+                        expectedTones, symWeights);
+                aidedBase = refinement.baselineMetric;
+                aidedRef = refinement.best.metric;
+                aidedBoundary = refinement.atBoundary ? 1 : 0;
+                // Report the best hypothesis found regardless of the gate so
+                // telemetry shows what the search preferred; the gate outcome
+                // is conveyed by atBoundary/gainDb/aidedBestChecks.
+                aidedDt = refinement.best.deltaSamples;
+                aidedDf = refinement.best.deltaHz;
+                aidedDd = refinement.best.driftHzPerSec;
+
+                if (js8::aided::refinementAccepted(refinement)) {
+
+                    // Fresh full 79-symbol re-demodulation from cd0 with the
+                    // refined sync: fixed timing offset plus a continuous
+                    // complex derotation phase(t) = 2*pi*df*t + pi*dd*t^2
+                    // (negative-exponent convention matches the coarse cd0
+                    // correction), then the same in-place FFT and magnitude
+                    // scaling as the first pass. No per-symbol trackers: the
+                    // refined base replaces them, and the Costas-only
+                    // coherent fit downstream absorbs small leftovers.
+                    std::array<std::array<float, NN>, NROWS> s2Aided{};
+                    std::array<std::array<std::complex<float>, NN>, NROWS>
+                        complexAided{};
+                    std::array<int, NN> baseStartsAided{};
+                    std::array<int, NN> shiftsAided{};
+                    std::array<float, NN> trackerHzAided{};
+                    double const rateHz = static_cast<double>(FS2);
+                    for (int k = 0; k < NN; ++k) {
+                        int const i1Base = ibest + k * Mode::NDOWNSPS;
+                        int i1 = i1Base + aidedDt;
+                        if (i1 < 0) {
+                            i1 = 0;
+                        } else if (i1 + Mode::NDOWNSPS > NP2) {
+                            i1 = NP2 - Mode::NDOWNSPS;
+                        }
+                        baseStartsAided[static_cast<std::size_t>(k)] = i1Base;
+                        shiftsAided[static_cast<std::size_t>(k)] = i1 - i1Base;
+                        for (int n = 0; n < Mode::NDOWNSPS; ++n) {
+                            std::complex<float> const x =
+                                cd0[static_cast<std::size_t>(i1 + n)];
+                            double const t =
+                                static_cast<double>(i1 + n) / rateHz;
+                            double const angle =
+                                2.0 * std::numbers::pi * aidedDf * t +
+                                std::numbers::pi * aidedDd * t * t;
+                            float const ang = static_cast<float>(angle);
+                            csymb[static_cast<std::size_t>(n)] =
+                                x * std::polar(1.0f, -ang);
+                        }
+
+                        fftwf_execute(plans[Plan::CS]);
+
+                        for (int i = 0; i < NROWS; ++i) {
+                            s2Aided[static_cast<std::size_t>(i)]
+                                   [static_cast<std::size_t>(k)] =
+                                       std::abs(csymb[static_cast<std::size_t>(
+                                           i)]) /
+                                       1000.0f;
+                            complexAided[static_cast<std::size_t>(i)]
+                                        [static_cast<std::size_t>(k)] =
+                                            csymb[static_cast<std::size_t>(
+                                                i)] /
+                                            1000.0f;
+                        }
+                    }
+
+                    // Identical downstream stack as the first pass (shared
+                    // helper): Costas-pilots-only coherent fit, whitening,
+                    // LLRs. Tentative data never enters the coherent fit.
+                    ToneBinLlrs const aidedBins = processToneBins(
+                        s2Aided, complexAided, baseStartsAided, shiftsAided,
+                        trackerHzAided);
+                    aidedLlrNorm = js8::aided::llrNorm(aidedBins.llr0);
+
+                    // The aided LLRs measure the SAME frame, so they must not
+                    // go through SoftCombiner::combine() (that would add one
+                    // frame twice as independent evidence). Run LDPC locally
+                    // on the fresh LLRs; the combiner entry keeps the initial
+                    // observation, and markDecoded() inside tryDecode evicts
+                    // it on success exactly like the normal path.
+                    int const savedNhard = nharderrors;
+                    float const savedXsnr = xsnr;
+                    s2 = s2Aided; // aided xsnr uses aided magnitudes
+                    int aidedBest = M + 1;
+                    BPResult aidedBp;
+                    if (auto res = tryDecode(aidedBins.llr0, 1, BPOptions{},
+                                             false, &aidedBp)) {
+                        aidedBest = aidedBp.bestChecks;
+                        aidedAccepted = 1;
+                        aidedResult = res;
+                    } else {
+                        aidedBest = std::min(aidedBest, aidedBp.bestChecks);
+                        for (float const scale : BP_RESCUE_LLR_SCALES) {
+                            BPOptions options;
+                            options.maxIterations = BP_RESCUE_ITERATIONS;
+                            options.earlyAbort = false;
+                            options.llrScale = scale;
+                            BPResult retryBp;
+                            if (auto retry = tryDecode(aidedBins.llr0, 1,
+                                                       options, false,
+                                                       &retryBp)) {
+                                aidedBest = std::min(aidedBest,
+                                                     retryBp.bestChecks);
+                                aidedAccepted = 1;
+                                aidedResult = retry;
+                                break;
+                            }
+                            aidedBest =
+                                std::min(aidedBest, retryBp.bestChecks);
+                        }
+                    }
+                    aidedBestChecks = aidedBest <= M ? aidedBest : -1;
+
+                    if (!aidedResult) {
+                        // Failed aided attempts leave no trace: original
+                        // outputs and failure path are preserved.
+                        nharderrors = savedNhard;
+                        xsnr = savedXsnr;
+                    }
+                }
+            }
+
+            if (decoder_js8().isDebugEnabled()) {
+                qCDebug(decoder_js8)
+                    << "Decoder-aided re-demod"
+                    << "initialBestChecks" << bestRescueChecks << "attempted"
+                    << (boundsOk ? 1 : 0) << "skipCode" << skipCode
+                    << "dataUsed" << aidedUsed
+                    << "meanConf" << aidedMeanConf << "dtSmpl" << aidedDt
+                    << "dfHz" << aidedDf << "ddotHz" << aidedDd
+                    << "baseMetric" << aidedBase << "refMetric" << aidedRef
+                    << "gainDb"
+                    << js8::aided::metricGainDb(aidedRef, aidedBase)
+                    << "atBoundary" << aidedBoundary << "aidedBestChecks"
+                    << aidedBestChecks << "crcAccepted" << aidedAccepted
+                    << "initLlrNorm" << initLlrNorm << "aidedLlrNorm"
+                    << aidedLlrNorm;
+            }
+
+            if (aidedResult)
+                return aidedResult;
         }
 
         if (decoder_js8().isDebugEnabled()) {
@@ -2726,6 +2991,8 @@ template <typename Mode> class DecodeMode {
             std::getenv("JS8_DISABLE_LDPC_RESCUE") == nullptr;
         m_enableCoherentData =
             std::getenv("JS8_DISABLE_COHERENT_DATA") == nullptr;
+        m_enableAidedRedemod =
+            std::getenv("JS8_DISABLE_REDEMOD") == nullptr;
 
         // Intialize the Nuttal window. In theory, we can do this as a
         // constexpr function at compile time, but doing so yield results

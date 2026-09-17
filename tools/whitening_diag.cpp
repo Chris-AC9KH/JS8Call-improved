@@ -68,10 +68,8 @@ namespace
     };
 
     template <typename Mode>
-    std::size_t synth_frame(SynthConfig const &cfg)
+    std::size_t synth_frame(SynthConfig const &cfg, char const *message)
     {
-        constexpr char message[] = "TESTTEST1234"; // 12 chars
-
         int tones[NN] = {};
         JS8::encode(0, JS8::Costas::array(Mode::NCOSTAS), message, tones);
 
@@ -160,6 +158,7 @@ namespace
     // function pointer, so active sinks are set through these pointers.
     std::vector<int> *g_checksSink = nullptr;
     double *g_alphaSink = nullptr;
+    std::vector<std::string> *g_aidedSink = nullptr;
 
     void benchmarkMessageHandler(QtMsgType type, QMessageLogContext const &ctx,
                                  QString const &msg) {
@@ -168,6 +167,14 @@ namespace
             return;
         std::string s = msg.toStdString();
         std::cerr << s << "\n";
+        if (s.find("Decoder-aided re-demod") != std::string::npos) {
+            // Captured verbatim for aided A/B analysis; its
+            // initialBestChecks/aidedBestChecks tokens must not pollute the
+            // rescue-syndrome sink.
+            if (g_aidedSink != nullptr)
+                g_aidedSink->push_back(s);
+            return;
+        }
         std::istringstream iss(s);
         std::string tok;
         while (iss >> tok) {
@@ -185,7 +192,8 @@ namespace
 
     Result
     run_decode(bool disableWhitening, bool coherentEnabled,
-               bool captureChecks = false)
+               bool captureChecks = false, bool redemodEnabled = true,
+               std::vector<std::string> *aidedLines = nullptr)
     {
         if (disableWhitening) {
             ::setenv("JS8_DISABLE_WHITENING", "1", 1);
@@ -197,10 +205,16 @@ namespace
         } else {
             ::setenv("JS8_DISABLE_COHERENT_DATA", "1", 1);
         }
+        if (redemodEnabled) {
+            ::unsetenv("JS8_DISABLE_REDEMOD");
+        } else {
+            ::setenv("JS8_DISABLE_REDEMOD", "1", 1);
+        }
 
         Result r;
         std::vector<int> checks;
         double maxAlpha = 0.0;
+        std::vector<std::string> aided;
         auto prevHandler = qInstallMessageHandler(
             +[](QtMsgType, QMessageLogContext const &, QString const &) {});
         if (captureChecks) {
@@ -208,6 +222,7 @@ namespace
                 QStringLiteral("decoder.js8.debug=true\n"));
             g_checksSink = &checks;
             g_alphaSink = &maxAlpha;
+            g_aidedSink = aidedLines != nullptr ? aidedLines : &aided;
             qInstallMessageHandler(benchmarkMessageHandler);
         }
         auto const started = std::chrono::steady_clock::now();
@@ -242,6 +257,7 @@ namespace
         r.maxAlpha = maxAlpha;
         g_checksSink = nullptr;
         g_alphaSink = nullptr;
+        g_aidedSink = nullptr;
         qInstallMessageHandler(prevHandler);
 
         return r;
@@ -288,7 +304,7 @@ namespace
                 cfg.snrDb = snrDb;
                 cfg.seed = 0xBEEF + trial;
                 cfg.startPhase = 0.7 + trial;
-                auto count = synth_frame<Mode>(cfg);
+                auto count = synth_frame<Mode>(cfg, expected);
                 set_mode_params(bit, static_cast<int>(count), cfg.baseHz);
                 auto r = run_decode(false, coherent, true);
                 printBenchmarkRow(name, snrDb, coherent, r, expected);
@@ -341,7 +357,7 @@ namespace
                 cfg.freqOffsetHz = scenario.freqOffsetHz;
                 cfg.driftHzPerSec = scenario.driftHzPerSec;
                 cfg.timingShiftSmpl = scenario.timingShiftSmpl;
-                auto count = synth_frame<ModeA>(cfg);
+                auto count = synth_frame<ModeA>(cfg, expected);
                 set_mode_params(0, static_cast<int>(count), cfg.baseHz);
                 auto r = run_decode(false, coherent, true);
                 int exact = 0;
@@ -367,6 +383,189 @@ namespace
             ++trial;
         }
     }
+    // Decoder-aided re-demodulation experiments.
+    //
+    // run_aided_rescue() sweeps impairments/noise around the decode cliff and
+    // reports, per config, OFF (re-demod disabled) vs ON: decoded flag, best
+    // observed rescue syndrome, aided attempts and CRC-accepted rescues. The
+    // tentative codeword always comes from the actual failed LDPC output.
+    //
+    // run_aided_benchmark() compares re-demod ON vs OFF across modes and low
+    // SNR points with multiple deterministic seeds: successful CRC decodes,
+    // near-misses, aided attempts/rescues, false CRC payloads, wall time.
+
+    int minRescueChecks(Result const &r) {
+        if (r.bestChecks.empty())
+            return r.decoded ? 0 : 99;
+        return *std::min_element(r.bestChecks.begin(), r.bestChecks.end());
+    }
+
+    int countAidedToken(std::vector<std::string> const &lines,
+                        char const *token, char const *value) {
+        int n = 0;
+        std::string const needle =
+            std::string(token) + " " + value;
+        for (auto const &line : lines)
+            if (line.find(needle) != std::string::npos)
+                ++n;
+        return n;
+    }
+
+    struct AidedSweep {
+        double snrDb;
+        double freqOffsetHz;
+        double driftHzPerSec;
+        double timingFrac; // Fraction of Mode::NSPS.
+        unsigned seed;
+        double startPhase;
+    };
+
+    void run_aided_rescue() {
+        // Payload diversity: the LDPC cliff is codeword-dependent, so several
+        // distinct messages are tried per impairment cell.
+        constexpr char const *messages[] = {
+            "TESTTEST1234", "TESTTEST1235", "AAAAAAAAAAAA", "ZZZZZZZZZZZZ",
+        };
+        std::printf("%-12s %-6s %-7s %-7s %-7s %-8s %-4s %-9s %-4s %-9s %-9s %-8s %-8s\n",
+                    "message", "snrDb", "freqHz", "drift", "timeFr", "seed",
+                    "off", "offChecks", "onEx", "attempts", "rescues",
+                    "onChecks", "wallMs");
+        int rescued = 0;
+        int nearMiss = 0;
+        // Impairments target the first pass's weak spots: multi-sample
+        // timing offsets near the tracker's pull-in limit, residual
+        // frequencies between grid points, and drift beyond the aided box.
+        for (char const *message : messages) {
+        for (double snrDb : {-14.0, -16.0, -18.0}) {
+            for (double freq : {0.35}) {
+                for (double drift : {0.02}) {
+                    for (double tfrac : {0.03}) {
+                        for (unsigned seed : {0xC11u, 0xC22u, 0xC33u}) {
+                            SynthConfig cfg;
+                            cfg.snrDb = snrDb;
+                            cfg.seed = seed;
+                            cfg.startPhase = 1.1 + 0.7 * (seed & 0xF);
+                            cfg.freqOffsetHz = freq;
+                            cfg.driftHzPerSec = drift;
+                            cfg.timingShiftSmpl = tfrac * ModeA::NSPS;
+                            auto count = synth_frame<ModeA>(cfg, message);
+                            set_mode_params(0, static_cast<int>(count),
+                                            cfg.baseHz);
+                            auto off = run_decode(false, true, true, false);
+                            auto const offMin = minRescueChecks(off);
+                            std::vector<std::string> aidedLines;
+                            auto on = run_decode(false, true, true, true,
+                                                 &aidedLines);
+                            int exact = 0;
+                            for (auto const &p : on.payloads)
+                                if (p == message)
+                                    ++exact;
+                            int const attempts = countAidedToken(
+                                aidedLines, "attempted", "1");
+                            int const rescues = countAidedToken(
+                                aidedLines, "crcAccepted", "1");
+                            if (offMin >= 1 && offMin <= 4)
+                                ++nearMiss;
+                            if (rescues > 0)
+                                ++rescued;
+                            std::printf(
+                                "%-12s %-6.1f %-7.2f %-7.3f %-7.3f 0x%-6X "
+                                "%-4d %-9d %-4d %-9d %-9d %-8d %lld\n",
+                                message, snrDb, freq, drift, tfrac, seed,
+                                off.decoded ? 1 : 0, offMin, exact, attempts,
+                                rescues, minRescueChecks(on),
+                                on.wallMs + off.wallMs);
+                            for (auto const &line : aidedLines)
+                                std::printf("    aided: %s\n", line.c_str());
+                        }
+                    }
+                }
+            }
+        }
+        }
+        std::printf("aided-rescue sweep: near-miss configs=%d rescued=%d\n",
+                    nearMiss, rescued);
+    }
+
+    void run_aided_benchmark() {
+        constexpr char expected[] = "TESTTEST1234";
+        std::printf("%-6s %-8s %-9s %-8s %-8s %-12s %-10s %-9s %-9s %s\n",
+                    "mode", "snrDb", "redemod", "decoded", "exact",
+                    "falsePos", "wallMs", "attempts", "rescues",
+                    "bestChecks");
+        long totalWallOn = 0;
+        long totalWallOff = 0;
+        int decodedOn = 0;
+        int decodedOff = 0;
+        int rescues = 0;
+        int attempts = 0;
+        int falsePos = 0;
+        auto const benchMode = [&](auto modeTag, int bit, char const *name) {
+            using Mode = decltype(modeTag);
+            int trial = 0;
+            for (double snrDb : {-24.0, -26.0, -28.0, -30.0, -32.0}) {
+                for (unsigned seed : {0xBEEFu, 0xBEF0u}) {
+                    for (bool redemod : {false, true}) {
+                        SynthConfig cfg;
+                        cfg.snrDb = snrDb;
+                        cfg.seed = seed + trial;
+                        cfg.startPhase = 0.7 + trial;
+                        auto count = synth_frame<Mode>(cfg, expected);
+                        set_mode_params(bit, static_cast<int>(count),
+                                        cfg.baseHz);
+                        std::vector<std::string> aidedLines;
+                        auto r = run_decode(false, true, true, redemod,
+                                            &aidedLines);
+                        int exact = 0;
+                        for (auto const &p : r.payloads)
+                            if (p == expected)
+                                ++exact;
+                        int const att = countAidedToken(aidedLines,
+                                                        "attempted", "1");
+                        int const res = countAidedToken(aidedLines,
+                                                        "crcAccepted", "1");
+                        attempts += att;
+                        rescues += res;
+                        falsePos += static_cast<int>(r.payloads.size()) -
+                                    exact;
+                        if (redemod) {
+                            totalWallOn += r.wallMs;
+                            decodedOn += r.decoded ? 1 : 0;
+                        } else {
+                            totalWallOff += r.wallMs;
+                            decodedOff += r.decoded ? 1 : 0;
+                        }
+                        std::string checks = "n/a";
+                        if (!r.bestChecks.empty()) {
+                            int mn = *std::min_element(r.bestChecks.begin(),
+                                                       r.bestChecks.end());
+                            checks = std::to_string(mn) + "/" +
+                                     std::to_string(r.bestChecks.size());
+                        }
+                        if (r.decoded && r.bestChecks.empty())
+                            checks = "0/success";
+                        std::printf(
+                            "%-6s %-8.1f %-9s %-8d %-8d %-12d %-10lld "
+                            "%-9d %-9d %s\n",
+                            name, snrDb, redemod ? "on" : "off",
+                            r.decoded ? 1 : 0, exact,
+                            static_cast<int>(r.payloads.size()) - exact,
+                            r.wallMs, att, res, checks.c_str());
+                    }
+                    ++trial;
+                }
+            }
+        };
+        benchMode(ModeA{}, 0, "A");
+        benchMode(ModeB{}, 1, "B");
+        benchMode(ModeC{}, 2, "C");
+        benchMode(ModeE{}, 3, "E");
+        benchMode(ModeI{}, 4, "I");
+        std::printf("aided-benchmark: decoded off=%d on=%d attempts=%d "
+                    "rescues=%d falsePos=%d wallMs off=%ld on=%ld\n",
+                    decodedOff, decodedOn, attempts, rescues, falsePos,
+                    totalWallOff, totalWallOn);
+    }
 }
 
 int
@@ -383,11 +582,19 @@ main(int argc, char **argv)
             run_coherent_scenarios();
             return 0;
         }
+        if (std::string(argv[i]) == "--aided-rescue") {
+            run_aided_rescue();
+            return 0;
+        }
+        if (std::string(argv[i]) == "--aided-benchmark") {
+            run_aided_benchmark();
+            return 0;
+        }
     }
 
     SynthConfig cfg;
     cfg.snrDb = 0.0;
-    auto count = synth_frame<ModeA>(cfg);
+    auto count = synth_frame<ModeA>(cfg, "TESTTEST1234");
     set_mode_params(0, static_cast<int>(count), cfg.baseHz);
 
     auto off = run_decode(true, true);
