@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <numeric>
 #include <optional>
 #include <sstream>
@@ -197,38 +198,67 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
             for (int i = 0; i < NROWS; ++i)
                 ps[i] = s1[i][j];
 
-            // Assign to `bmeta` in column order, with correct values
-            result.llr0[i1] = std::max({ps[4], ps[5], ps[6], ps[7]}) -
-                              std::max({ps[0], ps[1], ps[2], ps[3]}); // r4
-            result.llr0[i2] = std::max({ps[2], ps[3], ps[6], ps[7]}) -
-                              std::max({ps[0], ps[1], ps[4], ps[5]}); // r2
-            result.llr0[i4] = std::max({ps[1], ps[3], ps[5], ps[7]}) -
-                              std::max({ps[0], ps[2], ps[4], ps[6]}); // r1
+            // Common per-symbol noise-power estimate. When whitening is
+            // unavailable, fall back to unit variance so the calculation stays
+            // a Gaussian power likelihood rather than degenerating.
+            float const invSigma2 = whiteningAvailable ? 1.0f /
+                                       ((std::max(0.0f, (*toneNoise)[symbolWinners[j]]) *
+                                         std::max(0.0f, (*symbolNoise)[j])) +
+                                        1e-12f)
+                                                     : 1.0f;
 
-            for (auto &x : ps)
-                x = std::log(x + 1e-32f);
+            // Noise-normalized tone power (per-tone SNR). Under an AWN model
+            // with per-symbol noise power sigma2 = toneNoise * symbolNoise, the
+            // matched-filter power ps^2/sigma2 is the log-likelihood of tone i.
+            std::array<float, NROWS> w;
 
-            // Assign to `bmetb` in column order, with correct values
-            result.llr1[i1] = std::max({ps[4], ps[5], ps[6], ps[7]}) -
-                              std::max({ps[0], ps[1], ps[2], ps[3]}); // r4
-            result.llr1[i2] = std::max({ps[2], ps[3], ps[6], ps[7]}) -
-                              std::max({ps[0], ps[1], ps[4], ps[5]}); // r2
-            result.llr1[i4] = std::max({ps[1], ps[3], ps[5], ps[7]}) -
-                              std::max({ps[0], ps[2], ps[4], ps[6]}); // r1
+            for (int i = 0; i < NROWS; ++i) {
+                float const power = ps[i] * ps[i];
+                w[i] = power * invSigma2;
+            }
+
+            // Stable log-sum-exp of the tones whose natural-binary encoding has
+            // bit `bit` set (given by `shift`) or clear, for a single bit group.
+            auto logSumExp = [&](int shift, int bit) -> float {
+                float m = -std::numeric_limits<float>::infinity();
+
+                for (int i = 0; i < NROWS; ++i)
+                    if (((i >> shift) & 1) == bit && w[i] > m)
+                        m = w[i];
+
+                if (std::isinf(m))
+                    return 0.0f; // empty group: contributes 0 to the diff
+
+                float s = 0.0f;
+
+                for (int i = 0; i < NROWS; ++i)
+                    if (((i >> shift) & 1) == bit)
+                        s += std::exp(w[i] - m);
+
+                return m + std::log(s);
+            };
+
+            // Each symbol emits three LLRs (one per bit) as the logsum-exp
+            // difference across the two bit groups, combining all tones in each
+            // group rather than using only the single largest magnitude.
+            result.llr0[i1] = logSumExp(2, 1) - logSumExp(2, 0);
+            result.llr0[i2] = logSumExp(1, 1) - logSumExp(1, 0);
+            result.llr0[i4] = logSumExp(0, 1) - logSumExp(0, 0);
+
+            // llr0 and llr1 are unified: they carry the same, properly
+            // soft-calculated symbol information (pass diversity comes from the
+            // bit-range masking and LDPC feedback downstream).
+            result.llr1[i1] = result.llr0[i1];
+            result.llr1[i2] = result.llr0[i2];
+            result.llr1[i4] = result.llr0[i4];
 
             if (whiteningAvailable) {
-                int const winner = symbolWinners[j];
-                float const tn = std::max(0.0f, (*toneNoise)[winner]);
-                float const sn = std::max(0.0f, (*symbolNoise)[j]);
-                float const localNoise = std::sqrt(tn * sn + 1e-12f);
-
+                // The LLRs are already noise-normalized through invSigma2, so
+                // no further division is required here; only erasure and the
+                // pre/post magnitude metrics are collected.
                 auto const applyWhitening = [&](float &value) {
                     float const pre = std::abs(value);
                     sumAbsPre += pre;
-
-                    if (localNoise > 0.0f && std::isfinite(localNoise)) {
-                        value /= localNoise;
-                    }
 
                     if (applyErasureInWhitening &&
                         std::abs(value) < erasureThreshold) {
