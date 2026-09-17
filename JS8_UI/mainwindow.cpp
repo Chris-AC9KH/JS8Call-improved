@@ -101,11 +101,6 @@ void copyMessage(QStringView const string, char *const array,
 
 } // namespace
 
-// explicit member function of the UI_Constructor class
-// this is the forward declaration of the constructor contained in
-// JS8_Mainwindow/UI_Constructor.cpp
-void UI_Constructor();
-
 void UI_Constructor::checkStartupWarnings() {
     if (m_config.check_for_updates()) {
         checkVersion(false);
@@ -1328,18 +1323,7 @@ void UI_Constructor::createControlBar()
 
     ui->mode_button->setStyleSheet(Styles::ModeButtonStyle);
     ui->mode_button->setToolTip(tr("Set the JS8 mode speed"));
-    {
-        QString modeLabelText;
-        switch (m_nSubMode) {
-        case Varicode::JS8CallSlow:   modeLabelText = "JS8 Slow";   break;
-        case Varicode::JS8CallNormal: modeLabelText = "JS8 Normal"; break;
-        case Varicode::JS8CallFast:   modeLabelText = "JS8 Fast";   break;
-        case Varicode::JS8CallTurbo:  modeLabelText = "JS8 40";     break;
-        case Varicode::JS8CallUltra:  modeLabelText = "JS8 60";     break;
-        default:                      modeLabelText = "JS8";        break;
-        }
-        ui->mode_button->setText(modeLabelText);
-    }
+    updateModeButtonText();
 
     modeSpeedMenu = new QMenu(this);
     modeSpeedMenu->addAction(ui->actionModeJS8Slow);
@@ -4085,28 +4069,6 @@ void UI_Constructor::prepareHeartbeatMode(bool enabled) {
     } else {
         m_config.removeGroup("@HB");
     }
-#endif
-
-#if 0
-    //ui->actionCQ->setEnabled(!enabled);
-    //ui->actionFocus_Message_Reply_Area->setEnabled(!enabled);
-
-    // default to not displaying the other buttons
-    // ui->cqMacroButton->setVisible(!enabled);
-    // ui->replyMacroButton->setVisible(!enabled);
-    // ui->snrMacroButton->setVisible(!enabled);
-    // ui->infoMacroButton->setVisible(!enabled);
-    // ui->macrosMacroButton->setVisible(!enabled);
-    // ui->queryButton->setVisible(!enabled);
-    // ui->extFreeTextMsgEdit->setVisible(!enabled);
-    // if(enabled){
-    //     ui->extFreeTextMsgEdit->clear();
-    // }
-
-    // show heartbeat and acks in hb mode only
-    // ui->actionShow_Band_Heartbeats_and_ACKs->setChecked(enabled);
-    // ui->actionShow_Band_Heartbeats_and_ACKs->setVisible(true);
-    // ui->actionShow_Band_Heartbeats_and_ACKs->setEnabled(false);
 #endif
 
     updateHBButtonDisplay();
@@ -6954,4 +6916,3 @@ QByteArray UI_Constructor::wisdomFileName() const {
 
 Q_LOGGING_CATEGORY(decoder_js8, "decoder.js8", QtWarningMsg)
 Q_LOGGING_CATEGORY(mainwindow_js8, "mainwindow.js8", QtWarningMsg)
-
