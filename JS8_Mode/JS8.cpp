@@ -186,10 +186,12 @@ constexpr int KK = 87;           // Information bits (75 + CRC12)
 constexpr int ND = 58;           // Data symbols
 constexpr int NS = 21;           // Sync symbols (3 @ Costas 7x7)
 constexpr int NN = NS + ND;      // Total channel symbols (79)
-constexpr float ASYNCMIN = 1.5f; // Minimum sync
+constexpr float ASYNCMIN = 1.5f; // Normal coarse-sync threshold
+constexpr float ASYNCDEEP = 1.20f; // Bounded fallback coarse-sync threshold
 constexpr float SOFT_COSTAS_MIN = 1.5f; // Minimum soft Costas power ratio
 constexpr int NFSRCH = 5; // Search frequency range in Hz (i.e., +/- 2.5 Hz)
-constexpr std::size_t NMAXCAND = 300; // Maxiumum number of candidate signals
+constexpr std::size_t NMAXCAND = 300; // Maximum normal candidates
+constexpr std::size_t NMAXDEEP = 24; // Maximum deep-search candidates
 constexpr int NFILT = 1400;           // Filter length
 constexpr int NROWS = 8;
 constexpr int NFOS = 2;
@@ -543,6 +545,13 @@ struct Sync {
         : freq(freq), step(step), sync(sync) {}
 };
 
+struct SyncCandidates {
+    std::vector<Sync> normal;
+    std::vector<Sync> deep;
+
+    bool empty() const noexcept { return normal.empty() && deep.empty(); }
+};
+
 // Tag structs so that we can refer to multi index container indices
 // by a descriptive tag instead of by the index of the index. These
 // don't need to be anything but a name.
@@ -646,7 +655,7 @@ constexpr std::array<CheckNode, M> Nm = {{{6, {0, 29, 59, 88, 117, 146, 0}},
                                           {6, {5, 33, 65, 94, 123, 150, 0}},
                                           {6, {6, 34, 66, 95, 119, 151, 0}},
                                           {6, {7, 35, 67, 96, 124, 152, 0}},
-                                          {6, {8, 36, 68, 97, 124, 152, 0}},
+                                          {6, {8, 36, 68, 97, 125, 151, 0}},
                                           {6, {9, 37, 69, 98, 126, 153, 0}},
                                           {6, {10, 38, 70, 99, 125, 154, 0}},
                                           {6, {11, 39, 60, 100, 127, 144, 0}},
@@ -1082,6 +1091,7 @@ template <typename Mode> class DecodeMode {
     js8::SoftCombiner<N> m_softCombiner;
     bool m_enableFreqTracking = true;
     bool m_enableTimingTracking = true;
+    bool m_enableDeepSearch = true;
     float m_llrErasureThreshold = js8::llrErasureThreshold();
     bool m_enableLdpcFeedback = js8::ldpcFeedbackEnabled();
     int m_maxLdpcPasses = js8::ldpcFeedbackMaxPasses();
@@ -1965,7 +1975,7 @@ template <typename Mode> class DecodeMode {
     //       references `s`, so it was effectively a somewhat expensive dead
     //       store. It's been eliminated in this version.
 
-    std::vector<Sync> syncjs8(int nfa, int nfb) {
+    SyncCandidates syncjs8(int nfa, int nfb) {
         // Compute symbol spectra
 
         savg.fill(0.0f);
@@ -2106,27 +2116,34 @@ template <typename Mode> class DecodeMode {
             freqIndex.modify(it, normalize);
         }
 
-        // Extract candidates.
+        // Extract normal candidates first, while retaining a small bounded
+        // fallback band below ASYNCMIN. Because syncIndex is ordered from
+        // strongest to weakest, normal candidates always win duplicate
+        // suppression before a deep-search candidate can claim the same
+        // frequency neighborhood.
 
-        std::vector<Sync> candidates;
+        SyncCandidates candidates;
 
-        for (auto it = syncIndex.begin();
-             it != syncIndex.end() && candidates.size() < NMAXCAND;
+        for (auto it = syncIndex.begin(); it != syncIndex.end();
              it = syncIndex.begin()) {
-            // Stop iteration if below threshold or invalid; as the
-            // index is sorted by sync, any subsequent entries will
-            // also be below the threshold or invalid.
-
-            if (it->sync < ASYNCMIN || std::isnan(it->sync))
+            if (std::isnan(it->sync) || it->sync < ASYNCDEEP)
                 break;
 
-            // Good value, relatively strong; save the candidate.
+            if (it->sync >= ASYNCMIN) {
+                if (candidates.normal.size() >= NMAXCAND)
+                    break;
 
-            candidates.push_back(*it);
+                candidates.normal.push_back(*it);
+            } else {
+                if (!m_enableDeepSearch || candidates.deep.size() >= NMAXDEEP)
+                    break;
 
-            // Remove the candidate and any near-duplicates based
-            // on frequency. This invalidates `it`, so we reset it
-            // to the index begin in the loop increment condition.
+                candidates.deep.push_back(*it);
+            }
+
+            // Remove the candidate and any near-duplicates based on
+            // frequency. This invalidates `it`, so the loop restarts at the
+            // strongest remaining entry.
 
             freqIndex.erase(freqIndex.lower_bound(it->freq - Mode::AZ),
                             freqIndex.upper_bound(it->freq + Mode::AZ));
@@ -2275,6 +2292,8 @@ template <typename Mode> class DecodeMode {
             std::getenv("JS8_DISABLE_FREQ_TRACKING") == nullptr;
         m_enableTimingTracking =
             std::getenv("JS8_DISABLE_TIMING_TRACKING") == nullptr;
+        m_enableDeepSearch =
+            std::getenv("JS8_DISABLE_DEEP_SEARCH") == nullptr;
 
         // Intialize the Nuttal window. In theory, we can do this as a
         // constexpr function at compile time, but doing so yield results
@@ -2493,19 +2512,26 @@ template <typename Mode> class DecodeMode {
             if (candidates.empty())
                 break;
 
-            std::sort(
-                candidates.begin(), candidates.end(),
-                [nfqso = data.params.nfqso](auto const &a, auto const &b) {
-                    auto const a_dist = std::abs(a.freq - nfqso);
-                    auto const b_dist = std::abs(b.freq - nfqso);
+            auto const sortCandidates =
+                [nfqso = data.params.nfqso](auto &candidateList) {
+                    std::sort(
+                        candidateList.begin(), candidateList.end(),
+                        [nfqso](auto const &a, auto const &b) {
+                            auto const a_dist = std::abs(a.freq - nfqso);
+                            auto const b_dist = std::abs(b.freq - nfqso);
 
-                    if (a_dist < 10.0f && b_dist >= 10.0f)
-                        return true;
-                    if (b_dist < 10.0f && a_dist >= 10.0f)
-                        return false;
+                            if (a_dist < 10.0f && b_dist >= 10.0f)
+                                return true;
+                            if (b_dist < 10.0f && a_dist >= 10.0f)
+                                return false;
 
-                    return std::tie(a_dist, a.freq) < std::tie(b_dist, b.freq);
-                });
+                            return std::tie(a_dist, a.freq) <
+                                   std::tie(b_dist, b.freq);
+                        });
+                };
+
+            sortCandidates(candidates.normal);
+            sortCandidates(candidates.deep);
 
             // Recompute the baseband signal; subtraction during the last
             // pass might have changed the landscape.
@@ -2515,41 +2541,64 @@ template <typename Mode> class DecodeMode {
             bool const subtract = ipass < 3;
             bool improved = false;
 
-            for (auto [f1, xdt, sync] : candidates) {
-                float xsnr = 0.0f;
-                int nharderrors = -1;
+            auto const tryCandidates = [&](auto const &candidateList) {
+                for (auto [f1, xdt, sync] : candidateList) {
+                    float xsnr = 0.0f;
+                    int nharderrors = -1;
 
-                if (auto decode = js8dec(data.params.syncStats, subtract, f1,
-                                         xdt, nharderrors, xsnr, emitEvent)) {
-                    // We don't need to be emitting duplicate events for
-                    // something that's effectively the same SNR as a previous
-                    // event.
+                    if (auto decode =
+                            js8dec(data.params.syncStats, subtract, f1, xdt,
+                                   nharderrors, xsnr, emitEvent)) {
+                        // We don't need to be emitting duplicate events for
+                        // something that's effectively the same SNR as a
+                        // previous event.
 
-                    auto const snr = static_cast<int>(std::round(xsnr));
+                        auto const snr = static_cast<int>(std::round(xsnr));
 
-                    // If this decode is new, or it's a duplicate with a better
-                    // SNR than what we had before, then our situation has
-                    // improved and we must announce that we've had some
-                    // success.
+                        // If this decode is new, or it's a duplicate with a
+                        // better SNR than what we had before, then our situation
+                        // has improved and we must announce that we've had some
+                        // success.
 
-                    if (auto [it, inserted] =
-                            decodes.try_emplace(std::move(*decode), snr);
-                        inserted || it->second < snr) {
-                        improved = true;
+                        if (auto [it, inserted] =
+                                decodes.try_emplace(std::move(*decode), snr);
+                            inserted || it->second < snr) {
+                            improved = true;
 
-                        // Update the SNR if this is an improved decode.
+                            if (!inserted)
+                                it->second = snr;
 
-                        if (!inserted)
-                            it->second = snr;
-
-                        // Emit decoded events on new or improved decodes.
-
-                        emitEvent(JS8::Event::Decoded{
-                            data.params.nutc, snr, xdt - Mode::ASTART, f1,
-                            it->first.data, it->first.type,
-                            1.0f - nharderrors / 60.0f, Mode::NSUBMODE});
+                            emitEvent(JS8::Event::Decoded{
+                                data.params.nutc, snr, xdt - Mode::ASTART, f1,
+                                it->first.data, it->first.type,
+                                1.0f - nharderrors / 60.0f,
+                                Mode::NSUBMODE});
+                        }
                     }
                 }
+            };
+
+            // Preserve the existing fast path: normal candidates always get
+            // first shot. The lower coarse-sync band is only sent through the
+            // expensive coherent/fine decoder when the normal set produced no
+            // improvement, or on the final subtraction pass so weak independent
+            // signals are not permanently starved by stronger traffic.
+
+            tryCandidates(candidates.normal);
+
+            bool const tryDeep =
+                m_enableDeepSearch && !candidates.deep.empty() &&
+                (!improved || ipass == 3);
+
+            if (tryDeep) {
+                if (decoder_js8().isDebugEnabled()) {
+                    qCDebug(decoder_js8)
+                        << "deep sync fallback"
+                        << "pass" << ipass << "candidates"
+                        << candidates.deep.size();
+                }
+
+                tryCandidates(candidates.deep);
             }
 
             // If nothing from this pass improved our situation, there's no
