@@ -140,3 +140,9 @@ class TimingTracker {
     int m_updates = 0;          ///< Number of updates applied
 };
 } // namespace js8
+
+// JS8.cpp includes JS8.h before this header. Limit the SIC wrapper macros to
+// that decoder translation unit so tracker-only users do not inherit them.
+#ifdef __JS8
+#include "sic_refinement.h"
+#endif
