@@ -7,21 +7,9 @@
 #include "JS8_UI/mainwindow.h"
 
 void UI_Constructor::processCommandActivity() {
-#if 0
-    if (!m_txFrameQueue.isEmpty()) {
-        return;
-    }
-#endif
-
     if (m_rxCommandQueue.isEmpty()) {
         return;
     }
-
-#if 0
-    bool processed = false;
-
-    int f = currentFreq();
-#endif
 
     auto now = DriftingDateTime::currentDateTimeUtc();
 
@@ -1127,18 +1115,6 @@ void UI_Constructor::processCommandActivity() {
             }
         }
 
-#if 0
-        // PROCESS ALERT
-        else if (d.cmd == "!" && !isAllCall) {
-
-            // create alert dialog
-            processAlertReplyForCommand(d, d.from, " ");
-
-            // make sure this is explicit
-            continue;
-        }
-#endif
-
         // well, if there's no reply, don't do anything...
         if (reply.isEmpty()) {
             continue;
@@ -1148,14 +1124,6 @@ void UI_Constructor::processCommandActivity() {
         if (!ui->actionModeAutoreply->isChecked() && isAllCall) {
             continue;
         }
-
-#if 0
-        // TODO: jsherer - HB issue here
-        // do not queue a reply if it's a HB and HB is not active
-        // if((!ui->hbMacroButton->isChecked() || m_hbInterval <= 0) && d.cmd.contains("HB")){
-        //     continue;
-        // }
-#endif
 
         // do not queue for reply if there's text in the window
         if (!ui->extFreeTextMsgEdit->toPlainText().isEmpty()) {

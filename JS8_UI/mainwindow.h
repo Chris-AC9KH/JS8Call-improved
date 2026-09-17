@@ -252,7 +252,6 @@ class UI_Constructor : public QMainWindow {
     bool hasExistingMessageBufferToMe(int *pOffset);
     bool hasExistingMessageBuffer(int submode, int offset, bool drift,
                                   int *pPrevOffset);
-    bool hasClosedExistingMessageBuffer(int offset);
     void logCallActivity(CallDetail d, bool spot = true);
     void logHeardGraph(QString from, QString to);
     QString lookupCallInCompoundCache(QString const &call);

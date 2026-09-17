@@ -66,11 +66,6 @@ void UI_Constructor::processRxActivity() {
                     qMin(d.utcTimestamp, lastCompound.utcTimestamp);
             }
 
-        } else if (hasClosedExistingMessageBuffer(d.offset)) {
-            // incremental typeahead should just be displayed...
-            // TODO: should the buffer be reopened?
-            shouldDisplay = true;
-
         } else if (d.isDirected && d.text.contains("<....>")) {
             // if this is a _partial_ directed message, skip until the complete
             // call comes through.
@@ -78,7 +73,7 @@ void UI_Constructor::processRxActivity() {
 
         } else if (d.isDirected &&
                    (d.text.contains(": HB ") ||
-                    d.text.contains(": @ALLCALL HB"))) { // TODO: HEARTBEAT
+                    d.text.contains(": @ALLCALL HB"))) {
             // if this is a heartbeat, process elsewhere...
             continue;
         }
@@ -153,34 +148,4 @@ void UI_Constructor::processRxActivity() {
     }
 
     m_activityStorage->endBatch();
-
-#if 0
-    // TODO: this works but should also print in the rx window.
-    foreach(auto offset, m_bandActivity.keys()){
-        if(seen.contains(offset)){
-            continue;
-        }
-
-        if(m_bandActivity[offset].isEmpty()){
-            continue;
-        }
-
-        auto last = m_bandActivity[offset].last();
-        if((last.bits & Varicode::JS8CallLast) == Varicode::JS8CallLast){
-            continue;
-        }
-
-        auto now = DriftingDateTime::currentDateTimeUtc();
-        if(last.utcTimestamp.secsTo(now) < m_TRperiod){
-            continue;
-        }
-
-        ActivityDetail d = {};
-        d.text = " . . . ";
-        d.utcTimestamp = now;
-        d.snr = -99;
-
-        m_bandActivity[offset].append(d);
-    }
-#endif
 }

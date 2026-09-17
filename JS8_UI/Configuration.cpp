@@ -3385,7 +3385,6 @@ void Configuration::impl::accept() {
 
     // Emit this even if the value has not changed as a way to reset the
     // scheduler.
-    // TODO this is smelly, revisit when we make the scheduler smarter
     Q_EMIT self_->auto_switch_bands_changed(auto_switch_bands_);
 
     auto const newUdpEnabled = ui_->udpEnable->isChecked();
