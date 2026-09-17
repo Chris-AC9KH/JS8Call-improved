@@ -70,21 +70,20 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
      * @param erasureThreshold When > 0.0, magnitudes below this threshold
      *        (after whitening) are erased (set to zero).
      * @param debug When true, emits extra debug logging about noise metrics.
-     * @param coherentToneScores Optional per-tone coherent scores in
-     *        `s1` orientation (`[tone][symbol]`), already rotated to the
-     *        predicted carrier phase. When absent (or when `coherentAlpha`
-     *        is not positive) the legacy noncoherent scores are used exactly.
-     * @param coherentAlpha Blend weight in [0,1] applied after per-symbol
-     *        moment matching of both score families. `0` recovers the
-     *        noncoherent path bit-identically.
+     * @param coherentBlend Optional physical coherent numerators in
+     *        `s1` orientation (`[tone][symbol]`), holding
+     *        `2*A*projection - A*A` per tone. The decoder scales them by its
+     *        own per-symbol `invSigma2` exactly like the noncoherent power
+     *        numerators, so no symbol is ever renormalized. When absent (or
+     *        when its alpha/amplitude is not usable) the legacy noncoherent
+     *        scores are used exactly.
      * @return A `Result` containing `llr0`, `llr1` and processing statistics.
      */
     static Result process(std::array<std::array<float, ND>, NROWS> const &s1,
                            std::array<int, ND> const &symbolWinners,
                            float erasureThreshold, bool debug,
-                           std::optional<std::array<std::array<float, ND>, NROWS>> const
-                               &coherentToneScores = std::nullopt,
-                           float coherentAlpha = 0.0f) {
+                           std::optional<CoherentBlend<NROWS, ND>> const
+                               &coherentBlend = std::nullopt) {
         auto const median =
             [](std::vector<float> &values) -> std::optional<float> {
             if (values.empty())
@@ -191,6 +190,31 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
 
         bool const disableWhitening =
             std::getenv("JS8_DISABLE_WHITENING") != nullptr;
+        // Coherent data is used only when the whole blended input validates:
+        // any non-finite numerator, amplitude, or weight falls back to the
+        // legacy path bit-identically (per-symbol partial blends could still
+        // shift the shared downstream LLR normalization).
+        bool coherentUsable = false;
+        float coherentAlpha = 0.0f;
+        if (coherentBlend && coherentBlend->alpha > 0.0f &&
+            std::isfinite(coherentBlend->alpha) &&
+            std::isfinite(coherentBlend->amplitude) &&
+            coherentBlend->amplitude > 0.0f) {
+            coherentUsable = true;
+            for (auto const &row : coherentBlend->numerators) {
+                for (float const value : row) {
+                    if (!std::isfinite(value)) {
+                        coherentUsable = false;
+                        break;
+                    }
+                }
+                if (!coherentUsable)
+                    break;
+            }
+            if (coherentUsable)
+                coherentAlpha =
+                    std::clamp(coherentBlend->alpha, 0.0f, 1.0f);
+        }
         bool const whiteningAvailable = toneNoise && symbolNoise &&
                                         !symbolNoise->empty() &&
                                         !disableWhitening;
@@ -229,16 +253,16 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
                 w[i] = 0.5f * power * invSigma2;
             }
 
-            // Optionally blend conservatively estimated coherent scores. Both
-            // families are mapped to zero mean/unit variance first so that
-            // amplitude and noise-scale differences cannot mix incompatible
-            // units; with alpha <= 0 (or invalid coherent data) `w` above is
-            // used untouched, preserving the legacy path exactly.
-            if (coherentToneScores && coherentAlpha > 0.0f &&
-                std::isfinite(coherentAlpha)) {
+            // Optionally blend conservatively estimated coherent numerators.
+            // Both families share this symbol's invSigma2, so reliability
+            // information in their magnitudes is preserved; no symbol is ever
+            // renormalized. With no usable blend input, `w` above is used
+            // untouched, preserving the legacy path exactly.
+            if (coherentUsable) {
                 std::array<float, NROWS> coherentScores;
                 for (int i = 0; i < NROWS; ++i)
-                    coherentScores[i] = (*coherentToneScores)[i][j];
+                    coherentScores[i] =
+                        (*coherentBlend).numerators[i][j] * invSigma2;
                 std::array<float, NROWS> blended{};
                 if (js8::blendToneScores(w, coherentScores, coherentAlpha,
                                          blended))

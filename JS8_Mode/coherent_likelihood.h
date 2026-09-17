@@ -7,20 +7,33 @@
  * FFT bin for the transmitted tone shares a common carrier phase (mod 2*pi).
  * This header fits that carrier phase trajectory from the known Costas pilot
  * symbols and converts complex data-symbol tone bins into coherent tone
- * scores.
+ * numerators.
+ *
+ * Phase frame: the decoder's FrequencyTracker and TimingTracker perturb the
+ * complex bins deterministically (see normalizeFrequencyTrackerPhase() and
+ * normalizeTimingPhase()). Every observation is divided back into one
+ * consistent nominal-boundary phase frame before fitting or scoring. The
+ * trackers themselves are never modified.
+ *
+ * Likelihood units: with complex noise variance
+ *     sigma^2 = toneNoise * symbolNoise
+ * (the WhiteningProcessor convention), the tone-dependent part of the
+ * coherent log likelihood for a known amplitude A is
+ *     (2*A*projection - A*A) * invSigma2,
+ * where projection = Re(bin * exp(-j*phase)). The decoder multiplies the
+ * numerators produced here by its own per-symbol invSigma2 and blends them
+ * with the legacy `0.5*power*invSigma2` scores. No symbol is ever normalized
+ * independently, so symbol reliability information is preserved.
  *
  * Design constraints (see decoder integration):
  * - Only Costas/pilot symbols feed the phase fit; data symbols never do.
  * - The fit is a low-order carrier model
  *       phase(t) = phi0 + 2*pi*delta_f*(t-tc) + pi*fdot*(t-tc)^2
- *   with a bounded residual-frequency/drift grid plus local refinement.
+ *   solved in closed form from adjacent pilot phase differences plus one
+ *   absolute-phase refinement pass: O(pilots), no frequency/drift grid.
  * - A measurable quality gate (pilot count, span, residual RMS) decides the
  *   blend weight. Poor, ambiguous, or non-finite fits fall back to the
  *   existing noncoherent likelihoods (alpha = 0).
- * - Coherent tone scores are plain rotated real parts in the same amplitude
- *   units as the decoder's magnitude matrix. Absolute amplitude and noise
- *   scales cancel in the decoder's per-symbol moment matching before
- *   blending, so no per-data-symbol amplitude is fitted here.
  */
 
 #pragma once
@@ -37,23 +50,33 @@
 
 namespace js8 {
 
-/// One known-tone pilot observation for the carrier-phase fit.
+// One known-tone pilot observation for the carrier-phase fit.
 struct CoherentPilot {
-    double timeSeconds = 0.0;          ///< Symbol-start time in seconds.
-    std::complex<double> value{};      ///< Complex tone-bin value.
-    int tone = 0;                      ///< Expected Costas tone index.
-    int symbolIndex = 0;               ///< Global symbol index (debug only).
+    double timeSeconds = 0.0;   ///< Nominal symbol-start time in seconds.
+    std::complex<double> value{}; ///< Raw complex tone bin.
+    int tone = 0;                 ///< Expected tone index.
+    int symbolIndex = 0;          ///< Global symbol index (adjacency + debug).
+    double timingShiftSamples = 0.0; ///< Effective extraction displacement.
+    double trackerHz = 0.0;          ///< FrequencyTracker estimate applied.
+};
+
+// One data symbol's raw complex tone bins plus phase metadata.
+struct CoherentDataSymbol {
+    double timeSeconds = 0.0;   ///< Nominal symbol-start time in seconds.
+    double timingShiftSamples = 0.0; ///< Effective extraction displacement.
+    double trackerHz = 0.0;          ///< FrequencyTracker estimate applied.
+    std::array<std::complex<float>, 8> bins{};
 };
 
 /// Result of the low-order carrier-phase fit over pilot symbols.
 struct CarrierPhaseFit {
     bool fitted = false;               ///< True when the model is trusted.
-    bool atBound = false;              ///< True when the optimum hit a bound.
     int pilotCount = 0;                ///< Valid pilot observations used.
     double refTimeSeconds = 0.0;       ///< Weighted mean pilot time.
     double phi0 = 0.0;                 ///< Carrier phase at refTime (radians).
     double deltaF = 0.0;               ///< Residual frequency offset (Hz).
     double fdot = 0.0;                 ///< Linear frequency drift (Hz/s).
+    double amplitude = std::numeric_limits<double>::quiet_NaN();
     double rmsRad = std::numeric_limits<double>::quiet_NaN();
     double coherence = 0.0;            ///< Weighted mean resultant length.
 };
@@ -69,17 +92,16 @@ struct CoherentLikelihoodTelemetry {
     double phi0 = std::numeric_limits<double>::quiet_NaN();
     double deltaF = std::numeric_limits<double>::quiet_NaN();
     double fdot = std::numeric_limits<double>::quiet_NaN();
+    double pilotAmplitude = std::numeric_limits<double>::quiet_NaN();
     std::optional<double> avgCoherentToneMargin;
     std::optional<double> avgNoncoherentToneMargin;
 };
 
 namespace detail {
-// Fit search bounds and quality thresholds. These are fixed, inspectable
-// starting points; benchmark them against captured signals before tuning.
+// Fit bounds and quality thresholds. These are fixed, inspectable starting
+// points; benchmark them against captured signals before tuning.
 constexpr double kMaxDeltaFHz = 1.0;
-constexpr double kDeltaFStepHz = 0.05;
 constexpr double kMaxDriftHzPerSec = 0.05;
-constexpr double kDriftStepHzPerSec = 0.0025;
 constexpr double kGoodPhaseRmsRad = 0.12; // ~7 deg: full coherent weight
 constexpr double kPoorPhaseRmsRad = 0.35; // ~20 deg: fall back entirely
 
@@ -90,37 +112,122 @@ inline double wrapPhase(double angle) {
         wrapped += twoPi;
     return wrapped - std::numbers::pi;
 }
+
+// Closed-form weighted least squares for y = a*x0 + b*x1. Returns false when
+// the system is singular, degenerate, or non-finite.
+inline bool solveWeightedLine2(const double *x0, const double *x1,
+                               const double *y, const double *w, std::size_t n,
+                               double &a, double &b) {
+    double s00 = 0.0, s01 = 0.0, s11 = 0.0, s0y = 0.0, s1y = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!std::isfinite(x0[i]) || !std::isfinite(x1[i]) ||
+            !std::isfinite(y[i]) || !(w[i] > 0.0) || !std::isfinite(w[i]))
+            return false;
+        s00 += w[i] * x0[i] * x0[i];
+        s01 += w[i] * x0[i] * x1[i];
+        s11 += w[i] * x1[i] * x1[i];
+        s0y += w[i] * x0[i] * y[i];
+        s1y += w[i] * x1[i] * y[i];
+    }
+    double const det = s00 * s11 - s01 * s01;
+    double const scale = std::max({1.0, std::abs(s00), std::abs(s01),
+                                   std::abs(s11)});
+    if (!std::isfinite(det) || !(std::abs(det) > 1.0e-12 * scale * scale))
+        return false;
+    a = (s11 * s0y - s01 * s1y) / det;
+    b = (s00 * s1y - s01 * s0y) / det;
+    return std::isfinite(a) && std::isfinite(b);
+}
 } // namespace detail
+
+/// Remove the deterministic bulk phase of one FrequencyTracker::apply() call.
+///
+/// apply() multiplies window sample n by `wstep^(n+1)` with
+/// `wstep = exp(j*2*pi*trackerHz/sampleRateHz)` and resets every symbol. For
+/// a bin-centered tone that contributes exactly
+/// `exp(j*dphi*(windowSamples+1)/2)` to the matched FFT bin, so dividing it
+/// out leaves the physical carrier trajectory plus only the residual error.
+inline std::complex<double>
+normalizeFrequencyTrackerPhase(std::complex<double> bin, double trackerHz,
+                               double sampleRateHz, int windowSamples) {
+    if (!std::isfinite(bin.real()) || !std::isfinite(bin.imag()) ||
+        !std::isfinite(trackerHz) || !(sampleRateHz > 0.0) ||
+        windowSamples <= 0)
+        return {std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN()};
+    double const dphi =
+        2.0 * std::numbers::pi * trackerHz / sampleRateHz;
+    return bin *
+           std::exp(std::complex<double>{
+               0.0, -dphi * (static_cast<double>(windowSamples) + 1.0) * 0.5});
+}
+
+/// Remove the known tone-dependent phase of a TimingTracker displacement.
+///
+/// A window starting `shiftSamples` late sees the tone component advanced by
+/// `2*pi*tone*shiftSamples/windowSamples`; dividing it out normalizes every
+/// symbol to the nominal-boundary phase frame used by the carrier model.
+inline std::complex<double>
+normalizeTimingPhase(std::complex<double> bin, int tone, double shiftSamples,
+                     int windowSamples) {
+    if (!std::isfinite(bin.real()) || !std::isfinite(bin.imag()) ||
+        !std::isfinite(shiftSamples) || windowSamples <= 0 || tone < 0 ||
+        tone >= windowSamples)
+        return {std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN()};
+    double const tonePhase = 2.0 * std::numbers::pi *
+                             static_cast<double>(tone) * shiftSamples /
+                             static_cast<double>(windowSamples);
+    return bin * std::exp(std::complex<double>{0.0, -tonePhase});
+}
 
 /// Fit the carrier-phase model to pilot observations.
 ///
-/// @param pilots Known-tone pilot observations (complex bin + time).
+/// Pilot bins are first normalized into the nominal phase frame (tracker and
+/// timing corrections above). Adjacent same-block phase differences then give
+/// a closed-form frequency/drift seed, followed by one absolute-phase
+/// refinement pass. Cost is O(pilots): a few dozen trig evaluations, no grid.
+///
+/// @param pilots Known-tone pilot observations (complex bin + metadata).
 /// @param minPilots Minimum valid pilots required before trusting the fit.
 /// @param minSpanSeconds Minimum time span across valid pilots.
+/// @param windowSamples Decoder symbol FFT length (Mode::NDOWNSPS).
+/// @param sampleRateHz Decoder downsampled rate (post-downsample Hz).
 /// @return Fit result; `fitted` is false on any degenerate/ambiguous input.
 inline CarrierPhaseFit
 fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
-                double minSpanSeconds) {
+                double minSpanSeconds, int windowSamples,
+                double sampleRateHz) {
     CarrierPhaseFit fit;
 
-    struct ValidPilot {
+    struct NormalizedPilot {
         double timeSeconds;
         std::complex<double> value;
+        int symbolIndex;
     };
-    std::vector<ValidPilot> valid;
+    std::vector<NormalizedPilot> valid;
     valid.reserve(pilots.size());
     for (auto const &pilot : pilots) {
-        if (!std::isfinite(pilot.timeSeconds) ||
-            !std::isfinite(pilot.value.real()) ||
-            !std::isfinite(pilot.value.imag()))
+        if (!std::isfinite(pilot.timeSeconds))
             continue;
-        if (!(std::abs(pilot.value) > 0.0))
+        std::complex<double> value = normalizeFrequencyTrackerPhase(
+            pilot.value, pilot.trackerHz, sampleRateHz, windowSamples);
+        value = normalizeTimingPhase(value, pilot.tone,
+                                     pilot.timingShiftSamples, windowSamples);
+        if (!std::isfinite(value.real()) || !std::isfinite(value.imag()))
             continue;
-        valid.push_back({pilot.timeSeconds, pilot.value});
+        if (!(std::abs(value) > 0.0))
+            continue;
+        valid.push_back(
+            {pilot.timeSeconds, value, pilot.symbolIndex});
     }
     fit.pilotCount = static_cast<int>(valid.size());
     if (static_cast<int>(valid.size()) < minPilots || minPilots <= 0)
         return fit;
+    std::sort(valid.begin(), valid.end(),
+              [](auto const &a, auto const &b) {
+                  return a.timeSeconds < b.timeSeconds;
+              });
 
     double minTime = valid.front().timeSeconds;
     double maxTime = valid.front().timeSeconds;
@@ -160,115 +267,137 @@ fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
     double const refTime = weightedTime / weightSum;
     fit.refTimeSeconds = refTime;
 
-    auto const coherenceAt = [&](double deltaF, double fdot) {
-        std::complex<double> sum{};
+    // Seed from adjacent-symbol phase differences: absolute channel phase
+    // cancels, and with tracker-corrected residuals these stay inside
+    // (-pi, pi) for plausible inputs. Only truly adjacent symbols are used
+    // so no unwrapping across Costas-block gaps is ever attempted here.
+    std::vector<double> diffReg0, diffReg1, diffPhase, diffWeight;
+    for (std::size_t i = 0; i + 1 < valid.size(); ++i) {
+        if (valid[i + 1].symbolIndex != valid[i].symbolIndex + 1)
+            continue;
+        double const t0 = valid[i].timeSeconds - refTime;
+        double const t1 = valid[i + 1].timeSeconds - refTime;
+        diffReg0.push_back(t1 - t0);
+        diffReg1.push_back(t1 * t1 - t0 * t0);
+        diffPhase.push_back(detail::wrapPhase(
+            std::arg(valid[i + 1].value * std::conj(valid[i].value))));
+        diffWeight.push_back(std::min(weights[i], weights[i + 1]));
+    }
+    if (diffPhase.empty())
+        return fit;
+    // Phase model per difference: dPhase = 2*pi*deltaF*dReg0 + pi*fdot*dReg1.
+    std::vector<double> scaledReg0 = diffReg0, scaledReg1 = diffReg1;
+    for (auto &v : scaledReg0)
+        v *= 2.0 * std::numbers::pi;
+    for (auto &v : scaledReg1)
+        v *= std::numbers::pi;
+    double deltaF = 0.0, fdot = 0.0;
+    if (!detail::solveWeightedLine2(scaledReg0.data(), scaledReg1.data(),
+                                    diffPhase.data(), diffWeight.data(),
+                                    diffPhase.size(), deltaF, fdot))
+        return fit;
+
+    // One absolute-phase refinement pass: derotate by the seed, unwrap
+    // sequentially (residuals are small by construction), then solve the full
+    // quadratic model including the absolute phase.
+    double phi0 = 0.0;
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<double> unwrapped;
+        unwrapped.reserve(valid.size());
+        double previous = 0.0;
+        bool first = true;
         for (std::size_t i = 0; i < valid.size(); ++i) {
             double const tau = valid[i].timeSeconds - refTime;
-            double const model =
-                2.0 * std::numbers::pi * deltaF * tau +
-                std::numbers::pi * fdot * tau * tau;
-            sum += weights[i] * valid[i].value *
-                   std::exp(std::complex<double>{0.0, -model});
+            double const rotated = std::arg(
+                valid[i].value *
+                std::exp(std::complex<double>{
+                    0.0, -(2.0 * std::numbers::pi * deltaF * tau +
+                           std::numbers::pi * fdot * tau * tau)}));
+            if (!std::isfinite(rotated))
+                return fit;
+            double value = rotated;
+            if (!first)
+                value = previous + detail::wrapPhase(rotated - previous);
+            unwrapped.push_back(value);
+            previous = value;
+            first = false;
         }
-        return sum;
-    };
-
-    // Bounded coarse grid over residual frequency/drift, then two rounds of
-    // local refinement. This is a small per-candidate fit over 21 pilots, not
-    // a per-data-symbol search.
-    double bestDeltaF = 0.0;
-    double bestDrift = 0.0;
-    double bestScore = -1.0;
-    double stepF = detail::kDeltaFStepHz;
-    double stepD = detail::kDriftStepHzPerSec;
-    for (double deltaF = -detail::kMaxDeltaFHz;
-         deltaF <= detail::kMaxDeltaFHz + 0.5 * stepF; deltaF += stepF) {
-        for (double fdot = -detail::kMaxDriftHzPerSec;
-             fdot <= detail::kMaxDriftHzPerSec + 0.5 * stepD;
-             fdot += stepD) {
-            double const score = std::abs(coherenceAt(deltaF, fdot));
-            if (std::isfinite(score) && score > bestScore) {
-                bestScore = score;
-                bestDeltaF = deltaF;
-                bestDrift = fdot;
+        std::vector<double> reg0(valid.size(), 0.0);
+        std::vector<double> reg1(valid.size(), 0.0);
+        for (std::size_t i = 0; i < valid.size(); ++i) {
+            double const tau = valid[i].timeSeconds - refTime;
+            reg0[i] = 2.0 * std::numbers::pi * tau;
+            reg1[i] = std::numbers::pi * tau * tau;
+        }
+        // Absolute model: phase = phi0 + reg0*deltaF + reg1*fdot. Estimate
+        // phi0 as the weighted circular mean residual, then the
+        // frequency/drift corrections by weighted least squares.
+        double correction = 0.0;
+        {
+            std::complex<double> mean{};
+            for (std::size_t i = 0; i < valid.size(); ++i) {
+                double const predicted = phi0 + reg0[i] * deltaF +
+                                         reg1[i] * fdot;
+                mean += weights[i] *
+                        std::exp(std::complex<double>{
+                            0.0, detail::wrapPhase(unwrapped[i] - predicted)});
             }
+            if (!(std::abs(mean) > 0.0) || !std::isfinite(mean.real()) ||
+                !std::isfinite(mean.imag()))
+                return fit;
+            correction = std::arg(mean);
+            phi0 += correction;
         }
-    }
-    // Among near-tied optima (e.g. exact frequency aliases in noiseless data),
-    // prefer the smallest residual: the fine-sync and tracking stages ahead of
-    // this fit have already removed coarse frequency error.
-    for (double deltaF = -detail::kMaxDeltaFHz;
-         deltaF <= detail::kMaxDeltaFHz + 0.5 * stepF; deltaF += stepF) {
-        for (double fdot = -detail::kMaxDriftHzPerSec;
-             fdot <= detail::kMaxDriftHzPerSec + 0.5 * stepD;
-             fdot += stepD) {
-            double const score = std::abs(coherenceAt(deltaF, fdot));
-            if (!std::isfinite(score) ||
-                score < bestScore * (1.0 - 1.0e-9))
-                continue;
-            double const currentMag =
-                std::abs(bestDeltaF) + std::abs(bestDrift);
-            double const candidateMag = std::abs(deltaF) + std::abs(fdot);
-            if (candidateMag < currentMag - 1.0e-12) {
-                bestDeltaF = deltaF;
-                bestDrift = fdot;
-            }
-        }
-    }
-    for (int pass = 0; pass < 2; ++pass) {
-        stepF *= 0.25;
-        stepD *= 0.25;
-        for (int di = -2; di <= 2; ++di) {
-            for (int dj = -2; dj <= 2; ++dj) {
-                double const deltaF = bestDeltaF + di * stepF;
-                double const fdot = bestDrift + dj * stepD;
-                if (std::abs(deltaF) > detail::kMaxDeltaFHz ||
-                    std::abs(fdot) > detail::kMaxDriftHzPerSec)
-                    continue;
-                double const score = std::abs(coherenceAt(deltaF, fdot));
-                if (std::isfinite(score) && score > bestScore) {
-                    bestScore = score;
-                    bestDeltaF = deltaF;
-                    bestDrift = fdot;
-                }
-            }
-        }
+        std::vector<double> residuals(valid.size());
+        for (std::size_t i = 0; i < valid.size(); ++i)
+            residuals[i] = detail::wrapPhase(
+                unwrapped[i] - (phi0 + reg0[i] * deltaF + reg1[i] * fdot));
+        double stepF = 0.0, stepD = 0.0;
+        if (!detail::solveWeightedLine2(reg0.data(), reg1.data(),
+                                        residuals.data(), weights.data(),
+                                        valid.size(), stepF, stepD))
+            return fit;
+        deltaF += stepF;
+        fdot += stepD;
+        if (std::abs(stepF) < 1.0e-12 && std::abs(stepD) < 1.0e-12 &&
+            std::abs(correction) < 1.0e-12)
+            break;
     }
 
-    constexpr double boundEps = 1.0e-12;
-    if (std::abs(bestDeltaF) >= detail::kMaxDeltaFHz - boundEps ||
-        std::abs(bestDrift) >= detail::kMaxDriftHzPerSec - boundEps) {
-        fit.atBound = true;
-        return fit;
-    }
-
-    std::complex<double> const sum = coherenceAt(bestDeltaF, bestDrift);
-    double magnitudeSum = 0.0;
-    for (std::size_t i = 0; i < valid.size(); ++i)
-        magnitudeSum += weights[i] * std::abs(valid[i].value);
-    if (!(magnitudeSum > 0.0) || !std::isfinite(magnitudeSum) ||
-        !std::isfinite(sum.real()) || !std::isfinite(sum.imag()))
+    if (std::abs(deltaF) >= detail::kMaxDeltaFHz ||
+        std::abs(fdot) >= detail::kMaxDriftHzPerSec)
         return fit;
 
     double residualSum = 0.0;
+    std::complex<double> coherentSum{};
+    double magnitudeSum = 0.0;
     for (std::size_t i = 0; i < valid.size(); ++i) {
         double const tau = valid[i].timeSeconds - refTime;
-        double const predicted = std::arg(sum) +
-                                 2.0 * std::numbers::pi * bestDeltaF * tau +
-                                 std::numbers::pi * bestDrift * tau * tau;
+        double const predicted = phi0 +
+                                 2.0 * std::numbers::pi * deltaF * tau +
+                                 std::numbers::pi * fdot * tau * tau;
         double const residual =
             detail::wrapPhase(std::arg(valid[i].value) - predicted);
         if (!std::isfinite(residual))
             return fit;
         residualSum += weights[i] * residual * residual;
+        coherentSum += weights[i] * valid[i].value *
+                       std::exp(std::complex<double>{0.0, -predicted});
+        magnitudeSum += weights[i] * std::abs(valid[i].value);
     }
+    if (!(magnitudeSum > 0.0) || !std::isfinite(magnitudeSum))
+        return fit;
 
     fit.fitted = true;
-    fit.phi0 = std::arg(sum);
-    fit.deltaF = bestDeltaF;
-    fit.fdot = bestDrift;
+    fit.phi0 = phi0;
+    fit.deltaF = deltaF;
+    fit.fdot = fdot;
+    // Robust pilot amplitude: median normalized-bin magnitude, in the same
+    // scaled units as the decoder magnitude matrix. Shared by all tones, so
+    // no per-symbol amplitude is ever fitted.
+    fit.amplitude = medianMagnitude;
     fit.rmsRad = std::sqrt(residualSum / weightSum);
-    fit.coherence = std::abs(sum) / magnitudeSum;
+    fit.coherence = std::abs(coherentSum) / magnitudeSum;
     return fit;
 }
 
@@ -292,48 +421,21 @@ inline double coherentBlendWeight(CarrierPhaseFit const &fit) {
 }
 
 /// Predicted carrier phase at an absolute symbol-start time.
-inline double predictCarrierPhase(CarrierPhaseFit const &fit, double timeSeconds) {
+inline double predictCarrierPhase(CarrierPhaseFit const &fit,
+                                  double timeSeconds) {
     double const tau = timeSeconds - fit.refTimeSeconds;
     return fit.phi0 + 2.0 * std::numbers::pi * fit.deltaF * tau +
            std::numbers::pi * fit.fdot * tau * tau;
 }
 
-/// Normalize one symbol's tone scores to zero mean and unit variance.
+/// Blend physical noncoherent and coherent tone scores for one symbol.
 ///
-/// Returns false (leaving `out` untouched) when the scores are degenerate or
-/// non-finite. Amplitude and noise scales cancel in this mapping, which keeps
-/// coherent and noncoherent families comparable before blending.
-template <std::size_t Tones>
-bool normalizeToneScores(std::array<float, Tones> const &scores,
-                         std::array<float, Tones> &out) {
-    double mean = 0.0;
-    for (float const value : scores) {
-        if (!std::isfinite(value))
-            return false;
-        mean += value;
-    }
-    mean /= static_cast<double>(scores.size());
-
-    double variance = 0.0;
-    for (float const value : scores) {
-        double const centered = value - mean;
-        variance += centered * centered;
-    }
-    variance /= static_cast<double>(scores.size());
-    if (!std::isfinite(variance) ||
-        !(variance > 1.0e-12 * (1.0 + mean * mean)))
-        return false;
-
-    double const stddev = std::sqrt(variance);
-    for (std::size_t i = 0; i < scores.size(); ++i)
-        out[i] = static_cast<float>((scores[i] - mean) / stddev);
-    return true;
-}
-
-/// Blend noncoherent and coherent tone scores for one symbol.
-///
-/// With `alpha <= 0` (or any invalid input) this copies `noncoherent` exactly,
-/// so the fallback path is bit-identical to the legacy likelihood path.
+/// `noncoherent[i]` must hold the decoder's `0.5*power*invSigma2` values and
+/// `coherent[i]` the `(2*A*projection - A*A)*invSigma2` values sharing the
+/// same `invSigma2`. With `alpha <= 0` (or any invalid input) this copies
+/// `noncoherent` exactly, so the fallback path is bit-identical to the
+/// legacy likelihood path. Symbols are never renormalized: reliability
+/// information in the score magnitudes is preserved.
 template <std::size_t Tones>
 bool blendToneScores(std::array<float, Tones> const &noncoherent,
                      std::array<float, Tones> const &coherent, float alpha,
@@ -343,16 +445,14 @@ bool blendToneScores(std::array<float, Tones> const &noncoherent,
         return false;
     }
     float const clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
-    std::array<float, Tones> normNoncoherent{};
-    std::array<float, Tones> normCoherent{};
-    if (!normalizeToneScores(noncoherent, normNoncoherent) ||
-        !normalizeToneScores(coherent, normCoherent)) {
-        out = noncoherent;
-        return false;
+    for (std::size_t i = 0; i < Tones; ++i) {
+        if (!std::isfinite(noncoherent[i]) || !std::isfinite(coherent[i])) {
+            out = noncoherent;
+            return false;
+        }
+        out[i] = (1.0f - clampedAlpha) * noncoherent[i] +
+                 clampedAlpha * coherent[i];
     }
-    for (std::size_t i = 0; i < Tones; ++i)
-        out[i] = clampedAlpha * normCoherent[i] +
-                 (1.0f - clampedAlpha) * normNoncoherent[i];
     return true;
 }
 
@@ -376,34 +476,33 @@ std::optional<double> topTwoMargin(std::array<float, Tones> const &scores) {
     return static_cast<double>(best - second);
 }
 
-/// Coherent tone scores for one candidate frame, plus benchmark telemetry.
+/// Per-tone coherent numerators for one candidate frame, plus telemetry.
 ///
-/// `dataBins` holds the scaled complex tone bins (same amplitude units as the
-/// decoder's magnitude matrix) and `dataTimes` holds the corresponding
-/// symbol-start times. Raw coherent scores are the rotated real parts:
-///
-///     score = real(bin * exp(-j * predictedPhase))
-///
-/// Moment matching in the decoder maps these onto the noncoherent score
-/// family before blending, so no per-symbol amplitude is fitted here.
+/// For each data symbol and candidate tone, the raw complex bin is first
+/// normalized with that symbol's tracker metadata, then rotated by the
+/// predicted carrier phase:
+///     projection = Re(normalizedBin * exp(-j*predictedPhase))
+///     numerator  = 2*A*projection - A*A
+/// The decoder multiplies these numerators by its own per-symbol invSigma2,
+/// exactly as it does the noncoherent `0.5*power` numerators.
 struct CoherentToneResult {
     double alpha = 0.0;
-    std::vector<std::array<float, 8>> coherentScores;
+    double amplitude = 0.0;
+    std::vector<std::array<float, 8>> coherentNumerators;
     std::vector<double> predictedPhase;
     CoherentLikelihoodTelemetry telemetry;
 };
 
 inline CoherentToneResult computeCoherentToneScores(
     std::vector<CoherentPilot> const &pilots,
-    std::vector<std::array<std::complex<float>, 8>> const &dataBins,
-    std::vector<double> const &dataTimes, int minPilots,
-    double minSpanSeconds) {
+    std::vector<CoherentDataSymbol> const &data, int minPilots,
+    double minSpanSeconds, int windowSamples, double sampleRateHz) {
     CoherentToneResult result;
-    if (dataBins.size() != dataTimes.size())
+    if (windowSamples <= 0 || !(sampleRateHz > 0.0))
         return result;
 
-    CarrierPhaseFit const fit =
-        fitCarrierPhase(pilots, minPilots, minSpanSeconds);
+    CarrierPhaseFit const fit = fitCarrierPhase(
+        pilots, minPilots, minSpanSeconds, windowSamples, sampleRateHz);
     result.telemetry.fitted = fit.fitted;
     result.telemetry.pilotCount = fit.pilotCount;
     result.telemetry.phaseRmsRad = fit.rmsRad;
@@ -411,36 +510,51 @@ inline CoherentToneResult computeCoherentToneScores(
     result.telemetry.phi0 = fit.phi0;
     result.telemetry.deltaF = fit.deltaF;
     result.telemetry.fdot = fit.fdot;
+    result.telemetry.pilotAmplitude = fit.amplitude;
     result.telemetry.alpha = coherentBlendWeight(fit);
     if (!fit.fitted || !(result.telemetry.alpha > 0.0))
         return result;
+    if (!std::isfinite(fit.amplitude) || !(fit.amplitude > 0.0))
+        return CoherentToneResult{};
 
-    result.coherentScores.reserve(dataBins.size());
-    result.predictedPhase.reserve(dataTimes.size());
+    result.amplitude = fit.amplitude;
+    result.coherentNumerators.reserve(data.size());
+    result.predictedPhase.reserve(data.size());
     double coherentMarginSum = 0.0;
     double noncoherentMarginSum = 0.0;
     std::size_t marginCount = 0;
-    for (std::size_t symbol = 0; symbol < dataBins.size(); ++symbol) {
-        if (!std::isfinite(dataTimes[symbol]))
+    for (auto const &symbol : data) {
+        if (!std::isfinite(symbol.timeSeconds))
             return CoherentToneResult{};
-        double const predicted = predictCarrierPhase(fit, dataTimes[symbol]);
+        double const predicted =
+            predictCarrierPhase(fit, symbol.timeSeconds);
         if (!std::isfinite(predicted))
             return CoherentToneResult{};
         result.predictedPhase.push_back(predicted);
-        std::complex<double> const rotation =
-            std::exp(std::complex<double>{0.0, -predicted});
-        std::array<float, 8> coherent{};
+        std::array<float, 8> numerators{};
         std::array<float, 8> magnitudes{};
         for (std::size_t tone = 0; tone < 8; ++tone) {
-            std::complex<double> const bin{dataBins[symbol][tone].real(),
-                                           dataBins[symbol][tone].imag()};
+            std::complex<double> bin{symbol.bins[tone].real(),
+                                     symbol.bins[tone].imag()};
+            bin = normalizeFrequencyTrackerPhase(bin, symbol.trackerHz,
+                                                 sampleRateHz, windowSamples);
+            bin = normalizeTimingPhase(bin, static_cast<int>(tone),
+                                       symbol.timingShiftSamples,
+                                       windowSamples);
             if (!std::isfinite(bin.real()) || !std::isfinite(bin.imag()))
                 return CoherentToneResult{};
-            coherent[tone] = static_cast<float>((bin * rotation).real());
+            std::complex<double> const rotated =
+                bin * std::exp(std::complex<double>{0.0, -predicted});
+            double const projection = rotated.real();
+            if (!std::isfinite(projection))
+                return CoherentToneResult{};
+            numerators[tone] = static_cast<float>(
+                2.0 * fit.amplitude * projection -
+                fit.amplitude * fit.amplitude);
             magnitudes[tone] = static_cast<float>(std::abs(bin));
         }
-        result.coherentScores.push_back(coherent);
-        auto const coherentMargin = topTwoMargin(coherent);
+        result.coherentNumerators.push_back(numerators);
+        auto const coherentMargin = topTwoMargin(numerators);
         auto const noncoherentMargin = topTwoMargin(magnitudes);
         if (coherentMargin && noncoherentMargin) {
             coherentMarginSum += *coherentMargin;
@@ -459,5 +573,13 @@ inline CoherentToneResult computeCoherentToneScores(
     }
     return result;
 }
+
+/// Blended coherent input for one candidate frame, in WhiteningProcessor's
+/// `s1` orientation (`[tone][symbol]`).
+template <int ToneRows, int DataSymbols> struct CoherentBlend {
+    std::array<std::array<float, DataSymbols>, ToneRows> numerators{};
+    double amplitude = 0.0;
+    float alpha = 0.0f;
+};
 
 } // namespace js8

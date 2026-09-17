@@ -1271,7 +1271,12 @@ template <typename Mode> class DecodeMode {
         // coherent likelihood path can use phases. `s2` is still populated
         // exactly as before; `abs(complexS2)` reproduces it up to fp rounding.
         std::array<std::array<std::complex<float>, NN>, NROWS> complexS2;
-        std::array<int, NN> symbolStarts;
+        // Per-symbol phase metadata for tracker normalization: nominal
+        // (pre-tracker-shift) start, effective extraction displacement, and
+        // the FrequencyTracker estimate applied to that symbol.
+        std::array<int, NN> symbolBaseStarts;
+        std::array<int, NN> symbolTimingShifts;
+        std::array<float, NN> symbolTrackerHz;
 
         js8::FrequencyTracker freqTracker;
         if (m_enableFreqTracking) {
@@ -1410,7 +1415,12 @@ template <typename Mode> class DecodeMode {
             if (m_enableCoherentData) {
                 for (int i = 0; i < NROWS; ++i)
                     complexS2[i][k] = csymb[i] / 1000.0f;
-                symbolStarts[k] = i1;
+                symbolBaseStarts[k] = i1Base;
+                symbolTimingShifts[k] = i1 - i1Base;
+                symbolTrackerHz[k] = freqTracker.enabled()
+                                         ? static_cast<float>(
+                                               freqTracker.currentHz())
+                                         : 0.0f;
             }
 
             if (freqTracker.enabled() || timingTracker.enabled()) {
@@ -1550,17 +1560,17 @@ template <typename Mode> class DecodeMode {
             symbolWinners[j] = winner;
         }
 
-        std::optional<std::array<std::array<float, ND>, NROWS>>
-            coherentToneScores;
-        float coherentAlpha = 0.0f;
+        std::optional<js8::CoherentBlend<NROWS, ND>> coherentBlend;
         js8::CoherentLikelihoodTelemetry coherentTelemetry;
 
         if (m_enableCoherentData) {
             static_assert(NROWS == 8, "coherent path expects 8 FSK tones");
+            double const downsampledRate =
+                static_cast<double>(FS2);
 
-            // Known Costas pilot observations (complex bin at the expected
-            // tone, with the exact symbol-start time). Coverage of at least
-            // four pilots per Costas block is required before trusting a fit.
+            // Known Costas pilot observations with full phase metadata.
+            // Coverage of at least four pilots per Costas block is required
+            // before trusting a fit.
             std::vector<js8::CoherentPilot> pilots;
             pilots.reserve(NS);
             std::array<int, 3> blockValid{};
@@ -1574,14 +1584,19 @@ template <typename Mode> class DecodeMode {
                     if (!std::isfinite(magnitude) || !(magnitude > 0.0f))
                         continue;
                     double const startSeconds =
-                        static_cast<double>(symbolStarts[symbolIndex]) /
-                        static_cast<double>(FS2);
+                        static_cast<double>(
+                            symbolBaseStarts[symbolIndex]) /
+                        downsampledRate;
                     if (!std::isfinite(startSeconds))
                         continue;
                     pilots.push_back(js8::CoherentPilot{
                         startSeconds,
                         std::complex<double>{bin.real(), bin.imag()},
-                        expectedTone, symbolIndex});
+                        expectedTone, symbolIndex,
+                        static_cast<double>(
+                            symbolTimingShifts[symbolIndex]),
+                        static_cast<double>(
+                            symbolTrackerHz[symbolIndex])});
                     ++blockValid[static_cast<std::size_t>(block)];
                 }
             }
@@ -1592,59 +1607,66 @@ template <typename Mode> class DecodeMode {
             if (pilotCoverage) {
                 // Data symbols use the same s1 layout as the magnitude path:
                 // globals 7..35 then 43..71.
-                std::vector<std::array<std::complex<float>, NROWS>> dataBins;
-                dataBins.reserve(ND);
-                std::vector<double> dataTimes;
-                dataTimes.reserve(ND);
+                std::vector<js8::CoherentDataSymbol> dataSymbols;
+                dataSymbols.reserve(ND);
                 bool dataValid = true;
                 for (int j = 0; j < ND && dataValid; ++j) {
                     int const symbolIndex = j < 29 ? j + 7 : j + 14;
                     double const startSeconds =
-                        static_cast<double>(symbolStarts[symbolIndex]) /
-                        static_cast<double>(FS2);
+                        static_cast<double>(
+                            symbolBaseStarts[symbolIndex]) /
+                        downsampledRate;
                     if (!std::isfinite(startSeconds)) {
                         dataValid = false;
                         break;
                     }
-                    std::array<std::complex<float>, NROWS> bins{};
+                    js8::CoherentDataSymbol dataSymbol;
+                    dataSymbol.timeSeconds = startSeconds;
+                    dataSymbol.timingShiftSamples = static_cast<double>(
+                        symbolTimingShifts[symbolIndex]);
+                    dataSymbol.trackerHz = static_cast<double>(
+                        symbolTrackerHz[symbolIndex]);
                     for (int tone = 0; tone < NROWS; ++tone) {
-                        bins[static_cast<std::size_t>(tone)] =
+                        dataSymbol.bins[static_cast<std::size_t>(tone)] =
                             complexS2[tone][symbolIndex];
-                        if (!std::isfinite(bins[static_cast<std::size_t>(tone)]
-                                               .real()) ||
-                            !std::isfinite(bins[static_cast<std::size_t>(tone)]
-                                               .imag())) {
+                        if (!std::isfinite(
+                                dataSymbol.bins[static_cast<std::size_t>(tone)]
+                                    .real()) ||
+                            !std::isfinite(
+                                dataSymbol.bins[static_cast<std::size_t>(tone)]
+                                    .imag())) {
                             dataValid = false;
                             break;
                         }
                     }
-                    dataBins.push_back(bins);
-                    dataTimes.push_back(startSeconds);
+                    dataSymbols.push_back(dataSymbol);
                 }
 
                 if (dataValid) {
                     double const frameSpanSeconds =
-                        (static_cast<double>(symbolStarts[NN - 1]) -
-                         static_cast<double>(symbolStarts[0])) /
-                        static_cast<double>(FS2);
+                        (static_cast<double>(symbolBaseStarts[NN - 1]) -
+                         static_cast<double>(symbolBaseStarts[0])) /
+                        downsampledRate;
                     js8::CoherentToneResult const coherent =
                         js8::computeCoherentToneScores(
-                            pilots, dataBins, dataTimes, 12,
-                            0.5 * frameSpanSeconds);
+                            pilots, dataSymbols, 12,
+                            0.5 * frameSpanSeconds, Mode::NDOWNSPS,
+                            static_cast<double>(FS2));
                     coherentTelemetry = coherent.telemetry;
-                    if (!coherent.coherentScores.empty() &&
+                    if (!coherent.coherentNumerators.empty() &&
                         coherent.alpha > 0.0) {
-                        coherentAlpha =
+                        js8::CoherentBlend<NROWS, ND> blend;
+                        blend.amplitude = coherent.amplitude;
+                        blend.alpha =
                             static_cast<float>(coherent.alpha);
-                        std::array<std::array<float, ND>, NROWS> scores{};
                         for (int tone = 0; tone < NROWS; ++tone)
                             for (int j = 0; j < ND; ++j)
-                                scores[static_cast<std::size_t>(tone)]
-                                      [static_cast<std::size_t>(j)] =
-                                          coherent.coherentScores
-                                              [static_cast<std::size_t>(j)]
-                                              [static_cast<std::size_t>(tone)];
-                        coherentToneScores = scores;
+                                blend.numerators[static_cast<std::size_t>(tone)]
+                                                [static_cast<std::size_t>(j)] =
+                                    coherent.coherentNumerators
+                                        [static_cast<std::size_t>(j)]
+                                        [static_cast<std::size_t>(tone)];
+                        coherentBlend = blend;
                     }
                 }
             }
@@ -1652,8 +1674,7 @@ template <typename Mode> class DecodeMode {
 
         auto const whitening = js8::WhiteningProcessor<NROWS, ND, N>::process(
             s1, symbolWinners, m_llrErasureThreshold,
-            decoder_js8().isDebugEnabled(), coherentToneScores,
-            coherentAlpha);
+            decoder_js8().isDebugEnabled(), coherentBlend);
 
         if (decoder_js8().isDebugEnabled()) {
             qCDebug(decoder_js8)
@@ -1666,6 +1687,7 @@ template <typename Mode> class DecodeMode {
                 << "fittedPhaseRad" << coherentTelemetry.phi0
                 << "fittedResidualHz" << coherentTelemetry.deltaF
                 << "fittedDriftHzPerSec" << coherentTelemetry.fdot
+                << "pilotAmplitude" << coherentTelemetry.pilotAmplitude
                 << "avgCoherentToneMargin"
                 << coherentTelemetry.avgCoherentToneMargin.value_or(-1.0)
                 << "avgNoncoherentToneMargin"
