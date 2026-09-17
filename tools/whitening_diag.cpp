@@ -325,6 +325,8 @@ namespace
             {"driftPlus", 0.0, 0.01, 0.0},
             {"driftMinus", 0.0, -0.01, 0.0},
             {"timing", 0.0, 0.0, 0.02 * ModeA::NSPS},
+            {"freqTimingPlus", 0.3, 0.0, 0.02 * ModeA::NSPS},
+            {"freqTimingMinus", -0.3, 0.0, 0.02 * ModeA::NSPS},
         };
         std::printf("%-11s %-9s %-8s %-8s %-12s %-10s %-12s %s\n", "scenario",
                     "coherent", "decoded", "exact", "falsePos", "wallMs",

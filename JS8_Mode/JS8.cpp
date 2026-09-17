@@ -1583,6 +1583,8 @@ template <typename Mode> class DecodeMode {
                     double const magnitude = std::abs(bin);
                     if (!std::isfinite(magnitude) || !(magnitude > 0.0f))
                         continue;
+                    // The helper adds timingShiftSamples/sampleRateHz itself to
+                    // obtain the effective extraction timestamp.
                     double const startSeconds =
                         static_cast<double>(
                             symbolBaseStarts[symbolIndex]) /
@@ -1612,6 +1614,9 @@ template <typename Mode> class DecodeMode {
                 bool dataValid = true;
                 for (int j = 0; j < ND && dataValid; ++j) {
                     int const symbolIndex = j < 29 ? j + 7 : j + 14;
+                    // As for pilots, retain the nominal start here; the helper
+                    // adds timingShiftSamples/sampleRateHz itself to obtain
+                    // the effective extraction time.
                     double const startSeconds =
                         static_cast<double>(
                             symbolBaseStarts[symbolIndex]) /
@@ -1621,7 +1626,7 @@ template <typename Mode> class DecodeMode {
                         break;
                     }
                     js8::CoherentDataSymbol dataSymbol;
-                    dataSymbol.timeSeconds = startSeconds;
+                    dataSymbol.baseTimeSeconds = startSeconds;
                     dataSymbol.timingShiftSamples = static_cast<double>(
                         symbolTimingShifts[symbolIndex]);
                     dataSymbol.trackerHz = static_cast<double>(
@@ -1644,29 +1649,34 @@ template <typename Mode> class DecodeMode {
 
                 if (dataValid) {
                     double const frameSpanSeconds =
-                        (static_cast<double>(symbolBaseStarts[NN - 1]) -
-                         static_cast<double>(symbolBaseStarts[0])) /
+                        (static_cast<double>(symbolBaseStarts[NN - 1]) +
+                         static_cast<double>(symbolTimingShifts[NN - 1]) -
+                         static_cast<double>(symbolBaseStarts[0]) -
+                         static_cast<double>(symbolTimingShifts[0])) /
                         downsampledRate;
-                    js8::CoherentToneResult const coherent =
-                        js8::computeCoherentToneScores(
-                            pilots, dataSymbols, 12,
-                            0.5 * frameSpanSeconds, Mode::NDOWNSPS,
-                            static_cast<double>(FS2));
-                    coherentTelemetry = coherent.telemetry;
-                    if (!coherent.coherentNumerators.empty() &&
-                        coherent.alpha > 0.0) {
-                        js8::CoherentBlend<NROWS, ND> blend;
-                        blend.amplitude = coherent.amplitude;
-                        blend.alpha =
-                            static_cast<float>(coherent.alpha);
-                        for (int tone = 0; tone < NROWS; ++tone)
-                            for (int j = 0; j < ND; ++j)
-                                blend.numerators[static_cast<std::size_t>(tone)]
-                                                [static_cast<std::size_t>(j)] =
-                                    coherent.coherentNumerators
-                                        [static_cast<std::size_t>(j)]
-                                        [static_cast<std::size_t>(tone)];
-                        coherentBlend = blend;
+                    if (std::isfinite(frameSpanSeconds) &&
+                        frameSpanSeconds > 0.0) {
+                        js8::CoherentToneResult const coherent =
+                            js8::computeCoherentToneScores(
+                                pilots, dataSymbols, 12,
+                                0.5 * frameSpanSeconds, Mode::NDOWNSPS,
+                                static_cast<double>(FS2));
+                        coherentTelemetry = coherent.telemetry;
+                        if (!coherent.coherentNumerators.empty() &&
+                            coherent.alpha > 0.0) {
+                            js8::CoherentBlend<NROWS, ND> blend;
+                            blend.amplitude = coherent.amplitude;
+                            blend.alpha =
+                                static_cast<float>(coherent.alpha);
+                            for (int tone = 0; tone < NROWS; ++tone)
+                                for (int j = 0; j < ND; ++j)
+                                    blend.numerators[static_cast<std::size_t>(tone)]
+                                                    [static_cast<std::size_t>(j)] =
+                                        coherent.coherentNumerators
+                                            [static_cast<std::size_t>(j)]
+                                            [static_cast<std::size_t>(tone)];
+                            coherentBlend = blend;
+                        }
                     }
                 }
             }

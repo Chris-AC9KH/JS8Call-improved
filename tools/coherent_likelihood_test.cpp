@@ -142,7 +142,7 @@ void runPerfectSignal() {
         int const trueTone = symbol % 8;
         double const t = (7 + symbol) * 0.16;
         js8::CoherentDataSymbol entry;
-        entry.timeSeconds = t;
+        entry.baseTimeSeconds = t;
         entry.bins =
             makeDataBins(trueTone, js8::predictCarrierPhase(fit, t), 2.0,
                          0.05, rng);
@@ -169,6 +169,42 @@ void runPerfectSignal() {
             dominates = false;
     }
     check(dominates, "correct tone dominates all data symbols");
+}
+
+void runCoherentNumeratorScale() {
+    std::printf("[coherent numerator scale]\n");
+    std::mt19937 rng(111);
+    constexpr double amplitude = 2.3;
+    constexpr double phase = 0.4;
+    constexpr int trueTone = 5;
+    auto pilots = makePilots(0.0, 0.0, 0.0, 0.16, amplitude, 0.0, rng);
+
+    js8::CoherentDataSymbol symbol;
+    symbol.baseTimeSeconds = 0.0;
+    for (int tone = 0; tone < 8; ++tone) {
+        std::complex<double> value{};
+        if (tone == trueTone)
+            value = amplitude * std::polar(1.0, phase);
+        symbol.bins[static_cast<std::size_t>(tone)] =
+            std::complex<float>{static_cast<float>(value.real()),
+                                static_cast<float>(value.imag())};
+    }
+
+    auto const result = js8::computeCoherentToneScores(
+        pilots, std::vector<js8::CoherentDataSymbol>{symbol}, 12, 5.0, 32,
+        375.0);
+    check(!result.coherentNumerators.empty(), "scaled numerator produced");
+    double const expectedProjection =
+        amplitude * std::cos(phase - result.predictedPhase[0]);
+    double const expectedTrue =
+        amplitude * expectedProjection - 0.5 * amplitude * amplitude;
+    double const expectedOther = -0.5 * amplitude * amplitude;
+    check(std::abs(result.coherentNumerators[0][trueTone] - expectedTrue) <
+              1.0e-4,
+          "numerator uses A*projection - A*A/2");
+    check(std::abs(result.coherentNumerators[0][(trueTone + 1) % 8] -
+                   expectedOther) < 1.0e-4,
+          "non-signal numerator uses -A*A/2");
 }
 
 void runFrequencyOffset() {
@@ -258,7 +294,7 @@ void runNonFiniteInputs() {
     // A few corrupt pilots are filtered; the fit must stay finite.
     auto pilots = makePilots(0.0, 0.0, 0.0, 0.16, 2.0, 0.0, rng);
     pilots[3].value = {std::numeric_limits<double>::quiet_NaN(), 0.0};
-    pilots[9].timeSeconds = std::numeric_limits<double>::infinity();
+    pilots[9].baseTimeSeconds = std::numeric_limits<double>::infinity();
     auto filtered = js8::fitCarrierPhase(pilots, 12, 5.0, 32, 375.0);
     check(std::isfinite(js8::coherentBlendWeight(filtered)),
           "blend weight stays finite with corrupt pilots");
@@ -273,8 +309,8 @@ void runNonFiniteInputs() {
     check(std::isfinite(alpha), "blend weight stays finite");
 
     std::vector<js8::CoherentDataSymbol> data(2);
-    data[0].timeSeconds = 0.0;
-    data[1].timeSeconds = 0.16;
+    data[0].baseTimeSeconds = 0.0;
+    data[1].baseTimeSeconds = 0.16;
     data[0].bins[0] = {std::numeric_limits<float>::quiet_NaN(), 0.0f};
     auto result = js8::computeCoherentToneScores(
         pilots, data, 12, 5.0, 32, 375.0);
@@ -327,7 +363,7 @@ void runReliabilityPreserved() {
         winners[static_cast<std::size_t>(j)] = winner;
     }
     // Coherent numerators consistent with amplitude 1 and aligned phases:
-    // numerator = 2*A*projection - A*A with projection = bin magnitude.
+    // numerator = A*projection - 0.5*A*A with projection = bin magnitude.
     js8::CoherentBlend<8, 58> blend;
     blend.amplitude = 1.0;
     blend.alpha = 1.0f;
@@ -336,7 +372,7 @@ void runReliabilityPreserved() {
             float const projection = s1[tone][j];
             blend.numerators[static_cast<std::size_t>(tone)]
                             [static_cast<std::size_t>(j)] =
-                                2.0f * 1.0f * projection - 1.0f;
+                                1.0f * projection - 0.5f;
         }
     auto const result =
         js8::WhiteningProcessor<8, 58, 174>::process(s1, winners, 0.0f, false,
@@ -447,8 +483,109 @@ void runFrequencyTrackerCompensation() {
     }
 }
 
+// Combined timing displacement and residual carrier frequency. Each pilot
+// window is a pure tone-plus-carrier waveform (continuous FSK phase model,
+// no cross-symbol leakage), processed exactly like a decoder symbol: real
+// FrequencyTracker derotation, forward DFT, then tracker and timing phase
+// normalization. The fit must recover the physical carrier with the
+// *effective* (displaced) extraction timestamp; predicting at the nominal
+// symbol-start time must measurably fail instead.
+void runTimingShiftWithResidualFrequency() {
+    std::printf("[timing shift plus residual frequency]\n");
+    constexpr int window = 32;
+    constexpr double rateHz = 375.0;
+    constexpr int pilotCount = 21;
+    constexpr int tones[pilotCount] = {0, 3, 7, 1, 4, 2, 6,
+                                       0, 3, 7, 1, 4, 2, 6,
+                                       0, 3, 7, 1, 4, 2, 6};
+    constexpr int baseStart = 1000;
+    constexpr int shiftMax = 4;
+    constexpr double cases[][3] = {{0.8, 2.0, 0.6}, {-0.8, -2.0, -0.9}};
+
+    for (auto const &testCase : cases) {
+        double const residualHz = testCase[0];
+        double const trackerHz = testCase[1];
+        double const startPhase = testCase[2];
+        std::vector<int> shifts(static_cast<std::size_t>(pilotCount));
+        for (int symbol = 0; symbol < pilotCount; ++symbol)
+            shifts[static_cast<std::size_t>(symbol)] = static_cast<int>(
+                std::lround(shiftMax * symbol / (pilotCount - 1)));
+
+        std::vector<js8::CoherentPilot> pilots;
+        pilots.reserve(static_cast<std::size_t>(pilotCount));
+        for (int symbol = 0; symbol < pilotCount; ++symbol) {
+            int const shift = shifts[static_cast<std::size_t>(symbol)];
+            double const nominalStart =
+                static_cast<double>(baseStart + symbol * window);
+            std::vector<std::complex<float>> windowSamples(
+                static_cast<std::size_t>(window));
+            for (int n = 0; n < window; ++n) {
+                double const t = nominalStart + shift + n;
+                double const phase =
+                    startPhase +
+                    2.0 * std::numbers::pi * residualHz * t / rateHz +
+                    2.0 * std::numbers::pi * tones[symbol] * (shift + n) /
+                        window;
+                windowSamples[static_cast<std::size_t>(n)] = std::polar(
+                    1.0f, static_cast<float>(phase));
+            }
+            // Decoder-style processing: real tracker derotation, then DFT.
+            js8::FrequencyTracker tracker;
+            tracker.reset(trackerHz, rateHz);
+            tracker.apply(windowSamples.data(), window);
+            std::complex<double> const bin = dftBin(windowSamples, tones[symbol]);
+            pilots.push_back(
+                {nominalStart / rateHz, bin, tones[symbol], symbol,
+                 static_cast<double>(shift), trackerHz});
+        }
+
+        auto const fitEff = js8::fitCarrierPhase(pilots, 12, 1.0, window,
+                                                 rateHz);
+        check(fitEff.fitted, "timing-shifted fit accepted");
+        check(std::abs(fitEff.deltaF - residualHz) < 0.03,
+              "timing-shifted frequency magnitude recovered");
+        check((fitEff.deltaF > 0.0) == (residualHz > 0.0),
+              "timing-shifted frequency sign recovered");
+        check(std::isfinite(fitEff.rmsRad),
+              "timing-shifted fit RMS finite");
+        check(fitEff.rmsRad < 0.02, "timing-shifted fit RMS small");
+        // Recovered phase equals the physical carrier at the effective time.
+        // A length-window residual ramp contributes the DFT barycenter term
+        // (2*pi*fd*(window-1)/(2*rate)), a known constant of the DFT phase
+        // reference, so it is included in the physical expectation.
+        double const ref = fitEff.refTimeSeconds;
+        double const expected =
+            std::fmod(startPhase + 2.0 * std::numbers::pi * residualHz *
+                       (ref + static_cast<double>(window - 1) / (2.0 * rateHz)),
+                      2.0 * std::numbers::pi);
+        check(phaseError(fitEff.phi0, expected) < 0.02,
+              "effective-time carrier phase matches physical phase");
+
+        // Nominal-only timestamps (the pre-fix behavior): the extraction
+        // displacement is dropped from the model time but the tone term is
+        // still removed. The residual-frequency estimate must be biased.
+        std::vector<js8::CoherentPilot> nominal = pilots;
+        for (int symbol = 0; symbol < pilotCount; ++symbol) {
+            double const shift =
+                static_cast<double>(shifts[static_cast<std::size_t>(symbol)]);
+            nominal[static_cast<std::size_t>(symbol)].baseTimeSeconds =
+                (static_cast<double>(baseStart + symbol * window) - shift) /
+                rateHz;
+        }
+        auto const fitNom = js8::fitCarrierPhase(nominal, 12, 1.0, window,
+                                                 rateHz);
+        check(std::abs(fitNom.deltaF - residualHz) > 0.002,
+              "nominal timestamp must bias residual frequency");
+        check(fitNom.rmsRad > 3.0 * fitEff.rmsRad,
+              "nominal timestamp must inflate fit RMS");
+        check(js8::coherentBlendWeight(fitEff) > 0.0,
+              "timing-shifted fit earns coherent weight");
+    }
+}
+}
+
 // Timing displacement compensation across representative tones.
-void runTimingTrackerCompensation() {
+void runTimingOffsetIndependence() {
     std::printf("[TimingTracker phase compensation]\n");
     constexpr int window = 32;
     for (int tone : {0, 3, 7}) {
@@ -476,12 +613,11 @@ void runTimingTrackerCompensation() {
         }
         check(independent, "recovered phase independent of timing offset");
     }
-}
-
 } // namespace
 
 int main() {
     runPerfectSignal();
+    runCoherentNumeratorScale();
     runFrequencyOffset();
     runFrequencyDrift();
     runRandomPhase();
@@ -492,7 +628,8 @@ int main() {
     runReliabilityPreserved();
     runAlphaContinuity();
     runFrequencyTrackerCompensation();
-    runTimingTrackerCompensation();
+    runTimingShiftWithResidualFrequency();
+    runTimingOffsetIndependence();
 
     std::printf("\n%s (%d failure%s)\n", failures == 0 ? "ALL TESTS PASSED"
                                                        : "TESTS FAILED",

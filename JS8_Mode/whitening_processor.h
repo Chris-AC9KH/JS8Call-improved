@@ -72,7 +72,7 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
      * @param debug When true, emits extra debug logging about noise metrics.
      * @param coherentBlend Optional physical coherent numerators in
      *        `s1` orientation (`[tone][symbol]`), holding
-     *        `2*A*projection - A*A` per tone. The decoder scales them by its
+     *        `A*projection - 0.5*A*A` per tone. The decoder scales them by its
      *        own per-symbol `invSigma2` exactly like the noncoherent power
      *        numerators, so no symbol is ever renormalized. When absent (or
      *        when its alpha/amplitude is not usable) the legacy noncoherent

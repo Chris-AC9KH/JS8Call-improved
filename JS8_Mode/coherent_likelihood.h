@@ -19,7 +19,7 @@
  *     sigma^2 = toneNoise * symbolNoise
  * (the WhiteningProcessor convention), the tone-dependent part of the
  * coherent log likelihood for a known amplitude A is
- *     (2*A*projection - A*A) * invSigma2,
+ *     (A*projection - 0.5*A*A) * invSigma2,
  * where projection = Re(bin * exp(-j*phase)). The decoder multiplies the
  * numerators produced here by its own per-symbol invSigma2 and blends them
  * with the legacy `0.5*power*invSigma2` scores. No symbol is ever normalized
@@ -52,7 +52,7 @@ namespace js8 {
 
 // One known-tone pilot observation for the carrier-phase fit.
 struct CoherentPilot {
-    double timeSeconds = 0.0;   ///< Nominal symbol-start time in seconds.
+    double baseTimeSeconds = 0.0; ///< Nominal symbol-start time in seconds.
     std::complex<double> value{}; ///< Raw complex tone bin.
     int tone = 0;                 ///< Expected tone index.
     int symbolIndex = 0;          ///< Global symbol index (adjacency + debug).
@@ -62,7 +62,7 @@ struct CoherentPilot {
 
 // One data symbol's raw complex tone bins plus phase metadata.
 struct CoherentDataSymbol {
-    double timeSeconds = 0.0;   ///< Nominal symbol-start time in seconds.
+    double baseTimeSeconds = 0.0; ///< Nominal symbol-start time in seconds.
     double timingShiftSamples = 0.0; ///< Effective extraction displacement.
     double trackerHz = 0.0;          ///< FrequencyTracker estimate applied.
     std::array<std::complex<float>, 8> bins{};
@@ -140,6 +140,21 @@ inline bool solveWeightedLine2(const double *x0, const double *x1,
 }
 } // namespace detail
 
+/// Effective carrier-model timestamp for an extracted symbol.
+///
+/// The carrier trajectory must be evaluated where the FFT window actually
+/// starts, not at the nominal symbol boundary. Timing-dependent FSK phase is
+/// handled separately by normalizeTimingPhase(), so adding the displacement
+/// here does not double-count it.
+inline double effectiveSymbolTimeSeconds(double baseTimeSeconds,
+                                         double shiftSamples,
+                                         double sampleRateHz) {
+    if (!std::isfinite(baseTimeSeconds) || !std::isfinite(shiftSamples) ||
+        !(sampleRateHz > 0.0))
+        return std::numeric_limits<double>::quiet_NaN();
+    return baseTimeSeconds + shiftSamples / sampleRateHz;
+}
+
 /// Remove the deterministic bulk phase of one FrequencyTracker::apply() call.
 ///
 /// apply() multiplies window sample n by `wstep^(n+1)` with
@@ -208,7 +223,9 @@ fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
     std::vector<NormalizedPilot> valid;
     valid.reserve(pilots.size());
     for (auto const &pilot : pilots) {
-        if (!std::isfinite(pilot.timeSeconds))
+        double const effectiveTime = effectiveSymbolTimeSeconds(
+            pilot.baseTimeSeconds, pilot.timingShiftSamples, sampleRateHz);
+        if (!std::isfinite(effectiveTime))
             continue;
         std::complex<double> value = normalizeFrequencyTrackerPhase(
             pilot.value, pilot.trackerHz, sampleRateHz, windowSamples);
@@ -219,10 +236,12 @@ fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
         if (!(std::abs(value) > 0.0))
             continue;
         valid.push_back(
-            {pilot.timeSeconds, value, pilot.symbolIndex});
+            {effectiveTime, value, pilot.symbolIndex});
     }
     fit.pilotCount = static_cast<int>(valid.size());
     if (static_cast<int>(valid.size()) < minPilots || minPilots <= 0)
+        return fit;
+    if (!std::isfinite(minSpanSeconds) || !(minSpanSeconds > 0.0))
         return fit;
     std::sort(valid.begin(), valid.end(),
               [](auto const &a, auto const &b) {
@@ -301,6 +320,7 @@ fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
     // sequentially (residuals are small by construction), then solve the full
     // quadratic model including the absolute phase.
     double phi0 = 0.0;
+    double phi0Previous = 0.0;
     for (int pass = 0; pass < 2; ++pass) {
         std::vector<double> unwrapped;
         unwrapped.reserve(valid.size());
@@ -329,29 +349,30 @@ fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
             reg0[i] = 2.0 * std::numbers::pi * tau;
             reg1[i] = std::numbers::pi * tau * tau;
         }
-        // Absolute model: phase = phi0 + reg0*deltaF + reg1*fdot. Estimate
-        // phi0 as the weighted circular mean residual, then the
-        // frequency/drift corrections by weighted least squares.
+        // Absolute-phase estimate: with the seed derotated out, `unwrapped`
+        // already holds the carrier phase at the reference time plus only the
+        // residual frequency/drift error. The weighted circular mean of the
+        // derotated phases therefore estimates phi0 directly; re-applying the
+        // seed regressors here would double-subtract the trend and wrap the
+        // residuals around the circle for any non-trivial frequency error.
         double correction = 0.0;
         {
             std::complex<double> mean{};
-            for (std::size_t i = 0; i < valid.size(); ++i) {
-                double const predicted = phi0 + reg0[i] * deltaF +
-                                         reg1[i] * fdot;
+            for (std::size_t i = 0; i < valid.size(); ++i)
                 mean += weights[i] *
-                        std::exp(std::complex<double>{
-                            0.0, detail::wrapPhase(unwrapped[i] - predicted)});
-            }
+                        std::exp(std::complex<double>{0.0, unwrapped[i]});
             if (!(std::abs(mean) > 0.0) || !std::isfinite(mean.real()) ||
                 !std::isfinite(mean.imag()))
                 return fit;
             correction = std::arg(mean);
-            phi0 += correction;
+            phi0 = correction;
         }
+        // Residual trend after removing phi0: Linear/drift corrections are
+        // fitted against the small wrapped residuals around phi0.
         std::vector<double> residuals(valid.size());
         for (std::size_t i = 0; i < valid.size(); ++i)
-            residuals[i] = detail::wrapPhase(
-                unwrapped[i] - (phi0 + reg0[i] * deltaF + reg1[i] * fdot));
+            residuals[i] =
+                detail::wrapPhase(unwrapped[i] - phi0);
         double stepF = 0.0, stepD = 0.0;
         if (!detail::solveWeightedLine2(reg0.data(), reg1.data(),
                                         residuals.data(), weights.data(),
@@ -360,8 +381,9 @@ fitCarrierPhase(std::vector<CoherentPilot> const &pilots, int minPilots,
         deltaF += stepF;
         fdot += stepD;
         if (std::abs(stepF) < 1.0e-12 && std::abs(stepD) < 1.0e-12 &&
-            std::abs(correction) < 1.0e-12)
+            std::abs(correction - phi0Previous) < 1.0e-12)
             break;
+        phi0Previous = correction;
     }
 
     if (std::abs(deltaF) >= detail::kMaxDeltaFHz ||
@@ -431,7 +453,7 @@ inline double predictCarrierPhase(CarrierPhaseFit const &fit,
 /// Blend physical noncoherent and coherent tone scores for one symbol.
 ///
 /// `noncoherent[i]` must hold the decoder's `0.5*power*invSigma2` values and
-/// `coherent[i]` the `(2*A*projection - A*A)*invSigma2` values sharing the
+/// `coherent[i]` the `(A*projection - 0.5*A*A)*invSigma2` values sharing the
 /// same `invSigma2`. With `alpha <= 0` (or any invalid input) this copies
 /// `noncoherent` exactly, so the fallback path is bit-identical to the
 /// legacy likelihood path. Symbols are never renormalized: reliability
@@ -482,7 +504,7 @@ std::optional<double> topTwoMargin(std::array<float, Tones> const &scores) {
 /// normalized with that symbol's tracker metadata, then rotated by the
 /// predicted carrier phase:
 ///     projection = Re(normalizedBin * exp(-j*predictedPhase))
-///     numerator  = 2*A*projection - A*A
+///     numerator  = A*projection - 0.5*A*A
 /// The decoder multiplies these numerators by its own per-symbol invSigma2,
 /// exactly as it does the noncoherent `0.5*power` numerators.
 struct CoherentToneResult {
@@ -524,10 +546,12 @@ inline CoherentToneResult computeCoherentToneScores(
     double noncoherentMarginSum = 0.0;
     std::size_t marginCount = 0;
     for (auto const &symbol : data) {
-        if (!std::isfinite(symbol.timeSeconds))
+        double const effectiveTime = effectiveSymbolTimeSeconds(
+            symbol.baseTimeSeconds, symbol.timingShiftSamples, sampleRateHz);
+        if (!std::isfinite(effectiveTime))
             return CoherentToneResult{};
         double const predicted =
-            predictCarrierPhase(fit, symbol.timeSeconds);
+            predictCarrierPhase(fit, effectiveTime);
         if (!std::isfinite(predicted))
             return CoherentToneResult{};
         result.predictedPhase.push_back(predicted);
@@ -549,8 +573,8 @@ inline CoherentToneResult computeCoherentToneScores(
             if (!std::isfinite(projection))
                 return CoherentToneResult{};
             numerators[tone] = static_cast<float>(
-                2.0 * fit.amplitude * projection -
-                fit.amplitude * fit.amplitude);
+                fit.amplitude * projection -
+                0.5 * fit.amplitude * fit.amplitude);
             magnitudes[tone] = static_cast<float>(std::abs(bin));
         }
         result.coherentNumerators.push_back(numerators);
