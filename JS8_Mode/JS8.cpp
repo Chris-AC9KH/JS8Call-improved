@@ -2000,7 +2000,7 @@ template <typename Mode> class DecodeMode {
     //     multiplied by
     //       a Nuttall window to reduce spectral leakage.
     //     - An FFT is performed on each windowed segment to obtain the
-    //     frequency-domain
+    //       frequency-domain
     //       representation.
     //     - The power spectrum of each segment is computed, and the average
     //     spectrum is
@@ -2048,7 +2048,7 @@ template <typename Mode> class DecodeMode {
     //
     // 7.  Output:
     //
-    //	   - Returns a vector of the most promising signal candidates, sorted by
+    //\t   - Returns a vector of the most promising signal candidates, sorted by
     // their
     //       synchronization power. It's expected that these will be re-sorted
     //       by the caller into a desirable order, but synchronization power
@@ -2335,33 +2335,87 @@ template <typename Mode> class DecodeMode {
             (nstart < 0) ? static_cast<std::size_t>(-nstart) : 0;
         std::size_t const dd_start =
             (nstart > 0) ? static_cast<std::size_t>(nstart) : 0;
+
+        if (cref_start >= cref.size() || dd_start >= dd.size())
+            return;
+
         auto const size =
             std::min(cref.size() - cref_start, dd.size() - dd_start);
 
-        // Populate complex filter with the conjugate of the reference signal.
+        if (size == 0)
+            return;
 
+        // Populate the complex channel estimate with the decoded reference.
         for (std::size_t i = 0; i < size; ++i) {
             cfilt[i] = dd[dd_start + i] * std::conj(cref[cref_start + i]);
         }
 
-        // Zero-fill the remainder, if any.
-
+        // Zero-fill the remainder, then low-pass the complex channel estimate.
         std::fill(cfilt.begin() + size, cfilt.end(), ZERO);
-
-        // FFT to the frequency domain.
-
         fftwf_execute(plans[Plan::CF]);
-
-        // Apply the filter in the frequency domain.
-
         std::transform(cfilt.begin(), cfilt.end(), filter.begin(),
                        cfilt.begin(), std::multiplies<>());
-
-        // Inverse FFT to return to the time domain.
-
         fftwf_execute(plans[Plan::CB]);
 
-        // Subtract the reconstructed signal.
+        // Measure the decoded signal before and after the proposed subtraction.
+        // Use per-symbol matched correlations instead of one coherent frame sum
+        // so modest phase drift or fading cannot hide a poor cancellation.
+        std::array<std::complex<double>, NN> beforeCorrelation{};
+        std::array<std::complex<double>, NN> afterCorrelation{};
+
+        for (std::size_t i = 0; i < size; ++i) {
+            std::size_t const crefIndex = cref_start + i;
+            std::size_t const symbolIndex = crefIndex / Mode::NSPS;
+            auto const reference = std::complex<double>{cref[crefIndex].real(),
+                                                        cref[crefIndex].imag()};
+            auto const referenceConjugate = std::conj(reference);
+            float const measured = dd[dd_start + i];
+            float const reconstructed =
+                2.0f * std::real(cfilt[i] * cref[crefIndex]);
+            float const residual = measured - reconstructed;
+
+            beforeCorrelation[symbolIndex] +=
+                static_cast<double>(measured) * referenceConjugate;
+            afterCorrelation[symbolIndex] +=
+                static_cast<double>(residual) * referenceConjugate;
+        }
+
+        auto const correlationPower = [](auto const &correlation) {
+            return std::accumulate(
+                correlation.begin(), correlation.end(), 0.0,
+                [](double const total, auto const &value) {
+                    return total + std::norm(value);
+                });
+        };
+
+        double const beforeMetric = correlationPower(beforeCorrelation);
+        double const afterMetric = correlationPower(afterCorrelation);
+        bool const metricsValid = std::isfinite(beforeMetric) &&
+                                  std::isfinite(afterMetric) &&
+                                  beforeMetric >
+                                      std::numeric_limits<double>::epsilon();
+        bool const accepted = metricsValid && afterMetric < beforeMetric;
+        double const suppressionDb =
+            metricsValid
+                ? 10.0 * std::log10(
+                             beforeMetric /
+                             std::max(afterMetric,
+                                      std::numeric_limits<double>::min()))
+                : 0.0;
+
+        if (decoder_js8().isDebugEnabled()) {
+            qCDebug(decoder_js8)
+                << "SIC subtraction"
+                << "beforeMetric" << beforeMetric
+                << "afterMetric" << afterMetric
+                << "suppressionDb" << suppressionDb
+                << "accepted" << accepted;
+        }
+
+        // Do not damage the receive buffer when the reconstructed signal does
+        // not actually reduce the decoded waveform's matched-correlation power.
+        if (!accepted)
+            return;
 
         for (std::size_t i = 0; i < size; ++i) {
             dd[dd_start + i] -=
@@ -2442,36 +2496,24 @@ template <typename Mode> class DecodeMode {
             }
         }
 
-        // Compute a Hann-like window directly into the real part of the
-        // first NFILT + 1 elements in the filter, accumulating the sum
-        // as we go.
+        // Construct the subtraction LPF as a zero-phase circular-convolution
+        // kernel. Positive-time taps live at the beginning of the FFT buffer
+        // and negative-time taps wrap to its end, matching the original
+        // Fortran layout.
 
         sum = 0.0f;
+        for (int j = -NFILT / 2; j <= NFILT / 2; ++j)
+            sum += std::pow(std::cos(pi * j / NFILT), 2);
 
+        filter.fill(ZERO);
         for (int j = -NFILT / 2; j <= NFILT / 2; ++j) {
-            int const index = j + NFILT / 2;
-            float const value = std::pow(std::cos(pi * j / NFILT), 2);
-
-            filter[index].real(value);
-            sum += value;
+            float const value =
+                std::pow(std::cos(pi * j / NFILT), 2) / sum;
+            std::size_t const index =
+                j >= 0 ? static_cast<std::size_t>(j)
+                       : filter.size() - static_cast<std::size_t>(-j);
+            filter[index] = std::complex<float>(value, 0.0f);
         }
-
-        // Now that we've got the sum, create actual complex numbers using
-        // the normalized real values that we just populated and zero the
-        // rest of the filter.
-
-        std::fill(std::transform(filter.begin(), filter.begin() + NFILT + 1,
-                                 filter.begin(),
-                                 [sum](auto const value) {
-                                     return std::complex<float>(
-                                         value.real() / sum, 0.0f);
-                                 }),
-                  filter.end(), ZERO);
-
-        // Shift to position the window.
-
-        std::rotate(filter.begin(), filter.begin() + NFILT / 2,
-                    filter.begin() + NFILT + 1);
 
         // Transform the filter into the frequency domain.
 
@@ -2758,9 +2800,9 @@ class Worker : public QObject {
         // Since a strategy can be neither moved nor copied, we must
         // instantiate them in-place. Note that with the advent of the
         // multi-decoder, mode identifiers became a bitset instead of
-        // integral values. The order defined here is the order that
-        // the decode loop will run in; we're matching the Fortran
-        // version here in terms of faster modes first.
+        // integral values. The order defined here is the order that the
+        // decode loop will run in; we're matching the Fortran version here
+        // in terms of faster modes first.
 
         template <typename ModeType>
         DecodeEntry makeDecodeEntry(int shift, int &kpos, int &ksz) {
@@ -2831,7 +2873,7 @@ class Worker : public QObject {
     explicit Worker(QSemaphore *semaphore, QObject *parent = nullptr)
         : QObject(parent), m_semaphore(semaphore) {}
 
-    // Used to inform the worker that it's time to go; the next
+    // Used to inform the worker that it's time to quit; the next
     // time it wakes up due to the semaphore being released, it
     // will exit the runloop.
 
@@ -2926,7 +2968,7 @@ namespace JS8 {
 
 void encode(int const type, Costas::Array const &costas,
             const char *const message, int *const tones) {
-    // Our initial goal here is an 87-bit message, for which a std::bitset
+    // Our initial goal here is an 87-bit JS8 message, for which a std::bitset
     // would be the obvious choice, but we've got to compute a checksum of
     // the first 75 bits; thus, an array instead.
     //
