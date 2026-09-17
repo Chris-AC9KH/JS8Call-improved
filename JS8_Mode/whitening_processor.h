@@ -47,8 +47,8 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
         bool whiteningApplied;             ///< True when whitening was applied
         bool erasureApplied;               ///< True when erasure was applied
         std::size_t erasures;              ///< Number of LLR elements erased
-        double avgAbsPre;                  ///< Aggregate |LLR| before whitening
-        double avgAbsPost;                 ///< Aggregate |LLR| after whitening
+        double avgAbsPre;                   ///< Aggregate |LLR| before whitening
+        double avgAbsPost;                  ///< Aggregate |LLR| after whitening
     };
 
     /**
@@ -207,14 +207,14 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
                                         1e-12f)
                                                      : 1.0f;
 
-            // Noise-normalized tone power (per-tone SNR). Under an AWN model
-            // with per-symbol noise power sigma2 = toneNoise * symbolNoise, the
-            // matched-filter power ps^2/sigma2 is the log-likelihood of tone i.
+            // Noise-normalized tone power. Under an AWGN model with per-symbol
+            // noise power sigma^2 = toneNoise * symbolNoise, ps^2/(2*sigma^2)
+            // is used as the Gaussian soft-likelihood metric for tone i.
             std::array<float, NROWS> w;
 
             for (int i = 0; i < NROWS; ++i) {
                 float const power = ps[i] * ps[i];
-                w[i] = power * invSigma2;
+                w[i] = 0.5f * power * invSigma2;
             }
 
             // Stable log-sum-exp of the tones whose natural-binary encoding has
