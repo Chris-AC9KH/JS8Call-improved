@@ -32,6 +32,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <cstdlib>
@@ -155,6 +156,8 @@ namespace
         bool decoded = false;
         int  nhard   = -1;
         float snr    = -99.0f;
+        double freqHz = std::numeric_limits<double>::quiet_NaN();
+        double xdt    = std::numeric_limits<double>::quiet_NaN();
         std::vector<std::string> payloads;
         std::vector<int> bestChecks;
         double maxAlpha = 0.0;
@@ -249,6 +252,8 @@ namespace
             {
                 r.decoded = true;
                 r.snr     = dec->snr;
+                r.freqHz  = dec->frequency;
+                r.xdt     = dec->xdt;
                 r.payloads.push_back(dec->data);
             }
             else if (auto fin = std::get_if<JS8::Event::DecodeFinished>(&ev))

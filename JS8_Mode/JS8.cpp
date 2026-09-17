@@ -1846,10 +1846,23 @@ template <typename Mode> class DecodeMode {
                 }
             };
 
+        // Explicit synchronization context for finalizing a successful
+        // decode. Normal call sites omit it and finalize with the existing
+        // f1/xdt2 exactly as before; the aided pass supplies its refined
+        // physical estimate so reporting and SIC subtraction use the sync
+        // that actually produced the success. Never mutated to trick the
+        // path: failure behavior is identical with or without it.
+        struct FinalizeSync {
+            float frequencyHz;
+            float xdtSeconds;
+        };
+
         auto const tryDecode = [&](std::array<float, N> const &llrInput,
                                    int ipass, BPOptions const options,
                                    bool const rememberForRescue,
-                                   BPResult *bpOut = nullptr)
+                                   BPResult *bpOut = nullptr,
+                                   std::optional<FinalizeSync> const
+                                       &finalize = std::nullopt)
             -> std::optional<Decode> {
             BPResult const bp = bpdecode174(llrInput, decoded, cw, options);
             if (bpOut != nullptr)
@@ -1870,12 +1883,17 @@ template <typename Mode> class DecodeMode {
                 !(ipass > 2 && nharderrors > 39) &&
                 !(ipass == 4 && nharderrors > 30)) {
                 if (checkCRC12(decoded)) {
+                    // Success-only sync: normal decodes use f1/xdt2 exactly
+                    // as before; aided decodes use the supplied refined
+                    // estimate for both reporting and SIC seeding.
+                    FinalizeSync const fs =
+                        finalize.value_or(FinalizeSync{f1, xdt2});
                     if (syncStats)
                         emitEvent(JS8::Event::SyncState{
                             JS8::Event::SyncState::Type::DECODED,
                             Mode::NSUBMODE,
-                            f1,
-                            xdt2,
+                            fs.frequencyHz,
+                            fs.xdtSeconds,
                             {.decoded = sync}});
 
                     auto message = extractmessage174(decoded);
@@ -1888,7 +1906,8 @@ template <typename Mode> class DecodeMode {
                     JS8::encode(i3bit, Costas, message.data(), itone.data());
 
                     if (lsubtract)
-                        subtractjs8(genjs8refsig(itone, f1), xdt2);
+                        subtractjs8(genjs8refsig(itone, fs.frequencyHz),
+                                    fs.xdtSeconds);
 
                     float xsig = 0.0f;
 
@@ -2076,6 +2095,16 @@ template <typename Mode> class DecodeMode {
             int aidedBoundary = 0;
             int aidedBestChecks = -1;
             int aidedAccepted = 0;
+            double aidedFinalizeF1 =
+                std::numeric_limits<double>::quiet_NaN();
+            double aidedFinalizeXdt =
+                std::numeric_limits<double>::quiet_NaN();
+            double aidedPhysResidual =
+                std::numeric_limits<double>::quiet_NaN();
+            double aidedMidTime = std::numeric_limits<double>::quiet_NaN();
+            double aidedTrackerMid =
+                std::numeric_limits<double>::quiet_NaN();
+            std::optional<FinalizeSync> aidedFinalizeSync;
             int aidedScales = 0;
             int const aidedBudgetBefore = ldpcRescueBudget;
             int aidedBudgetAfter = ldpcRescueBudget;
@@ -2185,6 +2214,38 @@ template <typename Mode> class DecodeMode {
                         trackerHzAided);
                     aidedLlrNorm = js8::aided::llrNorm(aidedBins.llr0);
 
+                    // Final physical sync if this attempt succeeds: the
+                    // scalar timing seed moves with the global aided delta;
+                    // the scalar frequency seed is f1 plus the Costas-only
+                    // physical residual at the frame midpoint
+                    // (tracker-aware, drift included via aidedDd*tMid).
+                    // Falls back to the normal sync if degenerate; the same
+                    // context feeds reporting, subtraction seeding, and the
+                    // f1/xdt update below.
+                    {
+                        float const xdtCand = js8::aided::aidedFrameXdt(
+                            xdt2, aidedDt, DT2);
+                        std::array<float, NN> costasW{};
+                        js8::aided::buildCostasWeights(costasW);
+                        js8::aided::MidpointResidual const mid =
+                            js8::aided::aidedPhysicalResidualAtMidpoint(
+                                aidedDf, aidedDd, aidedBaselines,
+                                Mode::NDOWNSPS, rateHz, costasW);
+                        float aidedF1 = f1;
+                        float aidedXdtOut = xdt2;
+                        if (std::isfinite(xdtCand) && mid.valid) {
+                            aidedXdtOut = xdtCand;
+                            aidedF1 =
+                                f1 + static_cast<float>(mid.residualHz);
+                            aidedFinalizeF1 = aidedF1;
+                            aidedFinalizeXdt = aidedXdtOut;
+                            aidedPhysResidual = mid.residualHz;
+                            aidedMidTime = mid.midpointSeconds;
+                            aidedTrackerMid = mid.trackerHzAtMid;
+                        }
+                        aidedFinalizeSync = FinalizeSync{aidedF1, aidedXdtOut};
+                    }
+
                     // The aided LLRs measure the SAME frame, so they must not
                     // go through SoftCombiner::combine() (that would add one
                     // frame twice as independent evidence). Run LDPC locally
@@ -2197,7 +2258,8 @@ template <typename Mode> class DecodeMode {
                     int aidedBest = M + 1;
                     BPResult aidedBp;
                     if (auto res = tryDecode(aidedBins.llr0, 1, BPOptions{},
-                                             false, &aidedBp)) {
+                                             false, &aidedBp,
+                                             aidedFinalizeSync)) {
                         aidedBest = aidedBp.bestChecks;
                         aidedAccepted = 1;
                         aidedResult = res;
@@ -2220,7 +2282,8 @@ template <typename Mode> class DecodeMode {
                                 BPResult retryBp;
                                 if (auto retry =
                                         tryDecode(aidedBins.llr0, 1, options,
-                                                  false, &retryBp)) {
+                                                  false, &retryBp,
+                                                  aidedFinalizeSync)) {
                                     aidedBest = std::min(aidedBest,
                                                          retryBp.bestChecks);
                                     aidedAccepted = 1;
@@ -2259,12 +2322,26 @@ template <typename Mode> class DecodeMode {
                     << aidedBestChecks << "crcAccepted" << aidedAccepted
                     << "aidedScales" << aidedScales << "budgetBefore"
                     << aidedBudgetBefore << "budgetAfter" << aidedBudgetAfter
+                    << "finalizeF1Hz" << aidedFinalizeF1 << "finalizeXdt"
+                    << aidedFinalizeXdt << "physicalResidualHz"
+                    << aidedPhysResidual << "midpointTime" << aidedMidTime
+                    << "trackerHzMidOrFit" << aidedTrackerMid
+                    << "f1SeedHz" << f1 << "xdt2Seed" << xdt2
                     << "initLlrNorm" << initLlrNorm << "aidedLlrNorm"
                     << aidedLlrNorm;
             }
 
-            if (aidedResult)
+            if (aidedResult) {
+                // The aided sync produced this CRC success: expose it as the
+                // decode's sync (reporting and SIC seed already used the same
+                // context inside tryDecode). Only touched after acceptance;
+                // failures preserve the original f1/xdt exactly.
+                FinalizeSync const fs = aidedFinalizeSync.value_or(
+                    FinalizeSync{f1, xdt2});
+                f1 = fs.frequencyHz;
+                xdt = fs.xdtSeconds;
                 return aidedResult;
+            }
         }
 
         if (decoder_js8().isDebugEnabled()) {

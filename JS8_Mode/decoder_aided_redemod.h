@@ -208,6 +208,45 @@ buildSymbolWeights(ConfidenceSummary const &conf,
 }
 
 /**
+ * @brief Expand confidences to Costas-only weights (1.0 on pilots, else 0).
+ *
+ * Used for the final physical-frequency seed so low-confidence tentative
+ * data can never steer SIC subtraction; the search itself keeps the full
+ * confidence weights.
+ */
+inline void
+buildCostasWeights(std::array<float, kTotalSymbols> &weights) {
+    for (int k = 0; k < kTotalSymbols; ++k)
+        weights[static_cast<std::size_t>(k)] =
+            isCostasSymbol(k) ? 1.0f : 0.0f;
+}
+
+/**
+ * @brief Scalar frame timing seed from an aided timing delta.
+ *
+ * The aided search is relative to the tracked first-pass extraction whose
+ * scalar seed is xdt2 = ibest*DT2, so a global refinement of aidedDt
+ * downsampled samples moves the seed by aidedDt*dtSecondsPerSample (DT2).
+ * Per-symbol TimingTracker shifts are NOT folded in again: they already
+ * existed in the tracked solution and aidedDt is the new residual only.
+ * Positive aidedDt (later extraction) increases xdt, matching a late signal.
+ */
+inline float aidedFrameXdt(float xdt2, int aidedDt,
+                           float dtSecondsPerSample) {
+    if (!std::isfinite(xdt2) || !std::isfinite(dtSecondsPerSample))
+        return std::numeric_limits<float>::quiet_NaN();
+    return xdt2 + static_cast<float>(aidedDt) * dtSecondsPerSample;
+}
+
+/** Representative physical residual at the frame midpoint. */
+struct MidpointResidual {
+    double residualHz = std::numeric_limits<double>::quiet_NaN();
+    double midpointSeconds = std::numeric_limits<double>::quiet_NaN();
+    double trackerHzAtMid = std::numeric_limits<double>::quiet_NaN();
+    bool valid = false;
+};
+
+/**
  * @brief First-pass per-symbol extraction metadata for the refinement baseline.
  *
  * `startSamples` is the ACTUAL first-pass window start (nominal base plus the
@@ -221,6 +260,86 @@ struct SymbolBaseline {
     int startSamples = 0;  ///< First-pass window start (base + shift).
     float trackerHz = 0.0f; ///< Recorded tracker estimate for the symbol.
 };
+
+/**
+ * @brief Physical carrier residual at the frame midpoint.
+ *
+ * Sign derivation from the decoder (do not change without re-deriving):
+ * - coarse correction multiplies cd0 by exp(-j*2*pi*delfbest*t), then
+ *   f1 += delfbest, so f1 is the physical center for zero cd0 residual;
+ * - FrequencyTracker::apply() (and replayTrackerCorrection()) multiplies by
+ *   exp(+j*2*pi*trackerHz*t_local), i.e. it ADDS trackerHz to the apparent
+ *   residual, so a perfectly correcting tracker records
+ *   trackerHz ~= -physicalResidualHz;
+ * - the aided refinement derotates by exp(-j*(2*pi*aidedDf*t+pi*aidedDd*t^2))
+ *   AFTER replaying the tracker correction, and the search centers the
+ *   expected-tone peak, so at the optimum
+ *       physicalResidual(t) ~= aidedDf + aidedDd*t - trackerHz(t).
+ *
+ * The scalar seed is f1 + residual(midpoint). Per-symbol residuals
+ * r_k = aidedDf + aidedDd*t_k - trackerHz[k] (t_k = window-center absolute
+ * time) are combined with a weighted linear fit evaluated at the frame
+ * midpoint (weighted mean fallback); drift therefore enters through
+ * aidedDd*t_mid and is never discarded. Weights are caller-provided (Costas
+ * preferred for SIC seeding). Finite-input guarded, deterministic, no Qt.
+ */
+inline MidpointResidual aidedPhysicalResidualAtMidpoint(
+    double aidedDf, double aidedDd,
+    std::array<SymbolBaseline, kTotalSymbols> const &baselines, int window,
+    double sampleRateHz, std::array<float, kTotalSymbols> const &weights) {
+    MidpointResidual out{};
+    if (!std::isfinite(aidedDf) || !std::isfinite(aidedDd) || window <= 0 ||
+        !std::isfinite(sampleRateHz) || !(sampleRateHz > 0.0))
+        return out;
+    double tMin = std::numeric_limits<double>::infinity();
+    double tMax = -std::numeric_limits<double>::infinity();
+    double sw = 0.0, swt = 0.0, swtt = 0.0, swr = 0.0, swtr = 0.0;
+    for (int k = 0; k < kTotalSymbols; ++k) {
+        float const w = weights[static_cast<std::size_t>(k)];
+        if (!(w > 0.0f) || !std::isfinite(w))
+            continue;
+        double const tracker =
+            static_cast<double>(baselines[static_cast<std::size_t>(k)]
+                                    .trackerHz);
+        double const start =
+            static_cast<double>(baselines[static_cast<std::size_t>(k)]
+                                    .startSamples);
+        if (!std::isfinite(tracker) || !std::isfinite(start))
+            return out;
+        double const t = (start + window * 0.5) / sampleRateHz;
+        double const r = aidedDf + aidedDd * t - tracker;
+        if (!std::isfinite(t) || !std::isfinite(r))
+            return out;
+        tMin = std::min(tMin, t);
+        tMax = std::max(tMax, t);
+        double const dw = static_cast<double>(w);
+        sw += dw;
+        swt += dw * t;
+        swtt += dw * t * t;
+        swr += dw * r;
+        swtr += dw * t * r;
+    }
+    if (!(sw > 0.0) || !std::isfinite(sw) || !(tMax >= tMin) ||
+        !std::isfinite(tMin) || !std::isfinite(tMax))
+        return out;
+    double const tMid = 0.5 * (tMin + tMax);
+    double residual = std::numeric_limits<double>::quiet_NaN();
+    double const det = sw * swtt - swt * swt;
+    if (std::isfinite(det) && det > 0.0) {
+        double const a = (swr * swtt - swt * swtr) / det;
+        double const b = (sw * swtr - swt * swr) / det;
+        residual = a + b * tMid;
+    } else {
+        residual = swr / sw; // Degenerate (e.g. single point): plain mean.
+    }
+    if (!std::isfinite(residual))
+        return out;
+    out.residualHz = residual;
+    out.midpointSeconds = tMid;
+    out.trackerHzAtMid = aidedDf + aidedDd * tMid - residual;
+    out.valid = true;
+    return out;
+}
 
 /**
  * @brief Validate candidate sample bounds for the aided search/extraction.

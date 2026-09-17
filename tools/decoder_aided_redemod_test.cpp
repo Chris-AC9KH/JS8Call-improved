@@ -565,6 +565,123 @@ void runNonFiniteSafety() {
           "zero-Hz replay is bit-exact no-op");
 }
 
+void runFinalizeTiming() {
+    std::printf("[finalize timing]\n");
+    // xdt2 = ibest*DT2 extraction grid; aidedDt moves the seed relatively.
+    // FS2 = 200 -> DT2 = 0.005 s/sample: +2 samples -> +0.01 s.
+    constexpr float xdt2 = 0.5f;
+    constexpr float dt2 = 0.005f;
+    float const late = js8::aided::aidedFrameXdt(xdt2, 2, dt2);
+    float const early = js8::aided::aidedFrameXdt(xdt2, -2, dt2);
+    check(late == xdt2 + 2 * dt2, "aidedDt=+2 gives xdt2+2/FS2");
+    check(early == xdt2 - 2 * dt2, "aidedDt=-2 moves the opposite way");
+    check(late > xdt2 && early < xdt2,
+          "late signal increases xdt, early decreases it");
+    check(js8::aided::aidedFrameXdt(xdt2, 0, dt2) == xdt2,
+          "zero delta preserves xdt2");
+    check(!std::isfinite(js8::aided::aidedFrameXdt(
+              std::numeric_limits<float>::quiet_NaN(), 2, dt2)),
+          "non-finite xdt2 gives NaN");
+}
+
+// Baselines with uniform tracker metadata for the midpoint tests.
+std::array<js8::aided::SymbolBaseline, 79>
+makeTrackedBaselines(float trackerHz) {
+    std::array<js8::aided::SymbolBaseline, 79> b{};
+    for (int k = 0; k < 79; ++k) {
+        b[static_cast<std::size_t>(k)].startSamples =
+            kFrameStart + k * kWindow;
+        b[static_cast<std::size_t>(k)].trackerHz = trackerHz;
+    }
+    return b;
+}
+
+std::array<float, 79> costasOnlyUnitWeights() {
+    std::array<float, 79> w{};
+    js8::aided::buildCostasWeights(w);
+    return w;
+}
+
+void runFinalizeTrackerDisabled() {
+    std::printf("[finalize tracker disabled]\n");
+    // trackerHz = 0, physical +0.3, aidedDf = +0.3, no drift.
+    auto const out = js8::aided::aidedPhysicalResidualAtMidpoint(
+        0.3, 0.0, makeTrackedBaselines(0.0f), kWindow, kRate,
+        costasOnlyUnitWeights());
+    check(out.valid, "midpoint fit valid");
+    check(std::abs(out.residualHz - 0.3) < 1.0e-6,
+          "disabled tracker reduces to f1+aidedDf (+0.3 Hz)");
+    check(std::abs(out.trackerHzAtMid) < 1.0e-6,
+          "midpoint tracker estimate is zero");
+    check(out.midpointSeconds > 0.0, "midpoint time positive");
+}
+
+void runFinalizePerfectTracker() {
+    std::printf("[finalize perfect tracker]\n");
+    // Physical +0.4, tracker recorded -0.4 (mirror convention: replay adds
+    // the recorded value, so a correcting tracker holds -residual),
+    // aidedDf ~= 0.
+    auto const out = js8::aided::aidedPhysicalResidualAtMidpoint(
+        0.0, 0.0, makeTrackedBaselines(-0.4f), kWindow, kRate,
+        costasOnlyUnitWeights());
+    check(out.valid, "midpoint fit valid");
+    check(std::abs(out.residualHz - 0.4) < 1.0e-6,
+          "perfect tracker still yields physical +0.4 Hz");
+    check(std::abs(out.trackerHzAtMid + 0.4) < 1.0e-6,
+          "midpoint tracker value recovered as -0.4");
+}
+
+void runFinalizePartialTracker() {
+    std::printf("[finalize partial tracker]\n");
+    // Physical +0.4, tracker recorded -0.25, aidedDf = +0.15.
+    auto const out = js8::aided::aidedPhysicalResidualAtMidpoint(
+        0.15, 0.0, makeTrackedBaselines(-0.25f), kWindow, kRate,
+        costasOnlyUnitWeights());
+    check(out.valid, "midpoint fit valid");
+    check(std::abs(out.residualHz - 0.4) < 1.0e-6,
+          "partial correction sums to physical +0.4 Hz");
+}
+
+void runFinalizeNegativeFrequency() {
+    std::printf("[finalize negative frequency]\n");
+    // Mirror of the perfect-tracker case: physical -0.4, tracker +0.4.
+    auto const out = js8::aided::aidedPhysicalResidualAtMidpoint(
+        0.0, 0.0, makeTrackedBaselines(0.4f), kWindow, kRate,
+        costasOnlyUnitWeights());
+    check(out.valid, "midpoint fit valid");
+    check(std::abs(out.residualHz + 0.4) < 1.0e-6,
+          "signs reverse correctly to physical -0.4 Hz");
+}
+
+void runFinalizeDrift() {
+    std::printf("[finalize drift]\n");
+    // Linear residual r(t) = 0.1 + 0.02*t, tracker zero: the scalar must be
+    // evaluated at the frame midpoint, not at the edges, and aidedDd must
+    // contribute (drift is never discarded).
+    auto const b = makeTrackedBaselines(0.0f);
+    auto const out = js8::aided::aidedPhysicalResidualAtMidpoint(
+        0.1, 0.02, b, kWindow, kRate, costasOnlyUnitWeights());
+    check(out.valid, "midpoint fit valid with drift");
+    // t_k = (64 + 32k + 16)/200, k = 0..78 -> t in [0.4, 12.88],
+    // tMid = 6.64 s -> expected 0.1 + 0.02*6.64 = 0.2328.
+    double const expected = 0.1 + 0.02 * out.midpointSeconds;
+    check(std::abs(out.midpointSeconds - 6.64) < 1.0e-9,
+          "midpoint time is the frame center");
+    check(std::abs(out.residualHz - expected) < 1.0e-9,
+          "scalar equals physical frequency at midpoint");
+    check(out.residualHz > 0.2,
+          "drift contributes (not the df-only value 0.1)");
+    // Degenerate inputs are rejected, not silently estimated.
+    std::array<float, 79> noWeights{};
+    auto const bad = js8::aided::aidedPhysicalResidualAtMidpoint(
+        0.1, 0.02, b, kWindow, kRate, noWeights);
+    check(!bad.valid, "all-zero weights give invalid result");
+    auto const badDf = js8::aided::aidedPhysicalResidualAtMidpoint(
+        std::numeric_limits<double>::quiet_NaN(), 0.02, b, kWindow, kRate,
+        costasOnlyUnitWeights());
+    check(!badDf.valid, "non-finite aidedDf gives invalid result");
+}
+
 void runRescueDemonstration() {
     std::printf("[helper-level rescue demonstration]\n");
     // True transmitted word; tentative word has 3 bit errors (near miss).
@@ -633,6 +750,12 @@ int main() {
     runDriftHandling();
     runOtherSevenTones();
     runTrackedBaseline();
+    runFinalizeTiming();
+    runFinalizeTrackerDisabled();
+    runFinalizePerfectTracker();
+    runFinalizePartialTracker();
+    runFinalizeNegativeFrequency();
+    runFinalizeDrift();
     runWrongCodeword();
     runBoundsClipping();
     runNonFiniteSafety();
