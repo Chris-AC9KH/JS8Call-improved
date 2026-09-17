@@ -2345,11 +2345,17 @@ template <typename Mode> class DecodeMode {
         if (size == 0)
             return;
 
-        // Populate the complex channel estimate with the decoded reference.
-        for (std::size_t i = 0; i < size; ++i) {
-            cfilt[i] = dd[dd_start + i] * std::conj(cref[cref_start + i]);
-        }
+        // Mixed (demodulated) envelope shared by both channel candidates.
+        // mixed(i) = dd(i) * conj(cref(i)) is the complex signal we estimate.
+        auto const mixed = [&](std::size_t i) -> std::complex<float> {
+            return dd[dd_start + i] * std::conj(cref[cref_start + i]);
+        };
 
+        // Candidate A: the established FFT low-pass filtered channel estimate.
+        // Its #5a architecture (mixed -> FFT -> filter -> IFFT) is unchanged.
+        for (std::size_t i = 0; i < size; ++i) {
+            cfilt[i] = mixed(i);
+        }
         // Zero-fill the remainder, then low-pass the complex channel estimate.
         std::fill(cfilt.begin() + size, cfilt.end(), ZERO);
         fftwf_execute(plans[Plan::CF]);
@@ -2357,29 +2363,113 @@ template <typename Mode> class DecodeMode {
                        cfilt.begin(), std::multiplies<>());
         fftwf_execute(plans[Plan::CB]);
 
-        // Measure the decoded signal before and after the proposed subtraction.
-        // Use per-symbol matched correlations instead of one coherent frame sum
-        // so modest phase drift or fading cannot hide a poor cancellation.
-        std::array<std::complex<double>, NN> beforeCorrelation{};
-        std::array<std::complex<double>, NN> afterCorrelation{};
+        // Candidate B: a constrained, slowly varying segmented channel. One
+        // complex coefficient per multi-symbol window, smoothed across windows
+        // and interpolated back to the sample grid. This can track slow fading
+        // the fixed LPF cannot, but it carries many loosely constrained
+        // parameters, so we only adopt it when it measurably beats the LPF
+        // candidate on the identical correlation metric.
+        std::vector<std::complex<float>> mixedVec(size);
+        for (std::size_t i = 0; i < size; ++i)
+            mixedVec[i] = mixed(i);
 
+        std::size_t const windowSamples =
+            std::clamp<std::size_t>(2 * Mode::NSPS, Mode::NSPS, 4 * Mode::NSPS);
+        std::size_t const windowCount =
+            std::max<std::size_t>(1, size / windowSamples);
+
+        // Per-window complex coefficient (mean of the mixed signal). Windowing
+        // across several symbols keeps a competing weak signal from being
+        // trivially fitted as a single coefficient.
+        std::vector<std::complex<float>> coeff(windowCount, ZERO);
+        for (std::size_t w = 0; w < windowCount; ++w) {
+            std::size_t const wBegin = w * windowSamples;
+            std::size_t const wEnd = std::min(wBegin + windowSamples, size);
+            std::complex<double> acc{};
+            for (std::size_t i = wBegin; i < wEnd; ++i)
+                acc += std::complex<double>{mixedVec[i].real(),
+                                            mixedVec[i].imag()};
+            std::size_t const span = wEnd - wBegin;
+            double const inv = 1.0 / static_cast<double>(span);
+            coeff[w] = std::complex<float>{static_cast<float>(acc.real() * inv),
+                                           static_cast<float>(acc.imag() * inv)};
+        }
+
+        // Triangular smoothing across neighboring window coefficients.
+        std::vector<std::complex<float>> smoothed(windowCount, ZERO);
+        for (std::size_t w = 0; w < windowCount; ++w) {
+            std::complex<double> acc{};
+            double wt = 0.0;
+            for (int dw = -2; dw <= 2; ++dw) {
+                long long const j = static_cast<long long>(w) + dw;
+                if (j < 0 || j >= static_cast<long long>(windowCount))
+                    continue;
+                double const weight = 1.0 - std::abs(dw) * 0.25;
+                auto const coefficient =
+                    coeff[static_cast<std::size_t>(j)];
+                acc += std::complex<double>{coefficient.real(),
+                                            coefficient.imag()} *
+                       weight;
+                wt += weight;
+            }
+            smoothed[w] = std::complex<float>{static_cast<float>(acc.real() / wt),
+                                              static_cast<float>(acc.imag() / wt)};
+        }
+
+        // Interpolate smoothed coefficients back to the full sample grid so the
+        // channel varies continuously and the phase stays continuous.
+        std::vector<std::complex<float>> segmented(size, ZERO);
+        std::size_t const denom = std::max<std::size_t>(1, size - 1);
+        for (std::size_t i = 0; i < size; ++i) {
+            double const pos = (windowCount > 1)
+                                   ? static_cast<double>(i) *
+                                         (static_cast<double>(windowCount) - 1.0) /
+                                         static_cast<double>(denom)
+                                   : 0.0;
+            std::size_t const k0 = std::min<std::size_t>(
+                static_cast<std::size_t>(pos), windowCount - 1);
+            std::size_t const k1 =
+                std::min<std::size_t>(k0 + 1, windowCount - 1);
+            double const frac = pos - static_cast<double>(k0);
+            segmented[i] = std::complex<float>{
+                static_cast<float>(smoothed[k0].real() * (1.0 - frac) +
+                                   smoothed[k1].real() * frac),
+                static_cast<float>(smoothed[k0].imag() * (1.0 - frac) +
+                                   smoothed[k1].imag() * frac)};
+        }
+
+        // Per-symbol matched-correlation residual, identical for both
+        // candidates, so the selection reflects genuine cancellation quality.
+        auto afterMetricOf = [&](auto const &channel) {
+            std::array<std::complex<double>, NN> after{};
+            for (std::size_t i = 0; i < size; ++i) {
+                std::size_t const crefIndex = cref_start + i;
+                std::size_t const symbolIndex = crefIndex / Mode::NSPS;
+                auto const reference = std::complex<double>{cref[crefIndex].real(),
+                                                            cref[crefIndex].imag()};
+                float const reconstructed =
+                    2.0f * std::real(channel[i] * cref[crefIndex]);
+                float const residual = dd[dd_start + i] - reconstructed;
+                after[symbolIndex] +=
+                    static_cast<double>(residual) * std::conj(reference);
+            }
+            return std::accumulate(after.begin(), after.end(), 0.0,
+                                   [](double const t, auto const &v) {
+                                       return t + std::norm(v);
+                                   });
+        };
+
+        // Matched correlation of the untouched signal and of the LPF
+        // reconstruction, using the identical per-symbol metric.
+        std::array<std::complex<double>, NN> beforeCorrelation{};
         for (std::size_t i = 0; i < size; ++i) {
             std::size_t const crefIndex = cref_start + i;
             std::size_t const symbolIndex = crefIndex / Mode::NSPS;
             auto const reference = std::complex<double>{cref[crefIndex].real(),
                                                         cref[crefIndex].imag()};
-            auto const referenceConjugate = std::conj(reference);
-            float const measured = dd[dd_start + i];
-            float const reconstructed =
-                2.0f * std::real(cfilt[i] * cref[crefIndex]);
-            float const residual = measured - reconstructed;
-
             beforeCorrelation[symbolIndex] +=
-                static_cast<double>(measured) * referenceConjugate;
-            afterCorrelation[symbolIndex] +=
-                static_cast<double>(residual) * referenceConjugate;
+                static_cast<double>(dd[dd_start + i]) * std::conj(reference);
         }
-
         auto const correlationPower = [](auto const &correlation) {
             return std::accumulate(
                 correlation.begin(), correlation.end(), 0.0,
@@ -2389,37 +2479,66 @@ template <typename Mode> class DecodeMode {
         };
 
         double const beforeMetric = correlationPower(beforeCorrelation);
-        double const afterMetric = correlationPower(afterCorrelation);
-        bool const metricsValid = std::isfinite(beforeMetric) &&
-                                  std::isfinite(afterMetric) &&
-                                  beforeMetric >
-                                      std::numeric_limits<double>::epsilon();
-        bool const accepted = metricsValid && afterMetric < beforeMetric;
-        double const suppressionDb =
-            metricsValid
-                ? 10.0 * std::log10(
-                             beforeMetric /
-                             std::max(afterMetric,
-                                      std::numeric_limits<double>::min()))
-                : 0.0;
+        double const afterMetricLpf = afterMetricOf(cfilt);
+        double const afterMetricAdaptive = afterMetricOf(segmented);
+
+        // ~0.1% margin before adopting the more complex segmented model; keeps
+        // us from switching on floating-point noise alone.
+        double const adaptiveMargin = 0.001;
+        bool const lpfValid = std::isfinite(afterMetricLpf) &&
+                              afterMetricLpf > 0.0;
+        bool const adaptiveValid = std::isfinite(afterMetricAdaptive) &&
+                                    afterMetricAdaptive > 0.0;
+        bool const useAdaptive = adaptiveValid && lpfValid &&
+                                 afterMetricAdaptive <
+                                     afterMetricLpf * (1.0 - adaptiveMargin);
+        std::string_view channelModel =
+            useAdaptive ? std::string_view{"segmented"}
+                        : std::string_view{"lpf"};
+        double const selectedAfterMetric =
+            useAdaptive ? afterMetricAdaptive : afterMetricLpf;
+
+        // Unchanged #5a acceptance: subtract only if the selected candidate
+        // reduces the decoded waveform's correlation relative to the untouched
+        // signal. NaN/Inf metrics never pass, so no subtraction occurs.
+        bool const accepted =
+            std::isfinite(beforeMetric) &&
+            beforeMetric > std::numeric_limits<double>::epsilon() &&
+            std::isfinite(selectedAfterMetric) &&
+            selectedAfterMetric < beforeMetric;
+        double const suppressionDb = accepted
+            ? 10.0 * std::log10(beforeMetric /
+                                  std::max(selectedAfterMetric,
+                                           std::numeric_limits<double>::min()))
+            : 0.0;
 
         if (decoder_js8().isDebugEnabled()) {
             qCDebug(decoder_js8)
                 << "SIC subtraction"
                 << "beforeMetric" << beforeMetric
-                << "afterMetric" << afterMetric
+                << "lpfAfterMetric" << afterMetricLpf
+                << "adaptiveAfterMetric" << afterMetricAdaptive
+                << "selectedAfterMetric" << selectedAfterMetric
+                << "channelModel" << channelModel
                 << "suppressionDb" << suppressionDb
                 << "accepted" << accepted;
         }
 
-        // Do not damage the receive buffer when the reconstructed signal does
+        // Do not damage the receive buffer when the selected reconstruction does
         // not actually reduce the decoded waveform's matched-correlation power.
         if (!accepted)
             return;
 
-        for (std::size_t i = 0; i < size; ++i) {
-            dd[dd_start + i] -=
-                2.0f * std::real(cfilt[i] * cref[cref_start + i]);
+        if (useAdaptive) {
+            for (std::size_t i = 0; i < size; ++i) {
+                dd[dd_start + i] -=
+                    2.0f * std::real(segmented[i] * cref[cref_start + i]);
+            }
+        } else {
+            for (std::size_t i = 0; i < size; ++i) {
+                dd[dd_start + i] -=
+                    2.0f * std::real(cfilt[i] * cref[cref_start + i]);
+            }
         }
     }
 
