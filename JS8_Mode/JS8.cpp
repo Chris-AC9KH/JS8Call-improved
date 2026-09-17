@@ -2376,12 +2376,13 @@ template <typename Mode> class DecodeMode {
         std::size_t const windowSamples =
             std::clamp<std::size_t>(2 * Mode::NSPS, Mode::NSPS, 4 * Mode::NSPS);
         std::size_t const windowCount =
-            std::max<std::size_t>(1, size / windowSamples);
+            std::max<std::size_t>(1, (size + windowSamples - 1) / windowSamples);
 
         // Per-window complex coefficient (mean of the mixed signal). Windowing
         // across several symbols keeps a competing weak signal from being
         // trivially fitted as a single coefficient.
         std::vector<std::complex<float>> coeff(windowCount, ZERO);
+        std::vector<double> centers(windowCount, 0.0);
         for (std::size_t w = 0; w < windowCount; ++w) {
             std::size_t const wBegin = w * windowSamples;
             std::size_t const wEnd = std::min(wBegin + windowSamples, size);
@@ -2393,6 +2394,8 @@ template <typename Mode> class DecodeMode {
             double const inv = 1.0 / static_cast<double>(span);
             coeff[w] = std::complex<float>{static_cast<float>(acc.real() * inv),
                                            static_cast<float>(acc.imag() * inv)};
+            centers[w] = static_cast<double>(wBegin) +
+                         0.5 * (static_cast<double>(span) - 1.0);
         }
 
         // Triangular smoothing across neighboring window coefficients.
@@ -2416,26 +2419,30 @@ template <typename Mode> class DecodeMode {
                                               static_cast<float>(acc.imag() / wt)};
         }
 
-        // Interpolate smoothed coefficients back to the full sample grid so the
-        // channel varies continuously and the phase stays continuous.
+        // Interpolate the smoothed coefficients at the actual center sample of
+        // each measurement window, including a shorter final window. Samples
+        // outside the first and last centers reuse the nearest coefficient, so
+        // the channel remains continuous without stretching the trajectory.
         std::vector<std::complex<float>> segmented(size, ZERO);
-        std::size_t const denom = std::max<std::size_t>(1, size - 1);
+        std::size_t segment = 0;
         for (std::size_t i = 0; i < size; ++i) {
-            double const pos = (windowCount > 1)
-                                   ? static_cast<double>(i) *
-                                         (static_cast<double>(windowCount) - 1.0) /
-                                         static_cast<double>(denom)
-                                   : 0.0;
-            std::size_t const k0 = std::min<std::size_t>(
-                static_cast<std::size_t>(pos), windowCount - 1);
-            std::size_t const k1 =
-                std::min<std::size_t>(k0 + 1, windowCount - 1);
-            double const frac = pos - static_cast<double>(k0);
+            double const sample = static_cast<double>(i);
+            while (segment + 1 < windowCount &&
+                   sample > centers[segment + 1])
+                ++segment;
+            if (segment + 1 >= windowCount || sample <= centers[segment]) {
+                segmented[i] = smoothed[segment];
+                continue;
+            }
+
+            double const fraction =
+                (sample - centers[segment]) /
+                (centers[segment + 1] - centers[segment]);
             segmented[i] = std::complex<float>{
-                static_cast<float>(smoothed[k0].real() * (1.0 - frac) +
-                                   smoothed[k1].real() * frac),
-                static_cast<float>(smoothed[k0].imag() * (1.0 - frac) +
-                                   smoothed[k1].imag() * frac)};
+                static_cast<float>(smoothed[segment].real() * (1.0 - fraction) +
+                                   smoothed[segment + 1].real() * fraction),
+                static_cast<float>(smoothed[segment].imag() * (1.0 - fraction) +
+                                   smoothed[segment + 1].imag() * fraction)};
         }
 
         // Per-symbol matched-correlation residual, identical for both
