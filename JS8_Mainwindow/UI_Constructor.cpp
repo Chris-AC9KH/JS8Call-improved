@@ -1458,10 +1458,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     }
     ui->mode_button->setCursor(QCursor(Qt::PointingHandCursor));
 
-    // dial up and down buttons sizes
-    ui->dialFreqUpButton->setFixedSize(30, 24);
-    ui->dialFreqDownButton->setFixedSize(30, 24);
-
     // Prepare spotting configuration...
     prepareApi();
     prepareSpotting();

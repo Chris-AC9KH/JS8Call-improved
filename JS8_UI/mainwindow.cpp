@@ -307,6 +307,7 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("TextHorizontalSplitter",
                          ui->textHorizontalSplitter->saveState());
     m_settings->setValue("TopSplitter", ui->topSplitter->saveState());
+    m_settings->setValue("LeftSplitter", ui->leftSplitter->saveState());
     m_settings->setValue("BandActivityVisible",
                          ui->tableWidgetRXAll->isVisible());
     m_settings->setValue("BandHBActivityVisible",
@@ -414,6 +415,11 @@ void UI_Constructor::readSettings() {
             ui->tableWidgetCalls->setVisible(
                 ui->topSplitter->sizes().at(callIdx) > 0);
         }
+    }
+    
+    auto const leftSplitterState = m_settings->value("LeftSplitter").toByteArray();
+    if (!leftSplitterState.isEmpty()) {
+        ui->leftSplitter->restoreState(leftSplitterState);
     }
 
     m_bandActivityWasVisible =

@@ -57,8 +57,8 @@ inline QString buttonStyle() {
             border: none;
             border-radius: 6px;
             padding: 3px 9px;
-            min-height: 15px;
-            max-height: 15px;
+            min-height: 12;
+            max-height: 12px;
             font-family: "-apple-system";
         }
         QPushButton:hover, QToolButton:hover {
@@ -173,10 +173,10 @@ static inline QString logFrameStyle() {
                           " background-color: black;"
                           " border-radius:6px; padding:0px 8px; "
                           " font-family: Monaco, 'Courier New', monospace;"
-                          " font-size: 20pt;"
+                          " font-size: 15pt;"
                           " font-weight: bold;"
-                          " min-width: 200px;"
-                          " min-height: 40px;"
+                          " min-width: 150px;"
+                          " min-height: 20px;"
                           " max-height: 50px;"
                           "}");
 #elif defined(Q_OS_WIN)
@@ -251,14 +251,14 @@ constexpr const char *LogWidgetStyle =
 /// Style for the small frequency up/down step buttons (macOS).
 constexpr const char *DialFreqUpDownButtonStyle =
     "QPushButton {"
-    "    background-color: #000000;"
-    "    color: #39FF14;"
+    "    background: transparent;"
+    "    color: #000000;"
     "    font-size: 10pt;"
-    "    border:0px solid;"
-    "    border-radius:2px;"
-    "}"
-    "QPushButton:pressed {"
-    "    background-color: #222;"
+    "    padding: 0px;"
+    "    border: none;"
+    "    margin: 0px;"
+    "    min-height: 14px;"
+    "    max-height: 14px;"
     "}";
 
 /**
@@ -280,35 +280,39 @@ class OffsetSliderWidget : public QWidget {
      */
     explicit OffsetSliderWidget(QWidget *parent = nullptr) : QWidget(parent) {
         auto *layout = new QHBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(4);
+
         auto *caption = new QLabel("Offset:", this);
         caption->setStyleSheet("QLabel { color: black; }");
+
         slider = new QSlider(Qt::Horizontal, this);
-        // Lock the QSlider's appearance regardless of the system theme
         slider->setStyleSheet(R"(
             QSlider {
                 background: transparent;
-                min-height: 24px;
+                min-height: 14px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
-                height: 6px;
+                height: 4px;
                 background: #a5cdff;
-                border-radius: 3px;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 background: #6699ff;
                 border: 1px solid #c2c8d1;
-                width: 16px;
-                margin: -3px 0;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
                 border-radius: 6px;
             }
             QSlider::sub-page:horizontal {
                 background: #a5cdff;
-                border-radius: 3px;
+                border-radius: 2px;
             }
             QSlider::add-page:horizontal {
                 background: #e0e0e0;
-                border-radius: 3px;
+                border-radius: 2px;
             }
         )");
         slider->setRange(0, 3000);
@@ -353,8 +357,8 @@ constexpr const char *LabCallsignStyle = "QLabel {"
 constexpr const char *LabUTCStyle =
     "QLabel {"
     "    border-radius:6px;"
-    "    font-size: 14pt;"
-    "    line-height:14pt;"
+    "    font-size: 12pt;"
+    "    line-height:12pt;"
     "    font-family: Monaco, 'Courier New', monospace;"
     "    font-weight: bold;"
     "    background-color: black;"
