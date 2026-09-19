@@ -27,7 +27,6 @@ class QModelIndex;
 //
 class IARURegions final : public QAbstractListModel {
     Q_OBJECT
-    Q_ENUMS(Region)
 
   public:
     //

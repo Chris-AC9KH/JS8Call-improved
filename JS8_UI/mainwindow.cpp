@@ -5332,7 +5332,6 @@ void UI_Constructor::refreshTextDisplay() {
         textList.append(dt.message());
     }
 
-    auto transmitText = textList.join("");
     auto count = frames.length();
 
     // ugh...i hate these globals
@@ -5360,8 +5359,7 @@ void UI_Constructor::refreshTextDisplay() {
 
     connect(t, &BuildMessageFramesThread::finished, t, &QObject::deleteLater);
     connect(t, &BuildMessageFramesThread::resultReady, this,
-            [this, text](QString transmitText, int frames) {
-                // ugh...i hate these globals
+            [this, text](int frames) {
                 m_txTextDirtyLastSelectedCall = callsignSelected(true);
                 m_txTextDirtyLastText = text;
                 m_txFrameCountEstimate = frames;

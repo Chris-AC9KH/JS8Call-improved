@@ -2326,21 +2326,20 @@ BuildMessageFramesThread::BuildMessageFramesThread(
 
 void BuildMessageFramesThread::run() {
     auto results =
-        Varicode::buildMessageFrames(m_mycall, m_mygrid, m_selectedCall, m_text,
-                                     m_forceIdentify, m_forceData, m_submode);
-
+    Varicode::buildMessageFrames(m_mycall, m_mygrid, m_selectedCall, m_text,
+                                 m_forceIdentify, m_forceData, m_submode);
+    
     QStringList textList;
     qCDebug(varicode_js8) << "frames:";
     foreach (auto frame, results) {
         auto dt = DecodedText(frame.first, frame.second, m_submode);
         qCDebug(varicode_js8) << "->" << frame << dt.message()
-                              << Varicode::frameTypeString(dt.frameType())
-                              << "submode:" << m_submode;
+        << Varicode::frameTypeString(dt.frameType())
+        << "submode:" << m_submode;
         textList.append(dt.message());
     }
-
-    auto transmitText = textList.join("");
-    emit resultReady(transmitText, results.length());
+    
+    emit resultReady(results.length());
 }
 
 Varicode::SubmodeType Varicode::intToSubmode(int sm) {

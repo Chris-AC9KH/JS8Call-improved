@@ -207,7 +207,7 @@ class BuildMessageFramesThread : public QThread {
                              QObject *parent = nullptr);
     void run() override;
   signals:
-    void resultReady(QString, int);
+    void resultReady(int);
 
   private:
     QString m_mycall;

@@ -27,7 +27,6 @@ class QModelIndex;
 //
 class Modes final : public QAbstractListModel {
     Q_OBJECT
-    Q_ENUMS(Mode)
 
   public:
     //

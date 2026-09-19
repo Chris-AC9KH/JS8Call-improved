@@ -58,7 +58,6 @@ class QHostAddress;
 //
 class Configuration final : public QObject {
     Q_OBJECT
-    Q_ENUMS(DataMode)
 
   public:
     using MODE = Transceiver::MODE;

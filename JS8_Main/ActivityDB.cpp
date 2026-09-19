@@ -8,6 +8,8 @@
 
 #include <QTimeZone>
 
+#include <limits>
+
 namespace {
 
 constexpr char SCHEMA[] =
@@ -69,6 +71,21 @@ constexpr char SAVE_RX_TEXT_SQL[] =
     "ON CONFLICT(config, band) DO UPDATE SET html = excluded.html;";
 
 constexpr char TS_FORMAT[] = "yyyy-MM-dd HH:mm:ss";
+
+/**
+ * @brief Narrow a Qt container length to the int sqlite3's text-bind API
+ *        expects.
+ *
+ * QByteArray::size() returns qsizetype (64-bit on modern platforms); the
+ * sqlite3_bind_text() length parameter is a plain int. Every value passed
+ * through here is a UTF-8 encoding of a callsign, grid, timestamp string,
+ * or similar - nowhere near INT_MAX bytes - so the assert exists purely
+ * as a debug-build tripwire, not because overflow is expected.
+ */
+int sqliteLen(qsizetype n) {
+    Q_ASSERT(n <= std::numeric_limits<int>::max());
+    return static_cast<int>(n);
+}
 
 QByteArray toTs(const QDateTime &dt) {
     if (!dt.isValid()) return {};
@@ -348,19 +365,19 @@ bool ActivityDB::upsertCall(const QString &config, const QString &band,
 
     // a failed bind leaves utc_ts NULL, which no freshness guard can meet
     int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 3, call8.data(), call8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 4, through8.data(), through8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 3, call8.data(), sqliteLen(call8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 4, through8.data(), sqliteLen(through8.size()), SQLITE_TRANSIENT);
     bindRc |= sqlite3_bind_int(stmt, 5, record.snr);
-    bindRc |= sqlite3_bind_text(stmt, 6, grid8.data(), grid8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 6, grid8.data(), sqliteLen(grid8.size()), SQLITE_TRANSIENT);
     bindRc |= sqlite3_bind_int64(stmt, 7, (sqlite3_int64)record.dial);
     bindRc |= sqlite3_bind_int(stmt, 8, record.offset);
     bindRc |= sqlite3_bind_int(stmt, 9, record.bits);
     bindRc |= sqlite3_bind_double(stmt, 10, record.tdrift);
-    bindRc |= sqlite3_bind_text(stmt, 11, cq8.data(), cq8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 12, ack8.data(), ack8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 13, utc8.data(), utc8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 11, cq8.data(), sqliteLen(cq8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 12, ack8.data(), sqliteLen(ack8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 13, utc8.data(), sqliteLen(utc8.size()), SQLITE_TRANSIENT);
     bindRc |= sqlite3_bind_int(stmt, 14, record.submode);
     if (bindRc != SQLITE_OK) {
         sqlite3_reset(stmt);
@@ -390,9 +407,9 @@ bool ActivityDB::deleteCall(const QString &config, const QString &band,
     auto b8 = band.toUtf8();
     auto call8 = callsign.toUtf8();
     int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 3, call8.data(), call8.size(),
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 3, call8.data(), sqliteLen(call8.size()),
                                 SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
         // unbound: the zero-row DELETE would still report success
@@ -422,8 +439,8 @@ bool ActivityDB::deleteCalls(const QString &config, const QString &band) {
     auto c8 = config.toUtf8();
     auto b8 = band.toUtf8();
     int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         return noteResult(false);
@@ -455,8 +472,8 @@ QList<ActivityDB::CallRecord> ActivityDB::loadCalls(const QString &config,
     auto c8 = config.toUtf8();
     auto b8 = band.toUtf8();
     int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         noteResult(false);
@@ -506,9 +523,9 @@ bool ActivityDB::saveRxText(const QString &config, const QString &band,
     auto h8 = html.toUtf8();
     int bindRc = SQLITE_OK;
     // explicit lengths, not -1: strlen would truncate at an embedded NUL
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 3, h8.data(), h8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 3, h8.data(), sqliteLen(h8.size()), SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
         sqlite3_reset(stmt);
         sqlite3_clear_bindings(stmt);
@@ -538,8 +555,8 @@ QString ActivityDB::loadRxText(const QString &config, const QString &band,
     auto c8 = config.toUtf8();
     auto b8 = band.toUtf8();
     int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         noteResult(false);
@@ -574,8 +591,8 @@ bool ActivityDB::clearRxText(const QString &config, const QString &band) {
     auto c8 = config.toUtf8();
     auto b8 = band.toUtf8();
     int bindRc = SQLITE_OK;
-    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT);
-    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), b8.size(), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT);
+    bindRc |= sqlite3_bind_text(stmt, 2, b8.data(), sqliteLen(b8.size()), SQLITE_TRANSIENT);
     if (bindRc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         return noteResult(false);
@@ -600,7 +617,7 @@ bool ActivityDB::hasImported(const QString &config, bool *ok) {
     }
 
     auto c8 = config.toUtf8();
-    if (sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT) !=
+    if (sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT) !=
         SQLITE_OK) {
         sqlite3_finalize(stmt);
         noteResult(false);
@@ -626,7 +643,7 @@ bool ActivityDB::markImported(const QString &config) {
         return noteResult(false);
 
     auto c8 = config.toUtf8();
-    if (sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT) !=
+    if (sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT) !=
         SQLITE_OK) {
         sqlite3_finalize(stmt);
         return noteResult(false);
@@ -667,7 +684,7 @@ bool ActivityDB::clearConfig(const QString &config) {
             ok = false;
             continue;
         }
-        if (sqlite3_bind_text(stmt, 1, c8.data(), c8.size(), SQLITE_TRANSIENT) !=
+        if (sqlite3_bind_text(stmt, 1, c8.data(), sqliteLen(c8.size()), SQLITE_TRANSIENT) !=
             SQLITE_OK) {
             sqlite3_finalize(stmt);
             noteResult(false);
@@ -733,9 +750,9 @@ bool ActivityDB::copyConfig(const QString &from, const QString &to) {
         }
         // 1 is the destination the SELECT writes, 2 the source it reads
         int bindRc = SQLITE_OK;
-        bindRc |= sqlite3_bind_text(stmt, 1, t8.data(), t8.size(),
+        bindRc |= sqlite3_bind_text(stmt, 1, t8.data(), sqliteLen(t8.size()),
                                     SQLITE_TRANSIENT);
-        bindRc |= sqlite3_bind_text(stmt, 2, f8.data(), f8.size(),
+        bindRc |= sqlite3_bind_text(stmt, 2, f8.data(), sqliteLen(f8.size()),
                                     SQLITE_TRANSIENT);
         if (bindRc != SQLITE_OK) {
             sqlite3_finalize(stmt);
