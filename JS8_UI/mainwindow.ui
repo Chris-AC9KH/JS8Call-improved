@@ -225,7 +225,7 @@
                      <string>1234567890</string>
                     </property>
                     <property name="alignment">
-                     <set>Qt::AlignmentFlag::AlignLeading</set>
+                     <set>Qt::AlignmentFlag::AlignCenter</set>
                     </property>
                    </widget>
                   </item>
