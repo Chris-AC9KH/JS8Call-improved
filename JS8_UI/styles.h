@@ -92,8 +92,8 @@ inline QString buttonStyle() {
             border: none;
             border-radius: 4px;
             padding: 3px 9px;
-            min-height: 15px;
-            max-height: 15px;
+            min-height: 12px;
+            max-height: 12px;
             font-family: "Segoe UI";
         }
         QPushButton:hover, QToolButton:hover {
@@ -125,8 +125,10 @@ inline QString buttonStyle() {
            background-color: #6699ff;
            color: black;
            border: none;
-           border-radius: 5px;
+           border-radius: 0px;
            padding: 3px 9px;
+           min-height: 12px;
+           max-height: 12px;
            font-family: "Ubuntu", "Noto Sans";
        }
        QPushButton:hover, QToolButton:hover {
@@ -192,10 +194,12 @@ static inline QString logFrameStyle() {
                           " background-color: black;"
                           " border-radius:4px; padding:0px 8px; "
                           " font-family: Consolas, 'Courier New', monospace;"
-                          " font-size: 20pt;"
+                          " font-size: 15pt;"
                           " font-weight: bold;"
-                          " min-width: 200px;"
-                          " min-height: 40px;"
+                          " min-width: 150px;"
+                          " max-width: 150px;"
+                          " min-height: 20px;"
+                          " max-height: 50px;"
                           "}");
 #else
     // Linux and other platforms
@@ -204,10 +208,12 @@ static inline QString logFrameStyle() {
                           " color: #39FF14;"
                           " background-color: black;"
                           " border-radius:0px; padding:0px 8px; "
-                          " font-size: 28pt;"
+                          " font-size: 15pt;"
                           " font-weight: bold;"
-                          " min-width: 200px;"
-                          " min-height: 40px;"
+                          " min-width: 150px;"
+                          " max-width: 150px;"
+                          " min-height: 20px;"
+                          " max-height: 50px;"
                           "}");
 #endif
 }
@@ -390,13 +396,12 @@ constexpr const char *MonitorTxButtonStyle =
     "    border-width:0px;"
     "    border-radius:6px;"
     "}"
-    "QPushButton:hover {"
-    "    background-color: #4d7fff;"
-    "    color: white;"
-    "}"
     "QPushButton:checked {"
     "    background-color:#22FF22;"
     "    color:black;"
+    "}"
+    "QPushButton:hover {"
+    "    color: red;"
     "}"
     "QPushButton[transmitting=\"true\"] {"
     "    background-color:#FF2222;"
@@ -414,13 +419,12 @@ constexpr const char *ControlButtonStyle =
     "    border-width:0px;"
     "    border-radius:6px;"
     "}"
-    "QPushButton:hover {"
-    "    background-color: #4d7fff;"
-    "    color: white;"
-    "}"
     "QPushButton:checked {"
     "    background-color:#22FF22;"
     "    color:black;"
+    "}"
+    "QPushButton:hover {"
+    "    color: red;"
     "}"
     "QPushButton:disabled {"
     "    background-color:lightgray;"
@@ -442,7 +446,6 @@ constexpr const char *LogQSOButtonStyle =
     "    border-radius:6px;"
     "}"
     "QPushButton:hover {"
-    "    background-color: #4d7fff;"
     "    color: white;"
     "}"
     "QPushButton:checked {"
@@ -461,8 +464,8 @@ constexpr const char *TuneButtonStyle =
     "    border-radius:6px;"
     "}"
     "QPushButton:hover {"
-    "    background-color: #4d7fff;"
-    "    color: white;"
+    "background-color: #ffcc00;"
+    "    color: black;"
     "}"
     "QPushButton:checked {"
     "    background-color:#FF2222;"
@@ -480,7 +483,6 @@ constexpr const char *ModeButtonStyle =
     "    color:black;"
     "}"
     "QPushButton:hover {"
-    "    background-color: #4d7fff;"
     "    color: white;"
     "}"
     "QPushButton:checked {"
@@ -503,14 +505,16 @@ constexpr const char *LogWidgetStyle =
 /// Style for the small frequency up/down step buttons (Windows).
 constexpr const char *DialFreqUpDownButtonStyle =
     "QPushButton {"
-    "    background-color: #000000;"
-    "    color: #39FF14;"
-    "    font-size: 12pt;"
-    "    border:0px solid;"
-    "    border-radius:2px;"
-    "}"
-    "QPushButton:pressed {"
-    "    background-color: #222;"
+    "    background: transparent;"
+    "    color: #000000;"
+    "    font-size: 10pt;"
+    "    padding: 0px;"
+    "    border: none;"
+    "    margin: 0px;"
+    "    min-height: 14px;"
+    "    max-height: 14px;"
+    "    min-width: 10px;"
+    "    max-width: 10px;"
     "}";
 
 /**
@@ -529,37 +533,40 @@ class OffsetSliderWidget : public QWidget {
         slider->setStyleSheet(R"(
             QSlider {
                 background: transparent;
-                min-height: 24px;
+                min-height: 14px;
+                min-width: 100px;
+                max-width: 100px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
-                height: 6px;
+                height: 4px;
                 background: #a5cdff;
-                border-radius: 3px;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 background: #6699ff;
                 border: 1px solid #c2c8d1;
-                width: 16px;
-                margin: -3px 0;
-                border-radius: 5px;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
             }
             QSlider::sub-page:horizontal {
                 background: #a5cdff;
-                border-radius: 3px;
+                border-radius: 2px;
             }
             QSlider::add-page:horizontal {
                 background: #e0e0e0;
-                border-radius: 3px;
+                border-radius: 2px;
             }
         )");
         slider->setRange(0, 3000);
         slider->setValue(1500);
         valueLabel = new QLabel("0 Hz", this);
         valueLabel->setStyleSheet("QLabel { color: black; }");
-        valueLabel->setMinimumWidth(60);
+        valueLabel->setMinimumWidth(20);
         layout->addWidget(caption);
-        layout->addWidget(slider, 1);
+        layout->addWidget(slider);
         layout->addWidget(valueLabel);
         connect(slider, &QSlider::valueChanged, this, [this](int val) {
             valueLabel->setText(QString("%1 Hz").arg(val));
@@ -594,8 +601,8 @@ constexpr const char *LabCallsignStyle = "QLabel {"
 constexpr const char *LabUTCStyle =
     "QLabel {"
     "    border-radius:4px;"
-    "    font-size: 14pt;"
-    "    line-height:14pt;"
+    "    font-size: 12pt;"
+    "    line-height:12pt;"
     "    font-family: Consolas, 'Courier New', monospace;"
     "    font-weight: bold;"
     "    background-color: black;"
@@ -621,6 +628,9 @@ constexpr const char *MonitorTxButtonStyle =
     "    background-color:#22FF22;"
     "    color:black;"
     "}"
+    "QPushButton:hover {"
+    "    color: red;"
+    "}"
     "QPushButton[transmitting=\"true\"] {"
     "    background-color:#FF2222;"
     "    color:black;"
@@ -641,6 +651,9 @@ constexpr const char *ControlButtonStyle =
     "    background-color:#22FF22;"
     "    color:black;"
     "}"
+    "QPushButton:hover {"
+    "    color: red;"
+    "}"
     "QPushButton:disabled {"
     "    background-color:lightgray;"
     "    color:gray;"
@@ -660,6 +673,9 @@ constexpr const char *LogQSOButtonStyle =
     "    border-width:0px;"
     "    border-radius:4px;"
     "}"
+    "QPushButton:hover {"
+    "    color: white;"
+    "}"
     "QPushButton:checked {"
     "    background-color:#6699ff;"
     "    color:black;"
@@ -676,8 +692,8 @@ constexpr const char *TuneButtonStyle =
     "    border-radius:4px;"
     "}"
     "QPushButton:hover {"
-    "    background-color: #4d7fff;"
-    "    color: white;"
+    "background-color: #ffcc00;"
+    "    color: black;"
     "}"
     "QPushButton:checked {"
     "    background-color:#FF2222;"
@@ -693,6 +709,9 @@ constexpr const char *ModeButtonStyle =
     "    border-radius:4px;"
     "    background-color:#6699ff;"
     "    color:black;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
     "    background-color:#6699ff;"
@@ -715,14 +734,16 @@ constexpr const char *LogWidgetStyle =
 /// Style for the small frequency up/down step buttons (Linux/other).
 constexpr const char *DialFreqUpDownButtonStyle =
     "QPushButton {"
-    "    background-color: #000000;"
-    "    color: #39FF14;"
-    "    font-size: 12pt;"
-    "    border:1px solid;"
-    "    border-radius:0px;"
-    "}"
-    "QPushButton:pressed {"
-    "    background-color: #222;"
+    "    background: transparent;"
+    "    color: #000000;"
+    "    font-size: 10pt;"
+    "    padding: 0px;"
+    "    border: none;"
+    "    margin: 0px;"
+    "    min-height: 14px;"
+    "    max-height: 14px;"
+    "    min-width: 10px;"
+    "    max-width: 10px;"
     "}";
 
 /**
@@ -741,37 +762,40 @@ class OffsetSliderWidget : public QWidget {
         slider->setStyleSheet(R"(
             QSlider {
                 background: transparent;
-                min-height: 24px;
+                min-height: 14px;
+                min-width: 100px;
+                max-width: 100px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
-                height: 6px;
+                height: 4px;
                 background: #a5cdff;
-                border-radius: 3px;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 background: #6699ff;
                 border: 1px solid #c2c8d1;
-                width: 16px;
-                margin: -3px 0;
-                border-radius: 5px;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
             }
             QSlider::sub-page:horizontal {
                 background: #a5cdff;
-                border-radius: 3px;
+                border-radius: 2px;
             }
             QSlider::add-page:horizontal {
                 background: #e0e0e0;
-                border-radius: 3px;
+                border-radius: 2px;
             }
         )");
         slider->setRange(0, 3000);
         slider->setValue(1500);
         valueLabel = new QLabel("0 Hz", this);
         valueLabel->setStyleSheet("QLabel { color: black; }");
-        valueLabel->setMinimumWidth(60);
+        valueLabel->setMinimumWidth(20);
         layout->addWidget(caption);
-        layout->addWidget(slider, 1);
+        layout->addWidget(slider);
         layout->addWidget(valueLabel);
         connect(slider, &QSlider::valueChanged, this, [this](int val) {
             valueLabel->setText(QString("%1 Hz").arg(val));
@@ -796,7 +820,7 @@ class OffsetSliderWidget : public QWidget {
 
 /// Style for the callsign label in the header bar (Linux/other).
 constexpr const char *LabCallsignStyle = "QLabel {"
-                                         "    font-size: 14pt;"
+                                         "    font-size: 12pt;"
                                          "    line-height:12pt;"
                                          "    color : black;"
                                          "}";
@@ -806,8 +830,8 @@ constexpr const char *LabCallsignStyle = "QLabel {"
 constexpr const char *LabUTCStyle =
     "QLabel {"
     "    border-radius:0px;"
-    "    font-size: 18pt;"
-    "    line-height:18pt;"
+    "    font-size: 12pt;"
+    "    line-height:12pt;"
     "    font-family: \"DejaVu Sans Mono\", \"Liberation Mono\", \"Noto Mono\", \"Ubuntu Mono\", monospace;"
     "    font-weight: bold;"
     "    background-color: black;"
@@ -831,6 +855,9 @@ constexpr const char *MonitorTxButtonStyle =
     "QPushButton:checked {"
     "    background-color:#22FF22;"
     "}"
+    "QPushButton:hover {"
+    "    color: red;"
+    "}"
     "QPushButton[transmitting=\"true\"] {"
     "    background-color:#FF2222;"
     "}";
@@ -847,6 +874,9 @@ constexpr const char *ControlButtonStyle =
     "}"
     "QPushButton:checked {"
     "    background-color:#22FF22;"
+    "}"
+    "QPushButton:hover {"
+    "    color:red;"
     "}"
     "QPushButton:disabled {"
     "    background-color:lightgray;"
@@ -866,6 +896,9 @@ constexpr const char *LogQSOButtonStyle =
     "    border-width:0px;"
     "    border-radius:0px;"
     "}"
+    "QPushButton:hover {"
+    "    color:white;"
+    "}"
     "QPushButton:checked {"
     "    background-color:#6699ff;"
     "}";
@@ -881,8 +914,8 @@ constexpr const char *TuneButtonStyle =
     "    border-radius:0px;"
     "}"
     "QPushButton:hover {"
-    "    background-color: #4d7fff;"
-    "    color: white;"
+    "background-color: #ffcc00;"
+    "    color: black;"
     "}"
     "QPushButton:checked {"
     "    background-color:#FF2222;"
@@ -897,6 +930,9 @@ constexpr const char *ModeButtonStyle =
     "    border-width:0px;"
     "    border-radius:0px;"
     "    background-color:#6699ff;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
     "    background-color:#6699ff;"
