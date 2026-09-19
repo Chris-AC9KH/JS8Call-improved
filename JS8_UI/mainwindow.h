@@ -675,10 +675,6 @@ class UI_Constructor : public QMainWindow {
 
     char m_msg[100][80];
 
-    // widgets in control bar grid and label in header bar
-    // Chris: delete these
-    QLabel config_label;
-
     QMenu *modeSpeedMenu = nullptr;
 
     Styles::OffsetSliderWidget *freqOffsetWidget = nullptr;
@@ -987,10 +983,8 @@ class UI_Constructor : public QMainWindow {
     void set_application_font(QFont const &);
     void writeSettings();
     void updateCallActivityHeaderLabel();
-    void createHeaderBar();
     void createControlBar();
     void bindStatusButtonToAction(QPushButton *button, QAction *action, QString const &label);
-    void syncHeaderRowWidth();
     void statusChanged();
     void rigFailure(QString const &reason);
     void spotSetLocal();

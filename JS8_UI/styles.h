@@ -165,6 +165,11 @@ inline QString buttonStyle() {
  *
  * @return A QSS QString suitable for use with @c QWidget::setStyleSheet().
  */
+
+// =============================================================================
+// Header bar frequency display
+// =============================================================================
+
 static inline QString logFrameStyle() {
 #if defined(Q_OS_MACOS)
     return QStringLiteral("QFrame#frame { background-color: #F2F2F0; }"
@@ -176,6 +181,7 @@ static inline QString logFrameStyle() {
                           " font-size: 15pt;"
                           " font-weight: bold;"
                           " min-width: 150px;"
+                          " max-width: 150px;"
                           " min-height: 20px;"
                           " max-height: 50px;"
                           "}");
@@ -244,7 +250,7 @@ namespace Styles {
 // Header Bar
 // ---------------------------------------------------------------------------
 
-/// Background style for the header bar's log/status frame (macOS).
+/// Background style for the header bar frame (macOS).
 constexpr const char *LogWidgetStyle =
     "QFrame#logWidget { background-color: #F2F2F0; }";
 
@@ -259,6 +265,8 @@ constexpr const char *DialFreqUpDownButtonStyle =
     "    margin: 0px;"
     "    min-height: 14px;"
     "    max-height: 14px;"
+    "    min-width: 10px;"
+    "    max-width: 10px;"
     "}";
 
 /**
@@ -291,6 +299,8 @@ class OffsetSliderWidget : public QWidget {
             QSlider {
                 background: transparent;
                 min-height: 14px;
+                min-width: 100px;
+                max-width: 100px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
@@ -319,9 +329,9 @@ class OffsetSliderWidget : public QWidget {
         slider->setValue(1500);
         valueLabel = new QLabel("0 Hz", this);
         valueLabel->setStyleSheet("QLabel { color: black; }");
-        valueLabel->setMinimumWidth(60);
+        valueLabel->setMinimumWidth(20);
         layout->addWidget(caption);
-        layout->addWidget(slider, 1);
+        layout->addWidget(slider);
         layout->addWidget(valueLabel);
         connect(slider, &QSlider::valueChanged, this, [this](int val) {
             valueLabel->setText(QString("%1 Hz").arg(val));
@@ -486,7 +496,7 @@ namespace Styles {
 // Header Bar
 // ---------------------------------------------------------------------------
 
-/// Background style for the header bar's log/status frame (Windows).
+/// Background style for the header bar frame (Windows).
 constexpr const char *LogWidgetStyle =
     "QFrame#logWidget { background-color: #DDEEFF; }";
 

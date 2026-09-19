@@ -1295,25 +1295,6 @@ void UI_Constructor::updateCallActivityHeaderLabel() {
             .arg(m_config.callsign_aging()));
 }
 
-/**
- * @brief Populate the header bar's widgets.
- *
- * config_label sits in the static slot between the frequency and
- * clock displays. It only displays for non-default configurations
- */
-void UI_Constructor::createHeaderBar()
-{
-    config_label.setAlignment(Qt::AlignCenter);
-    {
-        QFont headerFont = config_label.font();
-        headerFont.setPointSize(14);
-        headerFont.setBold(true);
-        config_label.setFont(headerFont);
-    }
-    ui->horizontalLayout_17->insertWidget(2, &config_label);
-    config_label.hide(); // only shown for non-default configuration
-}
-
 void UI_Constructor::createControlBar()
 {
     statusBar()->hide();
@@ -1413,19 +1394,8 @@ void UI_Constructor::bindStatusButtonToAction(QPushButton *button, QAction *acti
     });
 }
 
-void UI_Constructor::syncHeaderRowWidth() {
-    if (!ui->textHorizontalSplitter || !ui->logWidget) {
-        return;
-    }
-    auto const sizes = ui->textHorizontalSplitter->sizes();
-    if (sizes.size() >= 2) {
-        ui->logWidget->setMaximumWidth(sizes.at(0) + sizes.at(1));
-    }
-}
-
 void UI_Constructor::resizeEvent(QResizeEvent *e) {
     QMainWindow::resizeEvent(e);
-    syncHeaderRowWidth();
 }
 
 void UI_Constructor::closeEvent(QCloseEvent *e) {

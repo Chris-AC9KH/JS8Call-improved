@@ -125,16 +125,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->labUTC->setStyleSheet(Styles::LabUTCStyle);
     updateCallActivityHeaderLabel();
 
-    createHeaderBar();
     createControlBar();
     add_child_to_event_filter(this);
-
-    // Keep the header row (frequency + callsign/clock) aligned with the
-    // tableWidgetRXAll + textEditRX columns below, including live updates
-    // as the user drags the splitter.
-    connect(ui->textHorizontalSplitter, &QSplitter::splitterMoved, this,
-            &UI_Constructor::syncHeaderRowWidth);
-    QTimer::singleShot(0, this, &UI_Constructor::syncHeaderRowWidth);
 
     m_baseCall = Radio::base_callsign(m_config.my_callsign());
     m_opCall = m_config.opCall();
@@ -574,15 +566,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             &UI_Constructor::manualBandHop);
 
     // set up configurations menu
-    connect(m_multi_settings, &MultiSettings::configurationNameChanged,
-            [this](QString const &name) {
-                if ("Default" != name) {
-                    config_label.setText(name);
-                    config_label.show();
-                } else {
-                    config_label.hide();
-                }
-            });
     m_multi_settings->create_menu_actions(this, ui->menuConfig);
     m_configurations_button = m_rigErrorMessageBox.addButton(
         tr("Configurations..."), QMessageBox::ActionRole);
