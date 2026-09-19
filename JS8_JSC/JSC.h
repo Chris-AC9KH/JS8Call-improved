@@ -62,11 +62,6 @@ typedef struct Tuple {
  */
 class JSC {
   public:
-#if 0
-    static CompressionTable loadCompressionTable();
-    static CompressionTable loadCompressionTable(QTextStream &stream);
-#endif
-
     /**
      * @brief Build a codeword for the given parameters.
      * @param index Index into the dictionary.

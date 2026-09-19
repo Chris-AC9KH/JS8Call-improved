@@ -9,7 +9,6 @@
 
 #include "moc_mainwindow.cpp"
 
-// TODO: Move to member:
 static char message[29];
 static char msgsent[29];
 static int msgibits;
@@ -49,24 +48,6 @@ QString timed(QStringView const state, int const delay) {
         return QString("%1 (%2s)").arg(state).arg(time.rem);
 }
 } // namespace State
-
-#if 0
-  int round(int numToRound, int multiple)
-  {
-   if(multiple == 0)
-   {
-    return numToRound;
-   }
-
-   int roundDown = ( (int) (numToRound) / multiple) * multiple;
-
-   if(numToRound - roundDown > multiple/2){
-    return roundDown + multiple;
-   }
-
-   return roundDown;
-  }
-#endif
 
 int roundUp(int numToRound, int multiple) {
     if (multiple == 0) {
@@ -239,25 +220,9 @@ void UI_Constructor::tryBandHop() {
                         }
                         m->deleteLater();
                     });
-
             m->show();
-
-#if 0
-          QTimer *t = new QTimer(this);
-          t->setInterval(250);
-          t->setSingleShot(true);
-          connect(t, &QTimer::timeout, this, [this, frequency, dialFreq](){
-              auto message = QString("Scheduled frequency switch from %1 MHz to %2 MHz");
-              message = message.arg(Radio::frequency_MHz_string(dialFreq));
-              message = message.arg(Radio::frequency_MHz_string(frequency));
-              writeNoticeTextToUI(DriftingDateTime::currentDateTimeUtc(), message);
-          });
-          t->start();
-#endif
-
             return;
         }
-
         delete hopStation;
     }
 }
@@ -338,19 +303,6 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("ShowColumns", QVariant(m_showColumnsCache));
     m_settings->setValue("HBInterval", m_hbInterval);
     m_settings->setValue("CQInterval", m_cqInterval);
-
-    // TODO: jsherer - need any other customizations?
-    /*m_settings->setValue("PanelLeftGeometry",
-    ui->tableWidgetRXAll->geometry());
-    m_settings->setValue("PanelRightGeometry",
-    ui->tableWidgetCalls->geometry()); m_settings->setValue("PanelTopGeometry",
-    ui->extFreeTextMsg->geometry()); m_settings->setValue("PanelBottomGeometry",
-    ui->extFreeTextMsgEdit->geometry());
-    m_settings->setValue("PanelWaterfallGeometry",
-    ui->bandHorizontalWidget->geometry());*/
-    // m_settings->setValue("MainSplitter",
-    // QVariant::fromValue(ui->mainSplitter->sizes()));
-
     m_settings->endGroup();
 
     // Call activity now lives in activity.db3, written row-by-row as
@@ -481,23 +433,6 @@ void UI_Constructor::readSettings() {
     m_showColumnsCache = m_settings->value("ShowColumns").toMap();
     m_hbInterval = m_settings->value("HBInterval", 0).toInt();
     m_cqInterval = m_settings->value("CQInterval", 0).toInt();
-
-    // TODO: jsherer - any other customizations?
-    // ui->mainSplitter->setSizes(m_settings->value("MainSplitter",
-    // QVariant::fromValue(ui->mainSplitter->sizes())).value<QList<int> >());
-    // ui->tableWidgetRXAll->restoreGeometry(m_settings->value("PanelLeftGeometry",
-    // ui->tableWidgetRXAll->saveGeometry()).toByteArray());
-    // ui->tableWidgetCalls->restoreGeometry(m_settings->value("PanelRightGeometry",
-    // ui->tableWidgetCalls->saveGeometry()).toByteArray());
-    // ui->extFreeTextMsg->setGeometry( m_settings->value("PanelTopGeometry",
-    // ui->extFreeTextMsg->geometry()).toRect());
-    // ui->extFreeTextMsgEdit->setGeometry(
-    // m_settings->value("PanelBottomGeometry",
-    // ui->extFreeTextMsgEdit->geometry()).toRect());
-    // ui->bandHorizontalWidget->setGeometry(
-    // m_settings->value("PanelWaterfallGeometry",
-    // ui->bandHorizontalWidget->geometry()).toRect()); qCDebug(mainwindow_js8)
-    // << m_settings->value("PanelTopGeometry") << ui->extFreeTextMsg;
 
     setTextEditStyle(ui->textEditRX, m_config.color_rx_foreground(),
                      m_config.color_rx_background(), m_config.rx_text_font());
@@ -1231,12 +1166,6 @@ void UI_Constructor::updateCurrentBand() {
 }
 
 void UI_Constructor::displayDialFrequency() {
-#if 0
-    qCDebug(mainwindow_js8) << "rx nominal" << m_freqNominal;
-    qCDebug(mainwindow_js8) << "tx nominal" << m_freqTxNominal;
-    qCDebug(mainwindow_js8) << "offset set to" << freq() << freq();
-#endif
-
     auto dial_frequency = dialFrequency();
     auto audio_frequency = freq();
 
@@ -1578,10 +1507,6 @@ bool UI_Constructor::decode(qint32 k) {
     }
 #endif
 
-    //
-    // TODO: what follows can likely be pulled out to an async process
-    //
-
     // pause decoder if we are currently transmitting
     if (m_transmitting) {
         // We used to use isMessageQueuedForTransmit, and some form of checking
@@ -1764,12 +1689,6 @@ bool UI_Constructor::decodeEnqueueReady(qint32 k, qint32 k0) {
  * @return true if decoder ranges were queued, false otherwise
  */
 bool UI_Constructor::decodeEnqueueReadyExperiment(qint32 k, qint32 /*k0*/) {
-    // TODO: make this non-static field of UI_Constructor?
-    // map of last decode positions for each submode
-    // static QMap<qint32, qint32> m_lastDecodeStartMap;
-
-    // TODO: make this non-static field of UI_Constructor?
-    // map of submodes to decode + optional alternate decode positions
     static QMap<qint32, QList<qint32>> submodes = {
         {Varicode::JS8CallSlow, {0}},
         {Varicode::JS8CallNormal, {0}},
@@ -2181,30 +2100,6 @@ bool UI_Constructor::hasExistingMessageBuffer(int submode, int offset,
     return false;
 }
 
-bool UI_Constructor::hasClosedExistingMessageBuffer(int offset) {
-#if 0
-    int range = 10;
-    if(m_nSubMode == Varicode::JS8CallFast){ range = 16; }
-    if(m_nSubMode == Varicode::JS8CallTurbo){ range = 32; }
-
-    return offset - range <= m_lastClosedMessageBufferOffset && m_lastClosedMessageBufferOffset <= offset + range;
-#elif 0
-    int range = 10;
-    if (m_nSubMode == Varicode::JS8CallFast) {
-        range = 16;
-    }
-    if (m_nSubMode == Varicode::JS8CallTurbo) {
-        range = 32;
-    }
-
-    return m_lastClosedMessageBufferOffset - range <= offset &&
-           offset <= m_lastClosedMessageBufferOffset + range;
-#else
-    Q_UNUSED(offset);
-#endif
-    return false;
-}
-
 void UI_Constructor::logCallActivity(CallDetail d, bool spot) {
     // don't log empty calls
     if (d.call.trimmed().isEmpty()) {
@@ -2449,7 +2344,6 @@ void UI_Constructor::prepareSending(qint64 nowMS) {
 
     auto const msgLength = QStringView(m_nextFreeTextMsg).trimmed().length();
 
-    // TODO: stop
     if (msgLength == 0 && !m_tune) {
         m_stopTxButtonIsLongterm = false;
         this->on_stopTxButton_clicked();
@@ -2498,7 +2392,6 @@ void UI_Constructor::prepareSending(qint64 nowMS) {
         emitPTT(true);
     }
 
-    // TODO: stop
     if (!m_timeToSend and !m_tune)
         m_btxok = false; // Time to stop transmitting
 
@@ -2596,15 +2489,12 @@ void UI_Constructor::prepareSending(qint64 nowMS) {
             write_transmit_entry("ALL.TXT");
         }
 
-        // TODO: jsherer - perhaps an on_transmitting signal?
         m_lastTxStartTime = DriftingDateTime::currentDateTimeUtc();
-
         m_transmitting = true;
         transmitDisplay(true);
         statusUpdate();
     }
 
-    // TODO: stop
     if (!m_btxok && m_btxok0 && m_iptt == 1)
         stopTx();
 }
@@ -2761,14 +2651,6 @@ void UI_Constructor::transmit() {
 void UI_Constructor::stopTx() {
     Q_EMIT endTransmitMessage();
 
-    // TODO: uncomment if we want to mark after the frame is sent.
-    //// // start message marker
-    //// // - keep track of the total message sent so far, and mark it having
-    /// been sent / m_totalTxMessage.append(dt.message()); /
-    /// ui->extFreeTextMsgEdit->setCharsSent(m_totalTxMessage.length()); /
-    /// qCDebug(mainwindow_js8) << "total sent:\n" << m_totalTxMessage; / // end
-    /// message marker
-
     m_btxok = false;
     m_transmitting = false;
     m_iptt = 0;
@@ -2780,7 +2662,6 @@ void UI_Constructor::stopTx() {
     bool shouldContinue = prepareNextMessageFrame();
 #endif
     if (!shouldContinue) {
-        // TODO: jsherer - split this up...
         ui->extFreeTextMsgEdit->clear();
         ui->extFreeTextMsgEdit->setReadOnly(false);
         update_dynamic_property(ui->extFreeTextMsgEdit, "transmitting", false);
@@ -3366,19 +3247,6 @@ QString UI_Constructor::createMessageTransmitQueue(QString const &text,
 
     m_txFrameQueue.append(frames);
     m_txFrameCount += frames.length();
-
-    // TODO: jsherer - move this outside of create message transmit queue
-    // if we're transmitting a message to be displayed, we should bump the
-    // repeat buttons... "Bump the repeat buttons" from 2018 probably translates
-    // to "stop automatic transmission loops" in 2025: qCDebug(mainwindow_js8)
-    // << "Cancel HB and CQ transmit loops in createMessageTransmitQueue";
-    // m_cq_loop->onLoopCancel();
-    // m_hb_loop->onLoopCancel();
-    // But the loops cause this code to be executed as part of their
-    // normal operation, when the first transmission is sent.
-    // So the cancelation makes it impossible to iterate through the loop a
-    // second time.
-
     // return the text
     return lines.join("");
 }
@@ -3470,8 +3338,6 @@ UI_Constructor::buildMessageFrames(const QString &text, bool isData,
     QString mygrid = m_config.my_grid().left(4);
 
     bool forceIdentify = !m_config.avoid_forced_identify();
-
-    // TODO: might want to be more explicit?
     bool forceData = m_txFrameCountSent > 0 && isData;
 
     Varicode::MessageInfo info;
@@ -3485,22 +3351,12 @@ UI_Constructor::buildMessageFrames(const QString &text, bool isData,
                               Varicode::isCommandChecksumed(info.dirCmd));
     }
 
-#if 0
-    qCDebug(mainwindow_js8) << "frames:";
-    foreach(auto frame, frames){
-        auto dt = DecodedText(frame.frame, frame.bits);
-        qCDebug(mainwindow_js8) << "->" << frame << dt.message() << Varicode::frameTypeString(dt.frameType());
-    }
-#endif
-
     return frames;
 }
 
 bool UI_Constructor::prepareNextMessageFrame() {
     // check to see if the last i3bit was a last bit
     bool i3bitLast = (m_i3bit & Varicode::JS8CallLast) == Varicode::JS8CallLast;
-
-    // TODO: should this be user configurable?
     bool shouldForceDataForTypeahead = !i3bitLast;
 
     // reset i3
@@ -3633,115 +3489,6 @@ int UI_Constructor::findFreeFreqOffset(int fmin, int fmax, int bw) {
     // return fmin if there's no free offset
     return fmin;
 }
-
-#if 0
-// schedulePing
-void UI_Constructor::scheduleHeartbeat(bool first){
-    auto timestamp = DriftingDateTime::currentDateTimeUtc();
-
-    // if we have the heartbeat interval disabled, return early, unless this is a "heartbeat now"
-    if(!m_config.heartbeat() && !first){
-        heartbeatTimer.stop();
-        return;
-    }
-
-    // remove milliseconds
-    auto t = timestamp.time();
-    t.setHMS(t.hour(), t.minute(), t.second());
-    timestamp.setTime(t);
-
-    // round to 15 second increment
-    int secondsSinceEpoch = (timestamp.toMSecsSinceEpoch()/1000);
-    int delta = roundUp(secondsSinceEpoch, 15) + 1 + (first ? 0 : qMax(1, m_config.heartbeat()) * 60) - secondsSinceEpoch;
-    timestamp = timestamp.addSecs(delta);
-
-    // 25% of the time, switch intervals
-    float prob = (float) QRandomGenerator::global()->generate() / (RAND_MAX);
-    if(prob < 0.25){
-        timestamp = timestamp.addSecs(15);
-    }
-
-    m_nextHeartbeat = timestamp;
-    m_nextHeartbeatQueued = false;
-    m_nextHeartPaused = false;
-
-    if(!heartbeatTimer.isActive()){
-        heartbeatTimer.setInterval(1000);
-        heartbeatTimer.start();
-    }
-}
-
-// pausePing
-void UI_Constructor::pauseHeartbeat(){
-    m_nextHeartPaused = true;
-
-    if(heartbeatTimer.isActive()){
-        heartbeatTimer.stop();
-    }
-}
-
-// unpausePing
-void UI_Constructor::unpauseHeartbeat(){
-    scheduleHeartbeat(false);
-}
-
-// checkPing
-void UI_Constructor::checkHeartbeat(){
-    if(m_config.heartbeat() <= 0){
-        return;
-    }
-    auto secondsUntilHeartbeat = DriftingDateTime::currentDateTimeUtc().secsTo(m_nextHeartbeat);
-    if(secondsUntilHeartbeat > 5 && m_txHeartbeatQueue.isEmpty()){
-        return;
-    }
-    if(m_nextHeartbeatQueued){
-        return;
-    }
-    if(m_tx_watchdog){
-        return;
-    }
-
-    // idle heartbeat watchdog!
-    if (m_config.watchdog() && m_idleMinutes >= m_config.watchdog ()){
-      tx_watchdog (true);       // disable transmit
-      return;
-    }
-
-    prepareHeartbeat();
-}
-
-// preparePing
-void UI_Constructor::prepareHeartbeat(){
-    QStringList lines;
-
-    QString mycall = m_config.my_callsign();
-    QString mygrid = m_config.my_grid().left(4);
-
-    // JS8Call Style
-    if(m_txHeartbeatQueue.isEmpty()){
-        lines.append(QString("%1: HEARTBEAT %2").arg(mycall).arg(mygrid));
-    } else {
-        while(!m_txHeartbeatQueue.isEmpty() && lines.length() < 1){
-            lines.append(m_txHeartbeatQueue.dequeue());
-        }
-    }
-
-    // Choose a ping frequency
-    auto f = m_config.heartbeat_anywhere() ? -1 : findFreeFreqOffset(500, 1000, 50);
-
-    auto text = lines.join(QChar('\n'));
-    if(text.isEmpty()){
-        return;
-    }
-
-    // Queue the ping
-    enqueueMessage(PriorityLow, text, f, [this](){
-        m_nextHeartbeatQueued = false;
-    });
-
-    m_nextHeartbeatQueued = true;
-}
-#endif
 
 void UI_Constructor::on_startTxButton_toggled(bool checked) {
     if (checked) {
@@ -4038,14 +3785,6 @@ void UI_Constructor::prepareHeartbeatMode(bool enabled) {
     ui->actionModeJS8HB->setEnabled(canCurrentModeSendHeartbeat());
     ui->actionHeartbeatAcknowledgements->setEnabled(
         enabled && ui->actionModeAutoreply->isChecked());
-
-#if 0
-    if(enabled){
-        m_config.addGroup("@HB");
-    } else {
-        m_config.removeGroup("@HB");
-    }
-#endif
 
     updateHBButtonDisplay();
     updateButtonDisplay();
@@ -4912,15 +4651,11 @@ void UI_Constructor::on_tableWidgetRXAll_cellClicked(int /*row*/, int /*col*/) {
 
 void UI_Constructor::on_tableWidgetRXAll_cellDoubleClicked(int row, int col) {
     on_tableWidgetRXAll_cellClicked(row, col);
-
-    // TODO: jsherer - could also parse the messages for the last callsign?
     auto item = ui->tableWidgetRXAll->item(row, 0);
     int offset = item->text().replace(" Hz", "").toInt();
 
     // switch to the offset of this row
     changeFreq(offset);
-
-    // TODO: prompt mode switch?
 
     // print the history in the main window...
     int activityAging = m_config.activity_aging();
@@ -4989,13 +4724,6 @@ void UI_Constructor::on_tableWidgetCalls_cellDoubleClicked(int row, int col) {
 
 #if SHOW_MESSAGE_HISTORY_ON_DOUBLECLICK
     if (m_rxInboxCountCache.value(call, 0) > 0) {
-
-        // TODO:
-        // CommandDetail d = m_rxCallsignInboxCountCache[call].first();
-        // m_rxCallsignInboxCountCache[call].removeFirst();
-        //
-        // processAlertReplyForCommand(d, d.relayPath, d.cmd);
-
         Inbox i(inboxPath());
         if (i.open()) {
             QList<Message> msgs;
@@ -5240,14 +4968,9 @@ bool UI_Constructor::tryRestoreFreqOffset() {
 void UI_Constructor::changeFreq(int const newFreq) {
     // Don't allow QSY if we've already queued a transmission,
     // unless we have that functionality enabled.
-
     if (isMessageQueuedForTransmit() && !m_config.tx_qsy_allowed())
         return;
-
-    // TODO: jsherer - here's where we'd set minimum frequency again (later?)
-
     setFreq(std::max(0, newFreq));
-
     displayDialFrequency();
 }
 
@@ -5433,22 +5156,6 @@ void UI_Constructor::transmitDisplay(bool transmitting) {
 }
 
 void UI_Constructor::postDecode(bool is_new, QString const &) {
-#if 0
-  auto const& decode = message.trimmed ();
-  auto const& parts = decode.left (22).split (' ', QString::SkipEmptyParts);
-  if (parts.size () >= 5)
-  {
-      auto has_seconds = parts[0].size () > 4;
-      m_messageClient->decode (is_new
-                               , QTime::fromString (parts[0], has_seconds ? "hhmmss" : "hhmm")
-                               , parts[1].toInt ()
-                               , parts[2].toFloat (), parts[3].toUInt (), parts[4]
-                               , decode.mid (has_seconds ? 24 : 22, 21)
-                               , QChar {'?'} == decode.mid (has_seconds ? 24 + 21 : 22 + 21, 1)
-                               , m_diskData);
-  }
-#endif
-
     if (is_new) {
         m_rxDirty = true;
     }
@@ -5808,9 +5515,6 @@ void UI_Constructor::callsignSelectedChanged(QString /*old*/,
         }
 
         if (m_config.heartbeat_qso_pause()) {
-            // TODO: jsherer - HB issue
-            // don't hb if we select a callsign... (but we should keep track so
-            // if we deselect, we restore our hb)
             if (ui->hbMacroButton->isChecked()) {
                 qCDebug(mainwindow_js8)
                     << "Unchecking hbMacroButton after selection"
@@ -6093,8 +5797,6 @@ void UI_Constructor::processCompoundActivity() {
 
         m_rxCommandQueue.append(buffer.cmd);
         m_messageBuffer.remove(freq);
-
-        // TODO: only if to me?
         m_lastClosedMessageBufferOffset = freq;
     }
 }

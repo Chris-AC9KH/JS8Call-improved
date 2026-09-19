@@ -580,7 +580,6 @@ int HamlibTransceiver::do_start() {
 
     if (is_dummy_ && dummy_frequency_) {
         // return to where last dummy instance was
-        // TODO: this is going to break down if multiple dummy rigs are used
         rig_set_freq(rig_.data(), RIG_VFO_CURR, dummy_frequency_);
         update_rx_frequency(dummy_frequency_);
         if (RIG_MODE_NONE != dummy_mode_) {

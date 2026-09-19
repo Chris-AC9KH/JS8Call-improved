@@ -600,7 +600,6 @@ QString Varicode::huffDecode(QMap<QString, QString> const &huff,
 
     QString bits = Varicode::bitsToStr(bitvec);
 
-    // TODO: jsherer - this is naive...
     while (bits.length() > 0) {
         bool found = false;
         foreach (auto key, huff.keys()) {
@@ -2014,7 +2013,6 @@ QString Varicode::unpackFastDataMessage(const QString &text) {
     return unpacked;
 }
 
-// TODO: remove the dependence on providing all this data?
 QList<QPair<QString, int>>
 Varicode::buildMessageFrames(QString const &mycall, QString const &mygrid,
                              QString const &selectedCall, QString const &text,
@@ -2331,8 +2329,6 @@ void BuildMessageFramesThread::run() {
         Varicode::buildMessageFrames(m_mycall, m_mygrid, m_selectedCall, m_text,
                                      m_forceIdentify, m_forceData, m_submode);
 
-    // TODO: jsherer - we wouldn't normally use DecodedText.h here... but it's
-    // useful for computing the actual frames transmitted.
     QStringList textList;
     qCDebug(varicode_js8) << "frames:";
     foreach (auto frame, results) {

@@ -530,10 +530,7 @@ void WideGraph::on_qsyPushButton_clicked() { emit qsy(freq() - centerFreq()); }
 void WideGraph::on_offsetSpinBox_valueChanged(int const n) {
     if (n == freq())
         return;
-
-    // TODO: jsherer - here's where we'd set minimum frequency again (later?)
     auto const newFreq = qMax(0, n);
-
     setFreq(newFreq);
     emit changeFreq(newFreq);
 }

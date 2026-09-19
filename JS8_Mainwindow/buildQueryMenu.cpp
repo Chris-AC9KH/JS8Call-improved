@@ -194,20 +194,6 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
             toggleTx(true);
     });
 
-#if 0
-    auto retransmitAction = menu->addAction(QString("%1|[MESSAGE] - Please ACK and retransmit the following message").arg(call).trimmed());
-    retransmitAction->setDisabled(isAllCall);
-    connect(retransmitAction, &QAction::triggered, this, [this](){
-
-        QString selectedCall = callsignSelected();
-        if(selectedCall.isEmpty()){
-            return;
-        }
-
-        addMessageText(QString("%1|[MESSAGE]").arg(selectedCall), true, true);
-    });
-#endif
-
     auto alertAction = menu->addAction(
         QString("%1>[MESSAGE] - Please relay this message to its destination")
             .arg(call)
