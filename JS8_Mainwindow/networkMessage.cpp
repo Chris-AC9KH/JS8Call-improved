@@ -321,7 +321,6 @@ void UI_Constructor::networkMessage(Message const &message) {
             {"AUTO_REPLY", QVariant(ui->actionModeAutoreply->isChecked())},
             {"JS8HB", QVariant(ui->actionModeJS8HB->isChecked())},
             {"HBACK", QVariant(ui->actionHeartbeatAcknowledgements->isChecked())},
-            {"MULTI_DECODER", QVariant(ui->actionModeMultiDecoder->isChecked())},
             {"HB_INTERVAL", QVariant(m_hbInterval)},
             {"HB_TIMER_ACTIVE", QVariant(m_hb_loop->isActive())},
             {"MONITOR", QVariant(ui->monitorButton->isChecked())},
@@ -367,18 +366,6 @@ void UI_Constructor::networkMessage(Message const &message) {
         sendNetworkMessage("STATION.SET_HBACK", "", {
             {"_ID", id},
             {"HBACK", QVariant(ui->actionHeartbeatAcknowledgements->isChecked())},
-        });
-        return;
-    }
-
-    /** @brief STATION.SET_MULTI_DECODER: Toggle multi-decoder mode.
-     *  @note API 2.6+ */
-    if (type == "STATION.SET_MULTI_DECODER") {
-        auto checked = QVariant(message.value()).toBool();
-        ui->actionModeMultiDecoder->setChecked(checked);
-        sendNetworkMessage("STATION.SET_MULTI_DECODER", "", {
-            {"_ID", id},
-            {"MULTI_DECODER", QVariant(ui->actionModeMultiDecoder->isChecked())},
         });
         return;
     }

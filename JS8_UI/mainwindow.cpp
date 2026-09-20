@@ -292,8 +292,6 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("SubModeHB", ui->actionModeJS8HB->isChecked());
     m_settings->setValue("SubModeHBAck",
                          ui->actionHeartbeatAcknowledgements->isChecked());
-    m_settings->setValue("SubModeMultiDecode",
-                         ui->actionModeMultiDecoder->isChecked());
     m_settings->setValue("DialFreq",
                          QVariant::fromValue(m_lastMonitoredFrequency));
     m_settings->setValue("OutAttenuation", ui->outAttenuation->value());
@@ -411,8 +409,6 @@ void UI_Constructor::readSettings() {
         m_settings->value("SubModeHB", false).toBool());
     ui->actionHeartbeatAcknowledgements->setChecked(
         m_settings->value("SubModeHBAck", false).toBool());
-    ui->actionModeMultiDecoder->setChecked(
-        m_settings->value("SubModeMultiDecode", true).toBool());
 
     m_lastMonitoredFrequency =
         m_settings
@@ -1230,10 +1226,10 @@ void UI_Constructor::createControlBar()
     
     // give button columns stretch so they grow with available space,
     // while spacer columns (already Expanding by default) stay lighter-weight gaps
-    for (int col : {0, 1, 2, 4, 5, 7, 8, 9, 11, 12}) {
+    for (int col : {0, 1, 3, 4, 6, 7, 8, 10, 11}) {
         ui->controlGridLayout->setColumnStretch(col, 1);
     }
-    for (int col : {3, 6, 10}) {
+    for (int col : {2, 5, 9}) {
         ui->controlGridLayout->setColumnStretch(col, 0);
     }
 
@@ -1258,8 +1254,6 @@ void UI_Constructor::createControlBar()
     // On/off control buttons that use a QAction state
     bindStatusButtonToAction(ui->auto_reply_button, ui->actionModeAutoreply, "Auto Reply");
     ui->auto_reply_button->setToolTip(tr("Turn on/off Auto Reply"));
-    bindStatusButtonToAction(ui->multi_button, ui->actionModeMultiDecoder, "Multi Decode");
-    ui->multi_button->setToolTip(tr("Turn on/off decode of all mode speeds"));
     bindStatusButtonToAction(ui->hb_button, ui->actionModeJS8HB, "HB");
     ui->hb_button->setToolTip(tr("Turn on/off heartbeat networking"));
     bindStatusButtonToAction(ui->hb_ack_button, ui->actionHeartbeatAcknowledgements, "HB ACK");
@@ -1705,8 +1699,7 @@ bool UI_Constructor::decodeEnqueueReadyExperiment(qint32 k, qint32 /*k0*/) {
 
     int decodes = 0;
 
-    // do we have a better way to check this?
-    bool multi = ui->actionModeMultiDecoder->isChecked();
+    bool multi = true;
 
     // do we need to process alternate positions?
     bool skipAlt = true;
@@ -1714,12 +1707,6 @@ bool UI_Constructor::decodeEnqueueReadyExperiment(qint32 k, qint32 /*k0*/) {
     foreach (auto submode, submodes.keys()) {
         // do we have a better way to check this?
         bool everySecond = m_wideGraph->shouldAutoSyncSubmode(submode);
-
-        // skip if multi is disabled and this mode is not the current submode
-        // and we're not autosyncing this mode
-        if (!everySecond && !multi && submode != m_nSubMode) {
-            continue;
-        }
 
         // check all alternate decode positions
         foreach (auto alt, submodes.value(submode)) {
@@ -1859,10 +1846,8 @@ bool UI_Constructor::decodeProcessQueue(qint32 *pSubmode) {
     int submode = -1;
     int maxDecodes = 1;
 
-    bool multi = ui->actionModeMultiDecoder->isChecked();
-    if (multi) {
-        maxDecodes = JS8_ENABLE_JS8I ? 5 : 4;
-    }
+    bool multi = true;
+    maxDecodes = JS8_ENABLE_JS8I ? 5 : 4;
 
     int count = m_decoderQueue.count();
     if (count > maxDecodes) {
@@ -1877,12 +1862,6 @@ bool UI_Constructor::decodeProcessQueue(qint32 *pSubmode) {
     while (!m_decoderQueue.isEmpty()) {
         auto params = m_decoderQueue.front();
         m_decoderQueue.removeFirst();
-
-        // skip if we are not in multi mode and the submode doesn't equal the
-        // global submode
-        if (!multi && params.submode != m_nSubMode) {
-            continue;
-        }
 
         if (submode == -1 || params.submode < submode) {
             submode = params.submode;
@@ -3731,14 +3710,6 @@ void UI_Constructor::on_actionHeartbeatAcknowledgements_toggled(bool) {
 
     prepareHeartbeatMode(canCurrentModeSendHeartbeat() &&
                          ui->actionModeJS8HB->isChecked());
-    displayActivity(true);
-
-    setupJS8();
-}
-
-void UI_Constructor::on_actionModeMultiDecoder_toggled(bool checked) {
-    Q_UNUSED(checked);
-
     displayActivity(true);
 
     setupJS8();

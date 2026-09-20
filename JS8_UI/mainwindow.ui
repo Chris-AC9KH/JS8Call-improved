@@ -1149,24 +1149,24 @@ color:#222;
        <property name="minimumSize">
         <size>
          <width>0</width>
-         <height>25</height>
+         <height>20</height>
         </size>
        </property>
        <property name="maximumSize">
         <size>
          <width>16777215</width>
-         <height>30</height>
+         <height>24</height>
         </size>
        </property>
        <layout class="QGridLayout" name="controlGridLayout">
         <property name="leftMargin">
-         <number>0</number>
+         <number>100</number>
         </property>
         <property name="topMargin">
          <number>0</number>
         </property>
         <property name="rightMargin">
-         <number>0</number>
+         <number>100</number>
         </property>
         <property name="bottomMargin">
          <number>0</number>
@@ -1185,7 +1185,7 @@ color:#222;
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
            </size>
           </property>
          </widget>
@@ -1195,7 +1195,7 @@ color:#222;
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
            </size>
           </property>
           <property name="checkable">
@@ -1204,19 +1204,6 @@ color:#222;
          </widget>
         </item>
         <item row="0" column="2">
-         <widget class="QPushButton" name="multi_button">
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>26</height>
-           </size>
-          </property>
-          <property name="checkable">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item row="0" column="3">
          <spacer name="controlGroupSpacer_1">
           <property name="orientation">
            <enum>Qt::Orientation::Horizontal</enum>
@@ -1229,12 +1216,25 @@ color:#222;
           </property>
          </spacer>
         </item>
-        <item row="0" column="4">
+        <item row="0" column="3">
          <widget class="QPushButton" name="hb_button">
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="4">
+         <widget class="QPushButton" name="hb_ack_button">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>20</height>
            </size>
           </property>
           <property name="checkable">
@@ -1243,19 +1243,6 @@ color:#222;
          </widget>
         </item>
         <item row="0" column="5">
-         <widget class="QPushButton" name="hb_ack_button">
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>26</height>
-           </size>
-          </property>
-          <property name="checkable">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item row="0" column="6">
          <spacer name="controlGroupSpacer_2">
           <property name="orientation">
            <enum>Qt::Orientation::Horizontal</enum>
@@ -1268,12 +1255,25 @@ color:#222;
           </property>
          </spacer>
         </item>
-        <item row="0" column="7">
+        <item row="0" column="6">
          <widget class="QPushButton" name="monitorTxButton">
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="7">
+         <widget class="QPushButton" name="monitorButton">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>20</height>
            </size>
           </property>
           <property name="checkable">
@@ -1282,11 +1282,11 @@ color:#222;
          </widget>
         </item>
         <item row="0" column="8">
-         <widget class="QPushButton" name="monitorButton">
+         <widget class="QPushButton" name="tuneButton">
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
            </size>
           </property>
           <property name="checkable">
@@ -1295,19 +1295,6 @@ color:#222;
          </widget>
         </item>
         <item row="0" column="9">
-         <widget class="QPushButton" name="tuneButton">
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>26</height>
-           </size>
-          </property>
-          <property name="checkable">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item row="0" column="10">
          <spacer name="controlGroupSpacer_3">
           <property name="orientation">
            <enum>Qt::Orientation::Horizontal</enum>
@@ -1320,12 +1307,12 @@ color:#222;
           </property>
          </spacer>
         </item>
-        <item row="0" column="11">
+        <item row="0" column="10">
          <widget class="QPushButton" name="spotButton">
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
            </size>
           </property>
           <property name="checkable">
@@ -1333,12 +1320,12 @@ color:#222;
           </property>
          </widget>
         </item>
-        <item row="0" column="12">
+        <item row="0" column="11">
          <widget class="QPushButton" name="logQSOButton">
           <property name="minimumSize">
            <size>
             <width>0</width>
-            <height>26</height>
+            <height>20</height>
            </size>
           </property>
          </widget>
@@ -1696,7 +1683,6 @@ background-color: #22ff22;
     <addaction name="actionModeJS8Turbo"/>
     <addaction name="actionModeJS8Ultra"/>
     <addaction name="separator"/>
-    <addaction name="actionModeMultiDecoder"/>
     <addaction name="separator"/>
     <addaction name="actionModeAutoreply"/>
     <addaction name="actionModeJS8HB"/>
@@ -1993,17 +1979,6 @@ background-color: #22ff22;
    </property>
    <property name="shortcut">
     <string>Ctrl+Alt+R</string>
-   </property>
-  </action>
-  <action name="actionModeMultiDecoder">
-   <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
-    <bool>false</bool>
-   </property>
-   <property name="text">
-    <string>Enable Simultaneous Decoding of All Speeds (&amp;MULTI)</string>
    </property>
   </action>
   <action name="actionModeAutoreply">

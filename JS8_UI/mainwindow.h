@@ -369,7 +369,6 @@ class UI_Constructor : public QMainWindow {
     void on_actionModeJS8Slow_triggered();
     void on_actionModeJS8Ultra_triggered();
     void on_actionHeartbeatAcknowledgements_toggled(bool checked);
-    void on_actionModeMultiDecoder_toggled(bool checked);
     void on_actionModeAutoreply_toggled(bool checked);
     bool canCurrentModeSendHeartbeat() const;
     void prepareMonitorControls();

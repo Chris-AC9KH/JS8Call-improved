@@ -1436,7 +1436,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     for (QPushButton *b : {ui->monitorTxButton, ui->monitorButton, ui->logQSOButton,
                         ui->tuneButton, ui->spotButton, ui->auto_reply_button,
-                        ui->multi_button, ui->hb_button, ui->hb_ack_button}) {
+                        ui->hb_button, ui->hb_ack_button}) {
         b->setCursor(QCursor(Qt::PointingHandCursor));
     }
     ui->mode_button->setCursor(QCursor(Qt::PointingHandCursor));
