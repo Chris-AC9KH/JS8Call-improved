@@ -1954,7 +1954,7 @@ background-color: #22ff22;
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>JS8 &amp;60 (4 sec, ~60 wpm, fast but experimental mode)</string>
+    <string>JS8 &amp;60 (4 sec, ~60 wpm, lowest decoder sensitivity)</string>
    </property>
   </action>
   <action name="actionModeJS8HB">

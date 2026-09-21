@@ -1572,12 +1572,10 @@ bool UI_Constructor::decodeEnqueueReady(qint32 k, qint32 k0) {
     qint32 szE = -1;
     qint32 cycleE = -1;
 
-#if JS8_ENABLE_JS8I
     bool couldDecodeI = false;
     qint32 startI = -1;
     qint32 szI = -1;
     qint32 cycleI = -1;
-#endif
 
     static qint32 currentDecodeStartA = -1;
     static qint32 nextDecodeStartA = -1;
@@ -1611,7 +1609,6 @@ bool UI_Constructor::decodeEnqueueReady(qint32 k, qint32 k0) {
         isDecodeReady(Varicode::JS8CallSlow, k, k0, &currentDecodeStartE,
                       &nextDecodeStartE, &startE, &szE, &cycleE);
 
-#if JS8_ENABLE_JS8I
     static qint32 currentDecodeStartI = -1;
     static qint32 nextDecodeStartI = -1;
     qCDebug(decoder_js8) << "? JS8 60    " << currentDecodeStartI
@@ -1619,7 +1616,6 @@ bool UI_Constructor::decodeEnqueueReady(qint32 k, qint32 k0) {
     couldDecodeI =
         isDecodeReady(Varicode::JS8CallUltra, k, k0, &currentDecodeStartI,
                       &nextDecodeStartI, &startI, &szI, &cycleI);
-#endif
 
     if (couldDecodeA) {
         DecodeParams d;
@@ -1657,7 +1653,6 @@ bool UI_Constructor::decodeEnqueueReady(qint32 k, qint32 k0) {
         decodes++;
     }
 
-#if JS8_ENABLE_JS8I
     if (couldDecodeI) {
         DecodeParams d;
         d.submode = Varicode::JS8CallUltra;
@@ -1666,7 +1661,6 @@ bool UI_Constructor::decodeEnqueueReady(qint32 k, qint32 k0) {
         m_decoderQueue.append(d);
         decodes++;
     }
-#endif
 
     return decodes > 0;
 }
@@ -1689,17 +1683,13 @@ bool UI_Constructor::decodeEnqueueReadyExperiment(qint32 k, qint32 /*k0*/) {
         {Varicode::JS8CallFast, {0}},  // NORMAL: 0, 10, 20    --- ALT: 15, 25
         {Varicode::JS8CallTurbo, {0}}, // NORMAL: 0, 6, 12, 18 --- ALT: 15, 21,
                                        // 27
-#if JS8_ENABLE_JS8I
         {Varicode::JS8CallUltra, {0}},
-#endif
     };
 
     static qint32 maxSamples = JS8_RX_SAMPLE_SIZE;
     static qint32 oneSecondSamples = JS8_RX_SAMPLE_RATE;
 
     int decodes = 0;
-
-    bool multi = true;
 
     // do we need to process alternate positions?
     bool skipAlt = true;
@@ -1846,7 +1836,6 @@ bool UI_Constructor::decodeProcessQueue(qint32 *pSubmode) {
     int submode = -1;
     int maxDecodes = 1;
 
-    bool multi = true;
     maxDecodes = JS8_ENABLE_JS8I ? 5 : 4;
 
     int count = m_decoderQueue.count();
@@ -1888,13 +1877,11 @@ bool UI_Constructor::decodeProcessQueue(qint32 *pSubmode) {
             dec_data.params.kszE = params.sz;
             dec_data.params.nsubmodes |= (params.submode << 1);
             break;
-#if JS8_ENABLE_JS8I
         case Varicode::JS8CallUltra:
             dec_data.params.kposI = params.start;
             dec_data.params.kszI = params.sz;
             dec_data.params.nsubmodes |= (params.submode << 1);
             break;
-#endif
         }
     }
 
