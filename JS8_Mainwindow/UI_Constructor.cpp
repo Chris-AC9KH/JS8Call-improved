@@ -780,7 +780,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             if (!ensureCallsignSet(true))
                 return true;
 
-            toggleTx(true);
+            startTx();
             return true;
         },
         this));

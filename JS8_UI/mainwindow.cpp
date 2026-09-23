@@ -33,9 +33,9 @@ int ms_minute_error() {
 
 namespace State {
 constexpr QStringView Ready = u"Ready";
-constexpr QStringView Send = u"Send";
+constexpr QStringView Send = u"TX";
 constexpr QStringView Sending = u"Sending";
-constexpr QStringView Tuning = u"Tuning";
+constexpr QStringView Tuning = u"TX";
 
 QString timed(QStringView const state, int const delay) {
     auto time = std::div(delay, 60);
@@ -1021,7 +1021,9 @@ void UI_Constructor::on_monitorTxButton_toggled(bool checked) {
     if (!checked) {
         qCDebug(mainwindow_js8)
             << "on_monitorTxButton_toggled(" << checked << ") to stop TX.";
+        resetMessage();
         on_stopTxButton_clicked();
+        stopTx();
     }
 }
 
@@ -1034,16 +1036,16 @@ void UI_Constructor::on_spotButton_toggled(bool) {
 }
 
 void UI_Constructor::auto_tx_mode(bool state) {
+    if (m_auto == state) {
+        return;
+    }
+
     qCDebug(mainwindow_js8) << "auto_tx_mode(" << state << ")";
     m_auto = state;
     statusUpdate();
     if (state) {
-        // Let us not wait until the next polling slot, but prepare transmission
-        // now, even though that may waste a few CPU cycles through double work
-        // that will be done soon anyway:
         prepareSending(DriftingDateTime::currentMSecsSinceEpoch());
     } else {
-        // This function is called recursively from on_stopTxButton_clicked()!
         bool previous_stopTxButtonisLongterm = m_stopTxButtonIsLongterm;
         m_stopTxButtonIsLongterm = false;
         on_stopTxButton_clicked();
@@ -1261,7 +1263,6 @@ void UI_Constructor::createControlBar()
 
     // Tx
     ui->monitorTxButton->setToolTip(tr("Enable or disable the transmitter"));
-    ui->monitorTxButton->setText("TX");
     ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
     connect(ui->monitorTxButton, &QPushButton::toggled, this,
             &UI_Constructor::on_monitorTxButton_toggled);
@@ -3095,10 +3096,6 @@ void UI_Constructor::resetMessageUI() {
     ui->extFreeTextMsgEdit->setReadOnly(false);
 
     update_dynamic_property(ui->extFreeTextMsgEdit, "transmitting", false);
-
-    if (ui->startTxButton->isChecked()) {
-        ui->startTxButton->setChecked(false);
-    }
 }
 
 bool UI_Constructor::ensureCallsignSet(bool alert) {
@@ -3454,28 +3451,6 @@ int UI_Constructor::findFreeFreqOffset(int fmin, int fmax, int bw) {
 
     // return fmin if there's no free offset
     return fmin;
-}
-
-void UI_Constructor::on_startTxButton_toggled(bool checked) {
-    if (checked) {
-        startTx();
-    } else {
-        resetMessage();
-        on_stopTxButton_clicked();
-        stopTx();
-    }
-}
-
-void UI_Constructor::toggleTx(bool start) {
-    if (start && ui->startTxButton->isChecked()) {
-        return;
-    }
-    if (!start && !ui->startTxButton->isChecked()) {
-        return;
-    }
-    qCDebug(mainwindow_js8)
-        << "toggleTx(" << start << ") setting the TX button.";
-    ui->startTxButton->setChecked(start);
 }
 
 void UI_Constructor::on_logQSOButton_clicked() // Log QSO button
@@ -4120,8 +4095,9 @@ void UI_Constructor::sendCQ(bool repeat) {
 
     addMessageText(replaceMacros(message, buildMacroValues(), true));
 
-    if (repeat || m_config.transmit_directed())
-        toggleTx(true);
+    if ((repeat || m_config.transmit_directed()) && ui->monitorTxButton->isChecked()) {
+        startTx();
+    }
 }
 
 void UI_Constructor::on_cqMacroButton_toggled(bool checked) {
@@ -4166,8 +4142,9 @@ void UI_Constructor::on_replyMacroButton_clicked() {
     message = replaceMacros(message, buildMacroValues(), true);
     addMessageText(QString("%1 %2").arg(call).arg(message));
 
-    if (m_config.transmit_directed())
-        toggleTx(true);
+    if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+        startTx();
+    }
 }
 
 void UI_Constructor::on_snrMacroButton_clicked() {
@@ -4191,8 +4168,9 @@ void UI_Constructor::on_snrMacroButton_clicked() {
 
     addMessageText(QString("%1 SNR %2").arg(call).arg(snr));
 
-    if (m_config.transmit_directed())
-        toggleTx(true);
+    if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+        startTx();
+    }
 }
 
 void UI_Constructor::on_infoMacroButton_clicked() {
@@ -4204,8 +4182,9 @@ void UI_Constructor::on_infoMacroButton_clicked() {
     addMessageText(
         QString("INFO %1").arg(replaceMacros(info, buildMacroValues(), true)));
 
-    if (m_config.transmit_directed())
-        toggleTx(true);
+    if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+        startTx();
+    }
 }
 
 void UI_Constructor::on_statusMacroButton_clicked() {
@@ -4217,8 +4196,9 @@ void UI_Constructor::on_statusMacroButton_clicked() {
     addMessageText(QString("STATUS %1")
                        .arg(replaceMacros(status, buildMacroValues(), true)));
 
-    if (m_config.transmit_directed())
-        toggleTx(true);
+    if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+        startTx();
+    }
 }
 
 void UI_Constructor::setShowColumn(QString tableKey, QString columnKey,
@@ -4546,8 +4526,9 @@ void UI_Constructor::buildSavedMessagesMenu(QMenu *menu) {
             auto values = buildMacroValues();
             addMessageText(replaceMacros(macro, values, true));
 
-            if (m_config.transmit_directed())
-                toggleTx(true);
+            if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+                startTx();
+            }
         });
     }
 
@@ -5131,9 +5112,7 @@ void UI_Constructor::tryNotify(QString const &key) {
 
 void UI_Constructor::displayTransmit() {
     // Transmit Activity
-    update_dynamic_property(ui->startTxButton, "transmitting", m_transmitting);
-    update_dynamic_property(ui->monitorTxButton, "transmitting",
-                            m_transmitting);
+    update_dynamic_property(ui->monitorTxButton, "transmitting", m_transmitting);
 }
 
 bool UI_Constructor::canEnableHBReplies() {
@@ -5251,12 +5230,6 @@ void UI_Constructor::updateCQButtonDisplay() {
 }
 
 void UI_Constructor::updateTextDisplay() {
-    bool canTransmit = ensureCanTransmit();
-    bool isTransmitting = isMessageQueuedForTransmit();
-    bool emptyText = ui->extFreeTextMsgEdit->toPlainText().isEmpty();
-
-    ui->startTxButton->setDisabled(!canTransmit || isTransmitting || emptyText);
-
     if (m_txTextDirty) {
         // debounce frame and word count
         if (m_txTextDirtyDebounce.isActive()) {
@@ -5341,6 +5314,8 @@ void UI_Constructor::updateTextWordCheckerDisplay() {
 void UI_Constructor::updateTxButtonDisplay() {
     // can we transmit at all?
     bool canTransmit = ensureCanTransmit();
+    
+    update_dynamic_property(ui->monitorTxButton, "transmitting", m_transmitting);
 
     // if we're tuning or have a message queued
     if (m_tune || isMessageQueuedForTransmit()) {
@@ -5360,18 +5335,17 @@ void UI_Constructor::updateTxButtonDisplay() {
                                         : (((left + 2) * m_TRperiod) -
                                            ((m_sec0 + 1) % m_TRperiod)));
         }
-        ui->startTxButton->setText(buttonText);
-        ui->startTxButton->setEnabled(false);
-        ui->startTxButton->setFlat(true);
+        ui->monitorTxButton->setText(buttonText);
+        ui->monitorTxButton->setEnabled(false);
+        ui->monitorTxButton->setFlat(true);
     } else {
         QString const buttonText =
             m_txFrameCountEstimate > 0
                 ? State::timed(State::Send, m_txFrameCountEstimate * m_TRperiod)
                 : State::Send.toString();
-        ui->startTxButton->setText(buttonText);
-        ui->startTxButton->setEnabled(canTransmit &&
-                                      m_txFrameCountEstimate > 0);
-        ui->startTxButton->setFlat(false);
+        ui->monitorTxButton->setText(buttonText);
+        ui->monitorTxButton->setEnabled(true);
+        ui->monitorTxButton->setFlat(false);
     }
 }
 
@@ -6111,6 +6085,20 @@ void UI_Constructor::processTxQueue() {
         return;
     }
 
+    // TX must never be auto-enabled by incoming autoreply/HB traffic.
+    // If it's off, flush this message from the queue and stop — do not
+    // populate the pane, change frequency, or run the callback.
+    bool const isAutoTraffic =
+        head.priority >= PriorityHigh ||
+        head.message.contains(" HEARTBEAT ") ||
+        head.message.contains(" HB ") || head.message.contains(" ACK ") ||
+        ui->actionModeAutoreply->isChecked();
+
+    if (isAutoTraffic && !ui->monitorTxButton->isChecked()) {
+        m_txMessageQueue.dequeue();
+        return;
+    }
+
     // and if we are a low priority message, we need to have not transmitted
     // in the past 30 seconds...
     if (head.priority <= PriorityLow &&
@@ -6125,9 +6113,6 @@ void UI_Constructor::processTxQueue() {
     // add the message to the outgoing message text box
     addMessageText(message.message, true);
 
-    // check to see if this is a high priority message, or if we have
-    // autoreply enabled, or if this is a ping and the ping button is
-    // enabled
     if (message.priority >= PriorityHigh ||
         message.message.contains(" HEARTBEAT ") ||
         message.message.contains(" HB ") || message.message.contains(" ACK ") ||
@@ -6136,7 +6121,7 @@ void UI_Constructor::processTxQueue() {
             m_sliderFreqBeforeHB = freq(); // save current freq before HB changes it
         }
         changeFreq(f);
-        toggleTx(true);
+        startTx();
     }
 
     if (message.callback) {

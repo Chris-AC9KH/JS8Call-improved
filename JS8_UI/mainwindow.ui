@@ -1000,41 +1000,6 @@ QTextEdit[transmitting=&quot;true&quot;] {
           </property>
          </widget>
         </item>
-        <item row="1" column="17">
-         <widget class="QPushButton" name="startTxButton">
-          <property name="enabled">
-           <bool>false</bool>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>30</height>
-           </size>
-          </property>
-          <property name="toolTip">
-           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Start transmitting&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-          </property>
-          <property name="autoFillBackground">
-           <bool>false</bool>
-          </property>
-          <property name="styleSheet">
-           <string notr="true">QPushButton:checked {
-background-color: #22FF22;
-color:#222;
-}
-QPushButton[transmitting=&quot;true&quot;]{
-background:#FF2222;
-color:#222;
-}</string>
-          </property>
-          <property name="text">
-           <string>Send</string>
-          </property>
-          <property name="checkable">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
         <item row="1" column="14">
          <widget class="QPushButton" name="deselectButton">
           <property name="sizePolicy">

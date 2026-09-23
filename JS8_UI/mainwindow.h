@@ -359,8 +359,6 @@ class UI_Constructor : public QMainWindow {
     void decodeStart();
     void decodeBusy(bool b);
     void decodeDone();
-    void on_startTxButton_toggled(bool checked);
-    void toggleTx(bool start);
     void on_logQSOButton_clicked();
     void on_actionModeJS8HB_toggled(bool checked);
     void on_actionModeJS8Normal_triggered();

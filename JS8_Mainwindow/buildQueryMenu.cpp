@@ -67,8 +67,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
                            .arg(Varicode::formatSNR(d.snr)),
                        true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto infoAction = menu->addAction(
@@ -84,8 +85,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
             QString("%1 INFO %2").arg(selectedCall).arg(m_config.my_info()),
             true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto gridAction = menu->addAction(
@@ -104,8 +106,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
             QString("%1 GRID %2").arg(selectedCall).arg(m_config.my_grid()),
             true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     menu->addSeparator();
@@ -121,8 +124,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 SNR?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto infoQueryAction =
@@ -138,8 +142,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 INFO?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto gridQueryAction =
@@ -155,8 +160,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 GRID?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto stationIdleQueryAction = menu->addAction(
@@ -172,8 +178,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 STATUS?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto heardQueryAction = menu->addAction(
@@ -190,8 +197,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 HEARING?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto alertAction = menu->addAction(
@@ -297,8 +305,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 AGN?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto qslQueryAction = menu->addAction(
@@ -313,8 +322,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 QSL?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto qslAction = menu->addAction(
@@ -329,8 +339,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 QSL").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto yesAction = menu->addAction(
@@ -343,8 +354,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 YES").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto noAction =
@@ -359,8 +371,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 NO").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto hwAction = menu->addAction(
@@ -373,8 +386,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 HW CPY?").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto rrAction = menu->addAction(
@@ -387,8 +401,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 RR").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto fbAction =
@@ -401,8 +416,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 FB").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto sevenThreeAction = menu->addAction(
@@ -415,8 +431,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 73").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto skAction =
@@ -429,8 +446,9 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 SK").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 
     auto ditDitAction = menu->addAction(
@@ -443,7 +461,8 @@ void UI_Constructor::buildQueryMenu(QMenu *menu, QString call) {
 
         addMessageText(QString("%1 DIT DIT").arg(selectedCall), true);
 
-        if (m_config.transmit_directed())
-            toggleTx(true);
+        if (m_config.transmit_directed() && ui->monitorTxButton->isChecked()) {
+            startTx();
+        }
     });
 }
