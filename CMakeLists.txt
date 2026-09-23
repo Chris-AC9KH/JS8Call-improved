@@ -328,7 +328,6 @@ target_sources(
   JS8_Mainwindow/processBufferedActivity.cpp
   JS8_Mainwindow/processCommandActivity.cpp
   JS8_Mainwindow/processDecodeEvent.cpp
-  JS8_Mainwindow/processHeartbeatRateLimit.cpp
   JS8_Mainwindow/pushNotificationHandler.cpp
   JS8_Mainwindow/processRxActivity.cpp
   JS8_Mainwindow/UI_Constructor.cpp

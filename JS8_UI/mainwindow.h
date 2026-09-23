@@ -1024,7 +1024,6 @@ class UI_Constructor : public QMainWindow {
     void processCompoundActivity();
     void processBufferedActivity(); // JS8_Mainwindow/processBufferedActivity.cpp
     void processCommandActivity(); // JS8_Mainwindow/processCommandActivity.cpp
-    void processHeartbeatRateLimit(const QString &callsign); // JS8_Mainwindow/processHeartbeatRateLimit.cpp
     QString inboxPath();
     QString hbBlockingPath() const;
     void pushNotificationHandler(); // JS8_Mainwindow/pushNotificationHandler.cpp

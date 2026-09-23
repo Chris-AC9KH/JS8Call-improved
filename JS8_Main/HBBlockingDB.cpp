@@ -10,8 +10,8 @@
 #include <QTimeZone>
 
 namespace {
-constexpr char SCHEMA[] =
-    "CREATE TABLE IF NOT EXISTS hb_seen_v1 ("
+constexpr char ALLCALL_REPLY_SCHEMA[] =
+    "CREATE TABLE IF NOT EXISTS allcall_reply_v1 ("
     "  callsign VARCHAR(255) PRIMARY KEY, "
     "  last_seen TEXT"
     ");";
@@ -29,7 +29,7 @@ bool HBBlockingDB::open() {
         return false;
     }
 
-    rc = sqlite3_exec(db_, SCHEMA, nullptr, nullptr, nullptr);
+    rc = sqlite3_exec(db_, ALLCALL_REPLY_SCHEMA, nullptr, nullptr, nullptr);
     if (rc != SQLITE_OK) {
         close();
         return false;
@@ -54,12 +54,12 @@ QString HBBlockingDB::error() const {
     return {};
 }
 
-bool HBBlockingDB::upsertTimestamp(const QString &callsign,
-                                   const QDateTime &ts) {
+bool HBBlockingDB::upsertAllcallReplyTimestamp(const QString &callsign,
+                                               const QDateTime &ts) {
     if (!isOpen()) return false;
 
     const char *sql =
-        "INSERT INTO hb_seen_v1 (callsign, last_seen) VALUES (?, ?) "
+        "INSERT INTO allcall_reply_v1 (callsign, last_seen) VALUES (?, ?) "
         "ON CONFLICT(callsign) DO UPDATE SET last_seen = excluded.last_seen;";
 
     sqlite3_stmt *stmt;
@@ -75,11 +75,11 @@ bool HBBlockingDB::upsertTimestamp(const QString &callsign,
     return sqlite3_finalize(stmt) == SQLITE_OK;
 }
 
-QDateTime HBBlockingDB::getTimestamp(const QString &callsign) {
+QDateTime HBBlockingDB::getAllcallReplyTimestamp(const QString &callsign) {
     if (!isOpen()) return {};
 
     const char *sql =
-        "SELECT last_seen FROM hb_seen_v1 WHERE callsign = ? LIMIT 1;";
+        "SELECT last_seen FROM allcall_reply_v1 WHERE callsign = ? LIMIT 1;";
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -102,10 +102,11 @@ QDateTime HBBlockingDB::getTimestamp(const QString &callsign) {
     return result;
 }
 
-bool HBBlockingDB::deleteTimestamp(const QString &callsign) {
+// defined here but not presently used. The database storage is persistant
+bool HBBlockingDB::deleteAllcallReplyTimestamp(const QString &callsign) {
     if (!isOpen()) return false;
 
-    const char *sql = "DELETE FROM hb_seen_v1 WHERE callsign = ?;";
+    const char *sql = "DELETE FROM allcall_reply_v1 WHERE callsign = ?;";
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK)

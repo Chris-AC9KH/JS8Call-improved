@@ -777,16 +777,6 @@
                     </item>
                    </layout>
                   </item>
-                  <item>
-                   <widget class="QCheckBox" name="hb_rate_limit_check_box">
-                    <property name="text">
-                     <string>Suppress ACK to stations that send heartbeats at less than 55 minute intervals</string>
-                    </property>
-                    <property name="checked">
-                     <bool>true</bool>
-                    </property>
-                   </widget>
-                  </item>
                  </layout>
                 </widget>
                </item>
@@ -4489,7 +4479,6 @@ soundcard changes</string>
   <tabstop>heartbeat_anywhere_check_box</tabstop>
   <tabstop>heartbeat_qso_pause_check_box</tabstop>
   <tabstop>hb_blacklist_line_edit</tabstop>
-  <tabstop>hb_rate_limit_check_box</tabstop>
   <tabstop>autoreply_on_check_box</tabstop>
   <tabstop>cqMessagesButton</tabstop>
   <tabstop>relay_disabled_check_box</tabstop>

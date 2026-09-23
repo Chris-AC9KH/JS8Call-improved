@@ -714,7 +714,6 @@ class Configuration::impl final : public QDialog {
     bool heartbeat_anywhere_;
     bool heartbeat_qso_pause_;
     bool heartbeat_ack_snr_;
-    bool hb_rate_limit_;
     bool relay_disabled_;
     bool monitor_off_at_startup_;
     bool transmit_off_at_startup_;
@@ -947,7 +946,6 @@ bool Configuration::heartbeat_ack_snr() const {
     return true;
 #endif
 }
-bool Configuration::hb_rate_limit() const { return m_->hb_rate_limit_; }
 bool Configuration::relay_off() const { return m_->relay_disabled_; }
 bool Configuration::monitor_off_at_startup() const {
     return m_->monitor_off_at_startup_;
@@ -1833,7 +1831,6 @@ void Configuration::impl::initialize_models() {
     ui_->auto_whitelist_line_edit->setText(auto_whitelist_.join(", "));
     ui_->auto_blacklist_line_edit->setText(auto_blacklist_.join(", "));
     ui_->hb_blacklist_line_edit->setText(hb_blacklist_.join(", "));
-    ui_->hb_rate_limit_check_box->setChecked(hb_rate_limit_);
     ui_->spot_blacklist_line_edit->setText(spot_blacklist_.join(", "));
     ui_->rx_blocklist_line_edit->setText(rx_callsign_blocklist_.join(", "));
     ui_->primaryHighlightLineEdit->setText(primary_highlight_words_.join(", "));
@@ -2150,7 +2147,6 @@ void Configuration::impl::read_settings() {
         settings_->value("AutoBlacklist", QStringList{}).toStringList();
     hb_blacklist_ =
         settings_->value("HBBlacklist", QStringList{}).toStringList();
-    hb_rate_limit_ = settings_->value("HBRateLimit", false).toBool();
     spot_blacklist_ =
         settings_->value("SpotBlacklist", QStringList{}).toStringList();
     rx_callsign_blocklist_ =
@@ -2614,7 +2610,6 @@ void Configuration::impl::write_settings() {
     settings_->setValue("AutoWhitelist", auto_whitelist_);
     settings_->setValue("AutoBlacklist", auto_blacklist_);
     settings_->setValue("HBBlacklist", hb_blacklist_);
-    settings_->setValue("HBRateLimit", hb_rate_limit_);
     settings_->setValue("SpotBlacklist", spot_blacklist_);
     settings_->setValue("RXCallsignBlocklist", rx_callsign_blocklist_);
     settings_->setValue("PrimaryHighlightWords", primary_highlight_words_);
@@ -3356,7 +3351,6 @@ void Configuration::impl::accept() {
     heartbeat_anywhere_ = ui_->heartbeat_anywhere_check_box->isChecked();
     heartbeat_qso_pause_ = ui_->heartbeat_qso_pause_check_box->isChecked();
     heartbeat_ack_snr_ = ui_->heartbeat_ack_snr_check_box->isChecked();
-    hb_rate_limit_ = ui_->hb_rate_limit_check_box->isChecked();
     relay_disabled_ = ui_->relay_disabled_check_box->isChecked();
     monitor_off_at_startup_ = ui_->monitor_off_check_box->isChecked();
     transmit_off_at_startup_ = ui_->transmit_off_check_box->isChecked();

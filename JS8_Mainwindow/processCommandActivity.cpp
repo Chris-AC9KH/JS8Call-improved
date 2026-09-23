@@ -13,6 +13,13 @@ void UI_Constructor::processCommandActivity() {
 
     auto now = DriftingDateTime::currentDateTimeUtc();
 
+    HBBlockingDB db(hbBlockingPath());
+    bool const dbOk = db.open();
+    if (!dbOk) {
+        qCDebug(mainwindow_js8)
+            << "HBBlockingDB failed to open:" << db.error();
+    }
+
     while (!m_rxCommandQueue.isEmpty()) {
         auto d = m_rxCommandQueue.dequeue();
 
@@ -286,14 +293,17 @@ void UI_Constructor::processCommandActivity() {
             continue;
         }
 
-        // if this is an allcall, check to make sure we haven't replied to their
-        // allcall recently (in the past 30 minutes) that way we never get
-        // spammed by allcalls at too high of a frequency
-        if (isAllCall && m_txAllcallCommandCache.contains(d.from) &&
-            m_txAllcallCommandCache[d.from]->secsTo(now) / 60 < 30) {
-            qCDebug(mainwindow_js8)
-                << "skipping command for allcall timeout" << d.from;
-            continue;
+        // if this is an allcall, check to make sure we haven't replied to
+        // their allcall recently (in the past 55 minutes) that way we never
+        // get spammed by allcalls at too high of a frequency
+        if (isAllCall && dbOk) {
+            auto lastAllcallReply = db.getAllcallReplyTimestamp(d.from);
+            if (lastAllcallReply.isValid() &&
+                lastAllcallReply.secsTo(now) / 60 < 55) {
+                qCDebug(mainwindow_js8)
+                    << "skipping command for allcall timeout" << d.from;
+                continue;
+            }
         }
 
         // don't actually process any automatic message replies while in idle
@@ -691,11 +701,6 @@ void UI_Constructor::processCommandActivity() {
                 }
             }
 
-            // Rate-limit HB ACKs — records timestamp on first contact;
-            // blocks and purges callsign from the database if the
-            // station HB's again within 55 minutes.
-            processHeartbeatRateLimit(d.from);
-
             if (!m_config.hb_blacklist().contains(d.from) &&
                 !m_config.hb_blacklist().contains(
                     Radio::base_callsign(d.from))) {
@@ -704,8 +709,10 @@ void UI_Constructor::processCommandActivity() {
 
             if (isAllCall) {
                 // since all pings are technically @ALLCALL, let's bump the
-                // allcall cache here...
-                m_txAllcallCommandCache.insert(d.from, new QDateTime(now), 5);
+                // allcall reply-cooldown tracking here...
+                if (dbOk) {
+                    db.upsertAllcallReplyTimestamp(d.from, now);
+                }
             }
 
             continue;
@@ -826,7 +833,7 @@ void UI_Constructor::processCommandActivity() {
             m->show();
 #endif
         }
-        
+
         // PROCESS STORED MSG PUSH NOTIFICATIONS
         // NOTE: "RETRIEVE" is not a real JS8 command, so this never
         // matches a Varicode d.cmd. These arrive as plain directed freetext
@@ -1106,13 +1113,6 @@ void UI_Constructor::processCommandActivity() {
             }
 
             reply = replies.join(" ");
-
-            if (!reply.isEmpty()) {
-                if (isAllCall) {
-                    m_txAllcallCommandCache.insert(d.from, new QDateTime(now),
-                                                   25);
-                }
-            }
         }
 
         // well, if there's no reply, don't do anything...
@@ -1138,9 +1138,9 @@ void UI_Constructor::processCommandActivity() {
             continue;
         }
 
-        // add @ALLCALLs to the @ALLCALL cache
-        if (isAllCall) {
-            m_txAllcallCommandCache.insert(d.from, new QDateTime(now), 25);
+        // add @ALLCALLs to the reply-cooldown tracking
+        if (isAllCall && dbOk) {
+            db.upsertAllcallReplyTimestamp(d.from, now);
         }
 
         // queue the reply here to be sent when a free interval is available on
@@ -1154,5 +1154,6 @@ void UI_Constructor::processCommandActivity() {
             enqueueMessage(priority, reply, freq, callback);
         }
     }
-}
 
+    db.close();
+}
