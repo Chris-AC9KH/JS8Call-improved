@@ -170,7 +170,7 @@ void UI_Constructor::networkMessage(Message const &message) {
     // STATION.SET_AUTO_REPLY - Toggle auto-reply on/off
     // STATION.SET_JS8HB - Toggle JS8 heartbeat on/off
     // STATION.SET_HBACK - Toggle heartbeat acknowledgements on/off
-    // STATION.SET_MULTI_DECODER - Toggle multi-decoder on/off
+    // STATION.SET_MULTI_DECODER - [DEPRECATED, no-op]
     // STATION.SET_HB_INTERVAL - Set heartbeat interval (seconds)
     // STATION.SET_HB_TIMER - Start/stop heartbeat timer
     // STATION.SEND_HB - Send heartbeat immediately
@@ -366,6 +366,19 @@ void UI_Constructor::networkMessage(Message const &message) {
         sendNetworkMessage("STATION.SET_HBACK", "", {
             {"_ID", id},
             {"HBACK", QVariant(ui->actionHeartbeatAcknowledgements->isChecked())},
+        });
+        return;
+    }
+    
+    /** @brief STATION.SET_MULTI_DECODER: Toggle multi-decoder mode.
+     *  @deprecated API 4.x: Slated for removal in JS8Call 4.0
+     *  @note API 2.6+ through 3.x (no-op). Removed in 4.0.
+     */
+    if (type == "STATION.SET_MULTI_DECODER") {
+        sendNetworkMessage("STATION.SET_MULTI_DECODER", "", {
+            {"_ID", id},
+            {"MULTI_DECODER", QVariant(true)},
+            {"DEPRECATED", QVariant(true)},
         });
         return;
     }
