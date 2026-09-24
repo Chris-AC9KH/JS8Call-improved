@@ -338,8 +338,8 @@ class UI_Constructor : public QMainWindow {
     void openSettings(int tab = 0);
     void prepareApi();
     void prepareSpotting();
-    void on_spotButton_clicked(bool checked);
-    void on_monitorButton_clicked(bool);
+    void handleSpotButton_clicked(bool checked);
+    void handleMonitorButton_clicked(bool);
     void on_actionAbout_triggered();
     void resetPushButtonToggleText(QPushButton *btn);
     void on_stopTxButton_clicked();
@@ -359,7 +359,7 @@ class UI_Constructor : public QMainWindow {
     void decodeStart();
     void decodeBusy(bool b);
     void decodeDone();
-    void on_logQSOButton_clicked();
+    void handleLogQSOButton_clicked();
     void on_actionModeJS8HB_toggled(bool checked);
     void on_actionModeJS8Normal_triggered();
     void on_actionModeJS8Fast_triggered();
@@ -428,7 +428,7 @@ class UI_Constructor : public QMainWindow {
     bool isFreqOffsetFree(int f, int bw);
     int findFreeFreqOffset(int fmin, int fmax, int bw);
     void setDrift(int n);
-    void on_tuneButton_clicked(bool);
+    void handleTuneButton_clicked(bool);
     void acceptQSO(QDateTime const &, QString const &call, QString const &grid,
                    Frequency dial_freq, QString const &mode,
                    QString const &submode, QString const &rpt_sent,
@@ -448,10 +448,10 @@ class UI_Constructor : public QMainWindow {
     void stop_tuning();
     void stopTuneATU();
     void auto_tx_mode(bool);
-    void on_monitorButton_toggled(bool checked);
-    void on_monitorTxButton_toggled(bool checked);
-    void on_tuneButton_toggled(bool checked);
-    void on_spotButton_toggled(bool checked);
+    void handleMonitorButton_toggled(bool checked);
+    void handleMonitorTxButton_toggled(bool checked);
+    void handleTuneButton_toggled(bool checked);
+    void handleSpotButton_toggled(bool checked);
 
     void emitPTT(bool on);
     void emitTones();

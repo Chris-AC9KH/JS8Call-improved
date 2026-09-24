@@ -583,7 +583,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     logQSOTimer.setSingleShot(true);
     connect(&logQSOTimer, &QTimer::timeout, this,
-            &UI_Constructor::on_logQSOButton_clicked);
+            &UI_Constructor::handleLogQSOButton_clicked);
 
     tuneButtonTimer.setSingleShot(true);
     connect(&tuneButtonTimer, &QTimer::timeout, this,
@@ -959,7 +959,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     auto logAction = new QAction(QString("Log..."), ui->tableWidgetCalls);
     connect(logAction, &QAction::triggered, this,
-            &UI_Constructor::on_logQSOButton_clicked);
+            &UI_Constructor::handleLogQSOButton_clicked);
 
     // Disable default header mouseover and click behaviors, they are confusing
     // to users because they give the appearance of allowing sorting by header

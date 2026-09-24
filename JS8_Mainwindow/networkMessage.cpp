@@ -66,7 +66,7 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if (type == "RIG.SET_TUNE") {
         auto value = QVariant(message.value());
-        UI_Constructor::on_tuneButton_clicked(value.toBool());
+        UI_Constructor::handleTuneButton_clicked(value.toBool());
           sendNetworkMessage("RIG.SET_TUNE", "", {
             {"_ID", id},
             {"value", ui->tuneButton->isChecked()}
@@ -301,7 +301,7 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if(type == "STATION.SET_SPOT") {
         auto value = QVariant(message.value());
-          UI_Constructor::on_spotButton_clicked(value.toBool());
+          UI_Constructor::handleSpotButton_clicked(value.toBool());
           sendNetworkMessage("STATION.SPOT", "", {
             {"value", ui->spotButton->isChecked()},
             {"_ID", id}

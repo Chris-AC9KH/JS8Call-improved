@@ -594,7 +594,7 @@ void UI_Constructor::on_actionEnable_Reporting_SPOT_toggled(bool checked) {
 
 void UI_Constructor::on_actionEnable_Tuning_Tone_TUNE_toggled(bool checked) {
     ui->tuneButton->setChecked(checked);
-    on_tuneButton_clicked(checked);
+    handleTuneButton_clicked(checked);
 }
 
 void UI_Constructor::on_menuWindow_aboutToShow() {
@@ -960,7 +960,7 @@ void UI_Constructor::prepareSpotting() {
     }
 }
 
-void UI_Constructor::on_spotButton_clicked(bool checked) {
+void UI_Constructor::handleSpotButton_clicked(bool checked) {
     // 1. save setting
     m_config.set_spot_to_reporting_networks(checked);
 
@@ -969,7 +969,7 @@ void UI_Constructor::on_spotButton_clicked(bool checked) {
     prepareSpotting();
 }
 
-void UI_Constructor::on_monitorButton_clicked(bool checked) {
+void UI_Constructor::handleMonitorButton_clicked(bool checked) {
     if (!m_transmitting) {
         auto prior = m_monitoring;
         monitor(checked);
@@ -1011,27 +1011,27 @@ void UI_Constructor::on_actionAbout_triggered() // Display "About"
     CAboutDlg{this}.exec();
 }
 
-void UI_Constructor::on_monitorButton_toggled(bool) {
+void UI_Constructor::handleMonitorButton_toggled(bool) {
     resetPushButtonToggleText(ui->monitorButton);
 }
 
-void UI_Constructor::on_monitorTxButton_toggled(bool checked) {
+void UI_Constructor::handleMonitorTxButton_toggled(bool checked) {
     resetPushButtonToggleText(ui->monitorTxButton);
 
     if (!checked) {
         qCDebug(mainwindow_js8)
-            << "on_monitorTxButton_toggled(" << checked << ") to stop TX.";
+            << "handleMonitorTxButton_toggled(" << checked << ") to stop TX.";
         resetMessage();
         on_stopTxButton_clicked();
         stopTx();
     }
 }
 
-void UI_Constructor::on_tuneButton_toggled(bool) {
+void UI_Constructor::handleTuneButton_toggled(bool) {
     resetPushButtonToggleText(ui->tuneButton);
 }
 
-void UI_Constructor::on_spotButton_toggled(bool) {
+void UI_Constructor::handleSpotButton_toggled(bool) {
     resetPushButtonToggleText(ui->spotButton);
 }
 
@@ -1061,7 +1061,7 @@ void UI_Constructor::keyPressEvent(QKeyEvent *e) {
         stopTx();
         return;
     case Qt::Key_F5:
-        on_logQSOButton_clicked();
+        handleLogQSOButton_clicked();
         return;
     }
 
@@ -1265,41 +1265,41 @@ void UI_Constructor::createControlBar()
     ui->monitorTxButton->setToolTip(tr("Enable or disable the transmitter"));
     ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
     connect(ui->monitorTxButton, &QPushButton::toggled, this,
-            &UI_Constructor::on_monitorTxButton_toggled);
+            &UI_Constructor::handleMonitorTxButton_toggled);
     
     // Rx
     ui->monitorButton->setToolTip(tr("Enable or disable the receiver"));
     ui->monitorButton->setText("RX");
     ui->monitorButton->setStyleSheet(Styles::ControlButtonStyle);
     connect(ui->monitorButton, &QPushButton::clicked, this,
-            &UI_Constructor::on_monitorButton_clicked);
+            &UI_Constructor::handleMonitorButton_clicked);
     connect(ui->monitorButton, &QPushButton::toggled, this,
-            &UI_Constructor::on_monitorButton_toggled);
+            &UI_Constructor::handleMonitorButton_toggled);
     
     // Tune
     ui->tuneButton->setToolTip(tr("Transmit a tuning tone"));
     ui->tuneButton->setText("TUNE");
     ui->tuneButton->setStyleSheet(Styles::TuneButtonStyle);
     connect(ui->tuneButton, &QPushButton::clicked, this,
-            &UI_Constructor::on_tuneButton_clicked);
+            &UI_Constructor::handleTuneButton_clicked);
     connect(ui->tuneButton, &QPushButton::toggled, this,
-            &UI_Constructor::on_tuneButton_toggled);
+            &UI_Constructor::handleTuneButton_toggled);
 
     // Spot
     ui->spotButton->setToolTip(tr("Spot to reporting networks"));
     ui->spotButton->setText("SPOT");
     ui->spotButton->setStyleSheet(Styles::ControlButtonStyle);
     connect(ui->spotButton, &QPushButton::clicked, this,
-            &UI_Constructor::on_spotButton_clicked);
+            &UI_Constructor::handleSpotButton_clicked);
     connect(ui->spotButton, &QPushButton::toggled, this,
-            &UI_Constructor::on_spotButton_toggled);
+            &UI_Constructor::handleSpotButton_toggled);
 
     // Log QSO
     ui->logQSOButton->setToolTip(tr("Insert a new entry into the log"));
     ui->logQSOButton->setText("LOG");
     ui->logQSOButton->setStyleSheet(Styles::LogQSOButtonStyle);
     connect(ui->logQSOButton, &QPushButton::clicked, this,
-            &UI_Constructor::on_logQSOButton_clicked);
+            &UI_Constructor::handleLogQSOButton_clicked);
 }
 
 void UI_Constructor::bindStatusButtonToAction(QPushButton *button, QAction *action,
@@ -1350,7 +1350,7 @@ void UI_Constructor::on_dialFreqDownButton_clicked() {
 }
 
 void UI_Constructor::on_actionAdd_Log_Entry_triggered() {
-    on_logQSOButton_clicked();
+    handleLogQSOButton_clicked();
 }
 
 void UI_Constructor::on_actionCopyright_Notice_triggered() {
@@ -3453,7 +3453,7 @@ int UI_Constructor::findFreeFreqOffset(int fmin, int fmax, int bw) {
     return fmin;
 }
 
-void UI_Constructor::on_logQSOButton_clicked() // Log QSO button
+void UI_Constructor::handleLogQSOButton_clicked() // Log QSO button
 {
     QString call = callsignSelected();
     if (m_callSelectedTime.contains(call)) {
@@ -3703,7 +3703,7 @@ bool UI_Constructor::canCurrentModeSendHeartbeat() const {
 }
 
 void UI_Constructor::prepareMonitorControls() {
-    // on_monitorButton_toggled(!m_config.monitor_off_at_startup());
+    // handleMonitorButton_toggled(!m_config.monitor_off_at_startup());
     ui->monitorTxButton->setChecked(!m_config.transmit_off_at_startup());
 }
 
@@ -4715,7 +4715,7 @@ void UI_Constructor::on_tableWidgetCalls_cellDoubleClicked(int row, int col) {
 #endif
 }
 
-void UI_Constructor::on_tuneButton_clicked(bool checked) {
+void UI_Constructor::handleTuneButton_clicked(bool checked) {
     static bool lastChecked = false;
     if (lastChecked == checked)
         return;
@@ -4737,7 +4737,7 @@ void UI_Constructor::on_tuneButton_clicked(bool checked) {
         tuneButtonTimer.start(250);
     } else {
         itone[0] = 0;
-        on_monitorButton_clicked(true);
+        handleMonitorButton_clicked(true);
         m_tune = true;
     }
     Q_EMIT tune(checked);
@@ -4759,14 +4759,14 @@ void UI_Constructor::end_tuning() {
 
 void UI_Constructor::stop_tuning() {
     tuneATU_Timer.stop(); // stop tune watchdog when stopping Tune manually
-    on_tuneButton_clicked(false);
+    handleTuneButton_clicked(false);
     ui->tuneButton->setChecked(false);
     m_isTimeToSend = false;
     m_tune = false;
 }
 
 void UI_Constructor::stopTuneATU() {
-    on_tuneButton_clicked(false);
+    handleTuneButton_clicked(false);
     m_isTimeToSend = false;
 }
 
@@ -4947,8 +4947,8 @@ void UI_Constructor::handle_transceiver_update(
 
     if (old_state.online() == false && new_rig_state.online() == true) {
         // initializing
-        on_monitorButton_clicked(!m_config.monitor_off_at_startup());
-        on_monitorTxButton_toggled(!m_config.transmit_off_at_startup());
+        handleMonitorButton_clicked(!m_config.monitor_off_at_startup());
+        handleMonitorTxButton_toggled(!m_config.transmit_off_at_startup());
     }
 
     if (new_rig_state.frequency() != old_state.frequency() ||
