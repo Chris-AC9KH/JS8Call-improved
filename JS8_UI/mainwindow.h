@@ -455,6 +455,7 @@ class UI_Constructor : public QMainWindow {
 
     void emitPTT(bool on);
     void emitTones();
+    void emitTxEvent(bool start); // JS8_Mainwindow/emitTxEvent.cpp
     void udpNetworkMessage(Message const &message);
     void tcpNetworkMessage(Message const &message);
     void networkMessage(Message const &message); // JS8_Mainwindow/networkMessage.cpp
@@ -747,6 +748,7 @@ class UI_Constructor : public QMainWindow {
     int m_txFrameCountEstimate;
     int m_txFrameCount;
     int m_txFrameCountSent;
+    bool m_txEventStarted = false;
     QTimer m_txTextDirtyDebounce;
     bool m_txTextDirty;
     QString m_txTextDirtyLastText;

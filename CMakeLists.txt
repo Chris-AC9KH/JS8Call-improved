@@ -308,6 +308,7 @@ target_sources(
   JS8_Mainwindow/dataSink.cpp
   JS8_Mainwindow/displayBandActivity.cpp
   JS8_Mainwindow/displayCallActivity.cpp
+  JS8_Mainwindow/emitTxEvent.cpp
   JS8_Mainwindow/ensureMessageDock.cpp
   JS8_Mainwindow/initializeDummyData.cpp
   JS8_Mainwindow/initializeGroupMessage.cpp
