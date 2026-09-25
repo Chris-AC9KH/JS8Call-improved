@@ -52,6 +52,8 @@ The steps above are
 | [STATION.SET_STATUS](#stationset_status)     | 2.3 |
 | [STATION.GET_SPOT](#stationget_spot)         | 3.0 |
 | [STATION.SET_SPOT](#stationset_spot)         | 3.0 |
+| [STATION.DESELECT](#stationdeselect)         | 3.1 |
+| [STATION.CLEAR_TEXT](#stationclear_text)     | 3.1 |
 | [RX.GET_CALL_ACTIVITY](#rxget_call_activity) | 2.3 |
 | [RX.GET_CALL_SELECTED](#rxget_call_selected) | 2.3 |
 | [RX.GET_BAND_ACTIVITY](#rxget_band_activity) | 2.3 |
@@ -472,6 +474,42 @@ Sets status of SPOT setting
 | Response |
 |----------|
 |{"params":{"_ID":270409737648,"value":true},"type":"STATION.SPOT","value":""}|
+
+
+# STATION.DESELECT
+`API >= 3.1`
+
+Deselects the selected callsign, the same as the Deselect button
+
+| End Point |
+|-----------|
+|{"params":{},"type":"STATION.DESELECT","value":""}|
+
+| Requirements | |
+|--------------|-|
+| value        | empty string |
+
+| Response |
+|----------|
+|{"params":{"_ID":270409823907},"type":"STATION.DESELECT","value":""}|
+
+
+# STATION.CLEAR_TEXT
+`API >= 3.1`
+
+Clears the RX text window, the same as right-click Clear on it: the band's stored RX text goes too, and the compose box is emptied
+
+| End Point |
+|-----------|
+|{"params":{},"type":"STATION.CLEAR_TEXT","value":""}|
+
+| Requirements | |
+|--------------|-|
+| value        | empty string |
+
+| Response |
+|----------|
+|{"params":{"_ID":270409823907},"type":"STATION.CLEAR_TEXT","value":""}|
 
 
 # RX.GET_CALL_ACTIVITY

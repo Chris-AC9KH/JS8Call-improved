@@ -539,6 +539,27 @@ void UI_Constructor::networkMessage(Message const &message, bool internal) {
         });
         return;
     }
+
+    /** @brief STATION.DESELECT: Deselect the selected callsign.
+     *  @note API 3.1+ */
+    if (type == "STATION.DESELECT") {
+        // reply first: deselecting raises a STATION.STATUS that can take this _ID
+        sendNetworkMessage("STATION.DESELECT", "", {
+            {"_ID", id},
+        });
+        clearCallsignSelected();
+        return;
+    }
+
+    /** @brief STATION.CLEAR_TEXT: Clear the RX text window.
+     *  @note API 3.1+ */
+    if (type == "STATION.CLEAR_TEXT") {
+        on_actionClear_RX_Activity_triggered();
+        sendNetworkMessage("STATION.CLEAR_TEXT", "", {
+            {"_ID", id},
+        });
+        return;
+    }
     /** @} */ // End STATION Commands
 
     // RX.GET_CALL_ACTIVITY
