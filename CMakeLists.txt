@@ -126,7 +126,9 @@ cmake_dependent_option(
 find_package(Boost 1.77 REQUIRED)
 find_package(FFTW3      REQUIRED COMPONENTS single threads)
 find_package(Hamlib     REQUIRED)
-find_package(Qt6   6.11 REQUIRED COMPONENTS Multimedia Network SerialPort Widgets WebSockets)
+find_package(Qt6   6.12 REQUIRED COMPONENTS ShaderTools Multimedia Network SerialPort Widgets WebSockets GuiPrivate)
+
+qt_standard_project_setup()
 
 include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${FFTW3_INCLUDE_DIRS})
@@ -373,11 +375,26 @@ target_link_libraries(
   ${TARGET} PRIVATE
   ${FFTW3_LIBRARIES}
   Hamlib::Hamlib
-  Qt::Multimedia
-  Qt::Network
-  Qt::SerialPort
-  Qt::Widgets
-  Qt::WebSockets
+  Qt6::Multimedia
+  Qt6::Network
+  Qt6::SerialPort
+  Qt6::Widgets
+  Qt6::WebSockets
+  Qt6::GuiPrivate
+)
+
+#------------------------------------------------------------------------------#
+# Qt ShaderTools.
+#------------------------------------------------------------------------------#
+
+qt_add_shaders(${TARGET} "js8call_shaders"
+    PREFIX "/shaders"
+    BASE "resources/shaders"
+    FILES
+        resources/shaders/texquad.vert
+        resources/shaders/texquad.frag
+        resources/shaders/specline.vert
+        resources/shaders/specline.frag
 )
 
 #------------------------------------------------------------------------------#

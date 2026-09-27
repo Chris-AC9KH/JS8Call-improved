@@ -13,27 +13,34 @@
 #include "RDP.h"
 
 #include <QColor>
-#include <QPixmap>
+#include <QImage>
+#include <QLoggingCategory>
 #include <QPolygonF>
+#include <QRhiWidget>
 #include <QSize>
 #include <QString>
 #include <QTimer>
 #include <QVector>
-#include <QWidget>
+
+#include <rhi/qrhi.h>
 
 #include <algorithm>
 #include <array>
 #include <boost/circular_buffer.hpp>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <variant>
+#include <vector>
 
-class CPlotter final : public QWidget {
+Q_DECLARE_LOGGING_CATEGORY(plotter_js8)
+
+class CPlotter final : public QRhiWidget {
     Q_OBJECT
 
     // Scaler for the waterfall portion of the display; given a
     // y value, returns an index [0, 255) into the colors array.
-
+    // Unchanged from the CPU version -- pure math, no painting.
     class Scaler1D {
         int const &m_avg;
         int const &m_bpp;
@@ -70,7 +77,7 @@ class CPlotter final : public QWidget {
 
     // Scaler for the spectrum portion of the display; given a
     // y value, returns a pixel offset into the spectrum view.
-
+    // Unchanged from the CPU version.
     class Scaler2D {
         int const &m_h2;
         int m_gain = 0;
@@ -103,21 +110,35 @@ class CPlotter final : public QWidget {
         }
     };
 
+    // One GPU-resident, texture-backed quad: the waterfall, the spectrum
+    // background/grid ("overlay"), the frequency scale, and each of the
+    // dial/filter halves are all instances of this. Content is built into
+    // `image` on the CPU (via QPainter, or via direct pixel writes for the
+    // waterfall row path) and uploaded to `texture` in render().
+    struct TexQuad {
+        std::unique_ptr<QRhiTexture> texture;
+        std::unique_ptr<QRhiBuffer> uniformBuf; // rect + opacity + rowOffset
+        std::unique_ptr<QRhiShaderResourceBindings> srb;
+        QImage image;      // CPU scratch surface; size == texture size
+        QRectF ndcRect;    // placement in normalized device coords [-1,1]
+        float opacity = 1.0f;
+        bool contentDirty = false;  // image changed, needs re-upload
+        bool structureDirty = true; // size changed, texture needs recreate
+    };
+
   public:
     using Colors = QVector<QColor>;
     using Spectrum = WF::Spectrum;
 
     explicit CPlotter(QWidget *parent = nullptr);
 
-    ~CPlotter();
+    ~CPlotter() override;
 
     // Sizing
-
     QSize minimumSizeHint() const override;
     QSize sizeHint() const override;
 
     // Inline accessors
-
     int binsPerPixel() const { return m_binsPerPixel; }
     int flatten() const { return m_flatten.live(); }
     int freq() const { return m_freq; }
@@ -134,14 +155,10 @@ class CPlotter final : public QWidget {
     }
 
     // Inline manipulators
-
     void setFlatten(bool const flatten) { m_flatten(flatten); }
     void setPlot2dGain(int const plot2dGain) { m_scaler2D.setGain(plot2dGain); }
     void setPlot2dZero(int const plot2dZero) { m_scaler2D.setZero(plot2dZero); }
     void setSpectrum(Spectrum const spectrum) { m_spectrum = spectrum; }
-
-    // Manipulators
-
     void drawLine(QString const &);
     void drawData(WF::SWide, WF::State);
     void drawDecodeLine(const QColor &, int, int);
@@ -165,9 +182,11 @@ class CPlotter final : public QWidget {
     void changeFreq(int);
 
   protected:
-    // Event Handlers
+    // QRhiWidget rendering entry points -- replace paintEvent().
+    void initialize(QRhiCommandBuffer *cb) override;
+    void render(QRhiCommandBuffer *cb) override;
 
-    void paintEvent(QPaintEvent *) override;
+    // Event handlers -- unchanged from the QWidget version.
     void resizeEvent(QResizeEvent *) override;
     void leaveEvent(QEvent *) override;
     void wheelEvent(QWheelEvent *) override;
@@ -175,31 +194,37 @@ class CPlotter final : public QWidget {
     void mouseReleaseEvent(QMouseEvent *) override;
 
   private:
-    // Replot data storage; alternatives of nothing at all, a
-    // string denoting the label of a transmit period interval
-    // start, and waterfall display data, flattened. Important
-    // that the monostate alternative is first in the list.
-
+    // Replot data storage; unchanged from the CPU version.
     using Replot = boost::circular_buffer<
         std::variant<std::monostate, QString, WF::SWide>>;
 
     // Accessors
-
     bool shouldDrawSpectrum(WF::State) const;
     bool in30MBand() const;
     int xFromFreq(float f) const;
     float freqFromX(int x) const;
 
-    // Manipulators
-
+    // CPU-side content builders -- these now paint into a TexQuad's QImage
+    // and set contentDirty/structureDirty instead of drawing into a
+    // QPixmap directly
     void drawMetrics();
     void drawFilter();
     void drawDials();
     void replot();
     void resize();
 
-    // Data members ** ORDER DEPENDENCY **
+    // GPU helpers
+    void ensureGpuState(QRhiResourceUpdateBatch *u);
+    void ensureQuadGpuState(TexQuad &quad, QSize pixelSize,
+                            QRhiResourceUpdateBatch *u);
+    QRhiResourceUpdateBatch *pendingUpdateBatch();
+    void uploadWaterfallRow(std::vector<uint32_t> const &rgba,
+                            QRhiResourceUpdateBatch *u);
+    void buildSpectrumGeometry(QRhiResourceUpdateBatch *u);
+    void renderTexQuad(QRhiCommandBuffer *cb, TexQuad &quad);
+    void updateFilterQuadGeometry();
 
+    // Data members
     float m_dialFreq = 0.0f;
     int m_nSubMode = 0;
     int m_filterCenter = 0;
@@ -229,15 +254,38 @@ class CPlotter final : public QWidget {
     QTimer *m_replotTimer;
     QTimer *m_resizeTimer;
 
-    QPixmap m_ScalePixmap;
-    QPixmap m_WaterfallPixmap;
-    QPixmap m_OverlayPixmap;
-    QPixmap m_SpectrumPixmap;
-
-    std::array<QPixmap, 2> m_FilterPixmap = {};
-    std::array<QPixmap, 2> m_DialPixmap = {};
-
     QString m_text;
+
+    // GPU-side state
+    QRhi *m_rhi = nullptr;
+    QRhiResourceUpdateBatch *m_pendingUpdates = nullptr;
+    int m_lineVertexCount = 0;
+    int m_waterfallRowOffset = 0;
+    std::vector<uint32_t> m_rowScratch;
+    QColor m_lineColor = Qt::green;
+
+    std::unique_ptr<QRhiBuffer>                 m_quadVBuf;
+    std::unique_ptr<QRhiSampler>                m_sampler;
+    std::unique_ptr<QRhiShaderResourceBindings> m_quadPipelineLayoutSrb;
+    std::unique_ptr<QRhiShaderResourceBindings> m_lineSrb;
+    std::unique_ptr<QRhiGraphicsPipeline>       m_quadPipeline;
+    std::unique_ptr<QRhiGraphicsPipeline>       m_linePipeline;
+    std::unique_ptr<QRhiBuffer>                 m_pipelineDummyLayoutBuf;
+    std::unique_ptr<QRhiTexture>                m_pipelineDummyLayoutTex;
+    
+    QShader m_lineVertShader;
+    QShader m_lineFragShader;
+    QShader m_quadVertShader;
+    QShader m_quadFragShader;
+
+    std::unique_ptr<QRhiBuffer> m_lineVBuf;
+    std::unique_ptr<QRhiBuffer> m_lineUniformBuf;
+
+    TexQuad m_waterfallQuad;
+    TexQuad m_overlayQuad;
+    TexQuad m_scaleQuad;
+    std::array<TexQuad, 2> m_dialQuad;
+    std::array<TexQuad, 2> m_filterQuad;
 };
 
 #endif // PLOTTER_H
