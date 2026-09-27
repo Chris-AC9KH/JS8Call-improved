@@ -456,7 +456,7 @@ class Configuration::impl final : public QDialog {
 
     void initialize_models();
     bool split_mode() const {
-        return (WSJT_RIG_NONE_CAN_SPLIT || !rig_is_dummy_) &&
+        return (JS8_RIG_NONE_CAN_SPLIT || !rig_is_dummy_) &&
                (rig_params_.split_mode != TransceiverFactory::split_mode_none);
     }
     void set_cached_mode();
@@ -2919,10 +2919,10 @@ void Configuration::impl::set_rig_invariants() {
              !ui_->PTT_RTS_radio_button->isChecked()));
     }
     ui_->mode_group_box->setEnabled(
-        WSJT_RIG_NONE_CAN_SPLIT ||
+        JS8_RIG_NONE_CAN_SPLIT ||
         TransceiverFactory::basic_transceiver_name_ != rig);
     ui_->split_operation_group_box->setEnabled(
-        WSJT_RIG_NONE_CAN_SPLIT ||
+        JS8_RIG_NONE_CAN_SPLIT ||
         TransceiverFactory::basic_transceiver_name_ != rig);
 }
 

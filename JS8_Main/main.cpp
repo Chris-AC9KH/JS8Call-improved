@@ -198,13 +198,6 @@ int main(int argc, char *argv[]) {
             }
         }
 
-#if WSJT_QDEBUG_TO_FILE
-        // Open a trace file
-        TraceFile trace_file{
-            temp_dir.absoluteFilePath(a.applicationName() + "_trace.log")};
-        qCDebug(main_js8) << program_title() + " - Program startup";
-#endif
-
         // Create a unique writeable temporary directory in a suitable location
         bool temp_ok{false};
         QString unique_directory{QApplication::applicationName()};
@@ -244,26 +237,6 @@ int main(int argc, char *argv[]) {
 
         int result;
         do {
-#if WSJT_QDEBUG_TO_FILE
-            // announce to trace file and dump settings
-            qCDebug(main_js8) << "++++++++++++++++++++++++++++ Settings "
-                                 "++++++++++++++++++++++++++++";
-            for (auto const &key : multi_settings.settings()->allKeys()) {
-                auto const &value = multi_settings.settings()->value(key);
-                if (value.canConvert<QVariantList>()) {
-                    auto const sequence = value.value<QSequentialIterable>();
-                    qCDebug(main_js8).nospace() << key << ": ";
-                    for (auto const &item : sequence) {
-                        qCDebug(main_js8).nospace() << '\t' << item;
-                    }
-                } else {
-                    qCDebug(main_js8).nospace() << key << ": " << value;
-                }
-            }
-            qCDebug(main_js8) << "---------------------------- Settings "
-                                 "----------------------------";
-#endif
-
             // run the application UI
             UI_Constructor w(program_version(), temp_dir, multiple,
                              &multi_settings);

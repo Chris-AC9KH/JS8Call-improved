@@ -437,7 +437,7 @@ int HamlibTransceiver::do_start() {
         error_check(rc, "testing getting current VFO");
     }
 
-    if ((WSJT_RIG_NONE_CAN_SPLIT || !is_dummy_) &&
+    if ((JS8_RIG_NONE_CAN_SPLIT || !is_dummy_) &&
         rig_->caps->set_split_vfo) // if split is possible do some extra setup
     {
         freq_t f1;
@@ -696,7 +696,7 @@ auto HamlibTransceiver::get_vfos(bool for_split) const
 
     auto rx_vfo = rig_->state.vfo_list & RIG_VFO_A ? RIG_VFO_A : RIG_VFO_MAIN;
     auto tx_vfo =
-        (WSJT_RIG_NONE_CAN_SPLIT || !is_dummy_) && for_split
+        (JS8_RIG_NONE_CAN_SPLIT || !is_dummy_) && for_split
             ? (rig_->state.vfo_list & RIG_VFO_B ? RIG_VFO_B : RIG_VFO_SUB)
             : rx_vfo;
     if (reversed_) {
@@ -777,7 +777,7 @@ void HamlibTransceiver::do_tx_frequency(Frequency tx, MODE mode,
                                         bool no_ignore) {
     TRACE_CAT("HamlibTransceiver", tx << "reversed:" << reversed_);
 
-    if (WSJT_RIG_NONE_CAN_SPLIT ||
+    if (JS8_RIG_NONE_CAN_SPLIT ||
         !is_dummy_) // split is meaningless if you can't see it
     {
         auto split = tx ? RIG_SPLIT_ON : RIG_SPLIT_OFF;
@@ -991,7 +991,7 @@ void HamlibTransceiver::poll() {
         reversed_ = RIG_VFO_B == v;
     }
 
-    if ((WSJT_RIG_NONE_CAN_SPLIT || !is_dummy_) && rig_->caps->get_split_vfo &&
+    if ((JS8_RIG_NONE_CAN_SPLIT || !is_dummy_) && rig_->caps->get_split_vfo &&
         split_query_works_) {
         vfo_t v{RIG_VFO_NONE}; // so we can tell if it doesn't get updated :(
         auto rc = rig_get_split_vfo(rig_.data(), RIG_VFO_CURR, &s, &v);
@@ -1031,7 +1031,7 @@ void HamlibTransceiver::poll() {
             update_rx_frequency(f);
         }
 
-        if ((WSJT_RIG_NONE_CAN_SPLIT || !is_dummy_) && state().split() &&
+        if ((JS8_RIG_NONE_CAN_SPLIT || !is_dummy_) && state().split() &&
             (rig_->caps->targetable_vfo &
              (RIG_TARGETABLE_FREQ | RIG_TARGETABLE_PURE)) &&
             !one_VFO_) {
