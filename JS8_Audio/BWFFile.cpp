@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <numeric>
 
 #include "moc_BWFFile.cpp"
@@ -55,6 +56,20 @@ struct Desc {
     std::array<char, 4> id_;
     quint32 size_;
 };
+
+/**
+ * @brief Narrow a byte count to the quint32 a RIFF chunk-size field holds.
+ *
+ * The classic RIFF/WAV format stores every chunk size as a 32-bit field
+ * on disk, so this truncation is mandated by the file format itself, not
+ * a bug - the assert exists only as a debug-build tripwire for the day a
+ * chunk (data audio, "bext", an INFO entry) actually exceeds 4GB, which
+ * would need the RF64 extension this reader/writer does not implement.
+ */
+quint32 toChunkSize(qint64 n) {
+    Q_ASSERT(n >= 0 && n <= std::numeric_limits<quint32>::max());
+    return static_cast<quint32>(n);
+}
 
 // "fmt " chunk contents
 struct FormatChunk {
@@ -181,11 +196,12 @@ bool BWFFile::impl::read_header() {
     if (!file_.seek(0))
         return false;
     Desc outer_desc;
-    quint32 outer_offset = file_.pos();
+    qint64 outer_offset = file_.pos();
     quint32 outer_size{0};
     bool be{false};
     while (outer_offset <
-           sizeof outer_desc + outer_desc.size_ - 1) // allow for uncounted pad
+           qint64(sizeof outer_desc) + outer_desc.size_ -
+               1) // allow for uncounted pad
     {
         if (file_.read(&outer_desc, sizeof outer_desc) != sizeof outer_desc)
             return false;
@@ -200,10 +216,11 @@ bool BWFFile::impl::read_header() {
             if (!memcmp(riff_item, "WAVE", 4)) {
                 // WAVE
                 Desc wave_desc;
-                quint32 wave_offset = file_.pos();
+                qint64 wave_offset = file_.pos();
                 quint32 wave_size{0};
                 while (wave_offset <
-                       outer_offset + sizeof outer_desc + outer_size - 1) {
+                       outer_offset + qint64(sizeof outer_desc) + outer_size -
+                           1) {
                     if (file_.read(&wave_desc, sizeof wave_desc) !=
                         sizeof wave_desc)
                         return false;
@@ -281,10 +298,10 @@ bool BWFFile::impl::read_header() {
                             return false;
                         if (!memcmp(list_type, "INFO", 4)) {
                             Desc info_desc;
-                            quint32 info_offset = file_.pos();
+                            qint64 info_offset = file_.pos();
                             quint32 info_size{0};
                             while (info_offset < wave_offset +
-                                                     sizeof wave_desc +
+                                                     qint64(sizeof wave_desc) +
                                                      wave_size - 1) {
                                 if (file_.read(&info_desc, sizeof info_desc) !=
                                     sizeof info_desc)
@@ -379,7 +396,8 @@ bool BWFFile::impl::update_header() {
     if (!file_.seek(header_length_ - sizeof desc))
         return false;
     desc.set("data",
-             be ? qToBigEndian<quint32>(size) : qToLittleEndian<quint32>(size));
+             be ? qToBigEndian<quint32>(toChunkSize(size))
+                : qToLittleEndian<quint32>(toChunkSize(size)));
     if (file_.write(&desc, sizeof desc) != sizeof desc)
         return false;
 
@@ -387,8 +405,8 @@ bool BWFFile::impl::update_header() {
         if (!file_.seek(file_.size()))
             return false;
         auto size = bext_.size();
-        desc.set("bext", be ? qToBigEndian<quint32>(size)
-                            : qToLittleEndian<quint32>(size));
+        desc.set("bext", be ? qToBigEndian<quint32>(toChunkSize(size))
+                            : qToLittleEndian<quint32>(toChunkSize(size)));
         if ((file_.size() % 2) && file_.write("\0", 1) != 1)
             return false;
         if (file_.write(&desc, sizeof desc) != sizeof desc)
@@ -456,8 +474,9 @@ bool BWFFile::impl::update_header() {
              iter != info_dictionary_.constEnd(); ++iter) {
             auto value = iter.value();
             auto len = value.size() + 1; // include terminating null char
-            desc.set(iter.key().data(), be ? qToBigEndian<quint32>(len)
-                                           : qToLittleEndian<quint32>(len));
+            desc.set(iter.key().data(),
+                     be ? qToBigEndian<quint32>(toChunkSize(len))
+                        : qToLittleEndian<quint32>(toChunkSize(len)));
             if ((file_.size() % 2) && file_.write("\0", 1) != 1)
                 return false;
             if (file_.write(&desc, sizeof desc) != sizeof desc)
@@ -468,8 +487,8 @@ bool BWFFile::impl::update_header() {
         auto size = file_.pos() - list_start;
         if (!file_.seek(list_start - sizeof desc))
             return false;
-        desc.set("LIST", be ? qToBigEndian<quint32>(size)
-                            : qToLittleEndian<quint32>(size));
+        desc.set("LIST", be ? qToBigEndian<quint32>(toChunkSize(size))
+                            : qToLittleEndian<quint32>(toChunkSize(size)));
         if (file_.write(&desc, sizeof desc) != sizeof desc)
             return false;
     }
@@ -481,7 +500,8 @@ bool BWFFile::impl::update_header() {
     if (!file_.seek(0))
         return false;
     desc.set(be ? "RIFX" : "RIFF",
-             be ? qToBigEndian<quint32>(size) : qToLittleEndian<quint32>(size));
+             be ? qToBigEndian<quint32>(toChunkSize(size))
+                : qToLittleEndian<quint32>(toChunkSize(size)));
     if (file_.write(&desc, sizeof desc) != sizeof desc)
         return false;
     return file_.seek(position);

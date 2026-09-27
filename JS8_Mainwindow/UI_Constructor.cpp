@@ -48,7 +48,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
       m_btxok{false}, m_auto{false}, m_restart{false}, m_currentMessageType{-1},
       m_lastMessageType{-1}, m_tuneup{false}, m_isTimeToSend{false}, m_ihsym{0},
       m_px{0.0}, m_iptt0{0}, m_btxok0{false}, m_onAirFreq0{0.0},
-      m_first_error{true}, tx_status_label{"Receiving"},
+      m_first_error{true},
       m_appDir{QApplication::applicationDirPath()}, m_palette{"Linrad"},
       m_txFrameCountEstimate{0}, m_txFrameCount{0}, m_txFrameCountSent{0},
       m_txTextDirty{false}, m_driftMsMMA{0}, m_driftMsMMA_N{0},
@@ -85,9 +85,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
         context.inboxCounts = &m_rxInboxCountCache;
         context.callActivityBandCache = &m_callActivityBandCache;
         context.rxTextBandCache = &m_rxTextBandCache;
-        context.showStatusMessage = [this](QString const &message) {
-            showStatusMessage(message);
-        };
         context.displayActivity = [this]() { displayActivity(true); };
         context.clearRxFrameBlockNumbers = [this]() {
             m_rxFrameBlockNumbers.clear();
@@ -126,15 +123,9 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->dialFreqDownButton->setStyleSheet(Styles::DialFreqUpDownButtonStyle);
     ui->labCallsign->setStyleSheet(Styles::LabCallsignStyle);
     ui->labUTC->setStyleSheet(Styles::LabUTCStyle);
-    ui->buttonGrid->setStyleSheet(Styles::ButtonGridStyle);
-    ui->monitorTxButton->setStyleSheet(Styles::MonitorTxButtonStyle);
-    ui->monitorButton->setStyleSheet(Styles::MonitorButtonStyle);
-    ui->logQSOButton->setStyleSheet(Styles::LogQSOButtonStyle);
-    ui->tuneButton->setStyleSheet(Styles::TuneButtonStyle);
-    ui->modeButton->setStyleSheet(Styles::ModeButtonStyle);
-    ui->spotButton->setStyleSheet(Styles::SpotButtonStyle);
+    updateCallActivityHeaderLabel();
 
-    createStatusBar();
+    createControlBar();
     add_child_to_event_filter(this);
 
     m_baseCall = Radio::base_callsign(m_config.my_callsign());
@@ -317,7 +308,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     connect(m_soundInput, &SoundInput::error, &m_config,
             &Configuration::invalidate_audio_input_device);
     // connect(m_soundInput, &SoundInput::status, this,
-    // &UI_Constructor::showStatusMessage);
     connect(&m_audioThread, &QThread::finished, m_soundInput,
             &QObject::deleteLater);
 
@@ -574,19 +564,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             });
     connect(&m_config, &Configuration::manual_band_hop_requested, this,
             &UI_Constructor::manualBandHop);
-    connect(&m_config, &Configuration::enumerating_audio_devices,
-            [this]() { showStatusMessage(tr("Enumerating audio devices")); });
 
     // set up configurations menu
-    connect(m_multi_settings, &MultiSettings::configurationNameChanged,
-            [this](QString const &name) {
-                if ("Default" != name) {
-                    config_label.setText(name);
-                    config_label.show();
-                } else {
-                    config_label.hide();
-                }
-            });
     m_multi_settings->create_menu_actions(this, ui->menuConfig);
     m_configurations_button = m_rigErrorMessageBox.addButton(
         tr("Configurations..."), QMessageBox::ActionRole);
@@ -604,7 +583,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     logQSOTimer.setSingleShot(true);
     connect(&logQSOTimer, &QTimer::timeout, this,
-            &UI_Constructor::on_logQSOButton_clicked);
+            &UI_Constructor::handleLogQSOButton_clicked);
 
     tuneButtonTimer.setSingleShot(true);
     connect(&tuneButtonTimer, &QTimer::timeout, this,
@@ -771,13 +750,6 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     ui->actionModeJS8Slow->setActionGroup(modeActionGroup);
     ui->actionModeJS8Ultra->setActionGroup(modeActionGroup);
 
-    ui->modeButton->installEventFilter(new EventFilter::MouseButtonPress(
-        [this](QMouseEvent *event) {
-            ui->menuModeJS8->popup(event->globalPosition().toPoint());
-            return true;
-        },
-        this));
-
     if (!JS8_ENABLE_JS8A)
         ui->actionModeJS8Normal->setVisible(false);
     if (!JS8_ENABLE_JS8B)
@@ -808,7 +780,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             if (!ensureCallsignSet(true))
                 return true;
 
-            toggleTx(true);
+            startTx();
             return true;
         },
         this));
@@ -987,7 +959,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     auto logAction = new QAction(QString("Log..."), ui->tableWidgetCalls);
     connect(logAction, &QAction::triggered, this,
-            &UI_Constructor::on_logQSOButton_clicked);
+            &UI_Constructor::handleLogQSOButton_clicked);
 
     // Disable default header mouseover and click behaviors, they are confusing
     // to users because they give the appearance of allowing sorting by header
@@ -1462,47 +1434,12 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     // period
     m_lastTxStopTime = nextTransmitCycle().addSecs(-m_TRperiod / 2);
 
-    int width = 75;
-    /*
-    QList<QPushButton*> btns;
-    foreach(auto child, ui->buttonGrid->children()){
-        if(!child->isWidgetType()){
-            continue;
-        }
-
-        if(!child->objectName().contains("Button")){
-            continue;
-        }
-
-        auto b = qobject_cast<QPushButton*>(child);
-        width = qMax(width, b->geometry().width());
-        btns.append(b);
-    }
-    */
-    foreach (auto child, ui->buttonGrid->children()) {
-        if (!child->isWidgetType()) {
-            continue;
-        }
-
-        if (!child->objectName().contains("Button")) {
-            continue;
-        }
-
-        auto b = qobject_cast<QPushButton *>(child);
+    for (QPushButton *b : {ui->monitorTxButton, ui->monitorButton, ui->logQSOButton,
+                        ui->tuneButton, ui->spotButton, ui->auto_reply_button,
+                        ui->hb_button, ui->hb_ack_button}) {
         b->setCursor(QCursor(Qt::PointingHandCursor));
     }
-    auto buttonLayout = ui->buttonGrid->layout();
-    auto gridButtonLayout = qobject_cast<QGridLayout *>(buttonLayout);
-    gridButtonLayout->setColumnMinimumWidth(0, width);
-    gridButtonLayout->setColumnMinimumWidth(1, width);
-    gridButtonLayout->setColumnMinimumWidth(2, width);
-    gridButtonLayout->setColumnStretch(0, 1);
-    gridButtonLayout->setColumnStretch(1, 1);
-    gridButtonLayout->setColumnStretch(2, 1);
-
-    // dial up and down buttons sizes
-    ui->dialFreqUpButton->setFixedSize(30, 24);
-    ui->dialFreqDownButton->setFixedSize(30, 24);
+    ui->mode_button->setCursor(QCursor(Qt::PointingHandCursor));
 
     // Prepare spotting configuration...
     prepareApi();

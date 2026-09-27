@@ -481,12 +481,6 @@ bool TransmitTextEdit::isInternalDocumentMutationActive() const {
 QTextCursor::MoveOperation deleteKeyEventToMoveOperation(QKeyEvent *e) {
     QTextCursor::MoveOperation op = QTextCursor::NoMove;
 
-#if 0
-    if (e == QKeySequence::Delete) {
-            op = QTextCursor::PreviousCharacter;
-    }
-    else
-#endif
     if (e == QKeySequence::DeleteStartOfWord) {
         op = QTextCursor::StartOfWord;
     } else if (e == QKeySequence::DeleteEndOfWord) {

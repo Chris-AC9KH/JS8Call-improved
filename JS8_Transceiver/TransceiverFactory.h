@@ -18,8 +18,6 @@ class QDir;
 //
 class TransceiverFactory : public QObject {
     Q_OBJECT
-    Q_ENUMS(DataBits StopBits Handshake PTTMethod TXAudioSource SplitMode)
-
   public:
     //
     // Capabilities of a Transceiver that can be determined without

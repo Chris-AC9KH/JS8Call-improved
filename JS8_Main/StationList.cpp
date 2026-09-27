@@ -181,26 +181,6 @@ QModelIndex StationList::impl::add(Station s) {
     return QModelIndex{};
 }
 
-#if 0
-auto StationList::impl::offset (Frequency f) const -> FrequencyDelta
-{
-  // Lookup band for frequency
-  auto const& band = bands_->find (f);
-  if (!band.isEmpty ())
-    {
-      // Lookup station for band
-      for (int i = 0; i < stations_.size (); ++i)
-        {
-          if (stations_[i].band_name_ == band)
-            {
-              return stations_[i].frequency_;
-            }
-        }
-    }
-  return 0;                     // no offset
-}
-#endif
-
 int StationList::impl::rowCount(QModelIndex const &parent) const {
     return parent.isValid() ? 0 : stations_.size();
 }

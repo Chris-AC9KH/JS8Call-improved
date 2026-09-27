@@ -58,7 +58,6 @@ class QHostAddress;
 //
 class Configuration final : public QObject {
     Q_OBJECT
-    Q_ENUMS(DataMode)
 
   public:
     using MODE = Transceiver::MODE;
@@ -144,7 +143,6 @@ class Configuration final : public QObject {
     bool heartbeat_anywhere() const;
     bool heartbeat_qso_pause() const;
     bool heartbeat_ack_snr() const;
-    bool hb_rate_limit() const;
     bool relay_off() const;
     bool monitor_off_at_startup() const;
     bool transmit_off_at_startup() const;

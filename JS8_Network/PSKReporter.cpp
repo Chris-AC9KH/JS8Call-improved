@@ -573,7 +573,7 @@ class PSKReporter::impl final : public QObject {
                         DriftingDateTime::currentSecsSinceEpoch());
 
                     // Send data to PSK Reporter site
-                    socket_->write(payload_); // TODO: handle errors
+                    socket_->write(payload_);
                     qCDebug(pskreporter_js8) << "[PSK]sent spots";
                     flush = false; // break loop
                     message.device()->seek(0u);

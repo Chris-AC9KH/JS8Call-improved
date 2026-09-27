@@ -72,21 +72,6 @@ void UI_Constructor::processDecodeEvent(JS8::Event::Variant const &event) {
                             m_driftMsMMA_N++; // cap it to 60 observations
                     }
 
-                // XXX The following lines do nothing; it's a completely dead
-                // store. For
-                //     now, just #ifdefing them out, but they were in
-                //     the 2.2.1-devel code, and presumably they were important;
-                //     need to see what the intent was here.
-#if 0
-          qint32 driftLimitMs = JS8::Submode::period(Varicode::JS8CallNormal) * 1000;
-          qint32 newDriftMs   = m_driftMsMMA;
-          if(newDriftMs < 0){
-              newDriftMs = -((-newDriftMs) % driftLimitMs);
-          } else {
-              newDriftMs = ((newDriftMs) % driftLimitMs);
-          }
-#endif
-
                     setDrift(m_driftMsMMA);
                     // writeNoticeTextToUI(QDateTime::currentDateTimeUtc(),
                     // QString("Automatic Drift: %1").arg(driftAvg));
@@ -121,21 +106,7 @@ void UI_Constructor::processDecodeEvent(JS8::Event::Variant const &event) {
                         return;
                     }
                 }
-#if 0
-        // frames are valid if they meet our minimum rx threshold for the submode
-        bool bValidFrame = decodedtext.snr() >= JS8::Submode::rxSNRThreshold(decodedtext.submode());
 
-        qCDebug(mainwindow_js8) << "valid" << bValidFrame << JS8::Submode::name(decodedtext.submode()) << "decoded text" << decodedtext.message();
-
-        // skip if invalid
-        if(!bValidFrame) {
-            return;
-        }
-#else
-                qCDebug(mainwindow_js8)
-                    << JS8::Submode::name(decodedtext.submode())
-                    << "decoded text" << decodedtext.message();
-#endif
                 // TODO: move this into a function
                 // compute time drift for non-dupe messages
                 if (m_wideGraph->shouldAutoSyncSubmode(decodedtext.submode())) {
@@ -338,7 +309,6 @@ void UI_Constructor::processDecodeEvent(JS8::Event::Variant const &event) {
                             << "buffering data" << d.dial << d.offset << d.text;
                         d.isBuffered = true;
                         m_messageBuffer[d.offset].msgs.append(d);
-                        // TODO: incremental display if it's "to" me.
                     }
 
                     m_rxActivityQueue.append(d);
@@ -393,9 +363,6 @@ void UI_Constructor::processDecodeEvent(JS8::Event::Variant const &event) {
                             cmd.tdrift = cd.tdrift;
                             cmd.submode = cd.submode;
                             cmd.text = decodedtext.message();
-
-                            // TODO: check bits so we only auto respond to
-                            // "finished" cqs
                             m_rxCommandQueue.append(cmd);
 
                             // since this is no longer processed here we omit
@@ -420,9 +387,6 @@ void UI_Constructor::processDecodeEvent(JS8::Event::Variant const &event) {
                             cmd.utcTimestamp = cd.utcTimestamp;
                             cmd.tdrift = cd.tdrift;
                             cmd.submode = cd.submode;
-
-                            // TODO: check bits so we only auto respond to
-                            // "finished" heartbeats
                             m_rxCommandQueue.append(cmd);
 
                             // notification for hb
@@ -540,3 +504,4 @@ void UI_Constructor::processDecodeEvent(JS8::Event::Variant const &event) {
         },
         event);
 }
+

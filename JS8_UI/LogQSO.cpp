@@ -256,7 +256,7 @@ void LogQSO::accept() {
     operator_call = ui->loggedOperator->text();
 
     // Log this QSO to ADIF file "js8call_log.adi"
-    QString filename = "js8call_log.adi"; // TODO allow user to set
+    QString filename = "js8call_log.adi";
     ADIF adifile;
     auto adifilePath = QDir{QStandardPaths::writableLocation(
                                 QStandardPaths::AppLocalDataLocation)}

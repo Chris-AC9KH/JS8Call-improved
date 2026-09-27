@@ -66,7 +66,7 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if (type == "RIG.SET_TUNE") {
         auto value = QVariant(message.value());
-        UI_Constructor::on_tuneButton_clicked(value.toBool());
+        UI_Constructor::handleTuneButton_clicked(value.toBool());
           sendNetworkMessage("RIG.SET_TUNE", "", {
             {"_ID", id},
             {"value", ui->tuneButton->isChecked()}
@@ -169,8 +169,8 @@ void UI_Constructor::networkMessage(Message const &message) {
     // STATION.GET_CONFIG - Get all config states (auto_reply, js8hb, hback, etc.)
     // STATION.SET_AUTO_REPLY - Toggle auto-reply on/off
     // STATION.SET_JS8HB - Toggle JS8 heartbeat on/off
-    // STATION.SET_HBACK - Toggle heartbeat acknowledgments on/off
-    // STATION.SET_MULTI_DECODER - Toggle multi-decoder on/off
+    // STATION.SET_HBACK - Toggle heartbeat acknowledgements on/off
+    // STATION.SET_MULTI_DECODER - [DEPRECATED, no-op]
     // STATION.SET_HB_INTERVAL - Set heartbeat interval (seconds)
     // STATION.SET_HB_TIMER - Start/stop heartbeat timer
     // STATION.SEND_HB - Send heartbeat immediately
@@ -271,10 +271,10 @@ void UI_Constructor::networkMessage(Message const &message) {
      */
     if(type == "STATION.GET_OS"){
       sendNetworkMessage("STATION.GET_OS", "", {
-	      {"OS_NAME", QSysInfo::prettyProductName()},
-	      {"OS_KERNEL", QSysInfo::kernelType()},
-	      {"OS_KERNEL_VERSION", QSysInfo::kernelVersion()},
-	      {"_ID", id}
+          {"OS_NAME", QSysInfo::prettyProductName()},
+          {"OS_KERNEL", QSysInfo::kernelType()},
+          {"OS_KERNEL_VERSION", QSysInfo::kernelVersion()},
+          {"_ID", id}
         });
         return;
     }
@@ -288,7 +288,7 @@ void UI_Constructor::networkMessage(Message const &message) {
     if(type == "STATION.GET_SPOT") {
         sendNetworkMessage("STATION.SPOT", "", {
           {"value", ui->spotButton->isChecked()},
-	      {"_ID", id}
+          {"_ID", id}
         });
         return;
     }
@@ -299,9 +299,9 @@ void UI_Constructor::networkMessage(Message const &message) {
      *
      * Thanks to N0GQ Jeff Francis
      */
-if(type == "STATION.SET_SPOT") {
+    if(type == "STATION.SET_SPOT") {
         auto value = QVariant(message.value());
-          UI_Constructor::on_spotButton_clicked(value.toBool());
+          UI_Constructor::handleSpotButton_clicked(value.toBool());
           sendNetworkMessage("STATION.SPOT", "", {
             {"value", ui->spotButton->isChecked()},
             {"_ID", id}
@@ -321,7 +321,6 @@ if(type == "STATION.SET_SPOT") {
             {"AUTO_REPLY", QVariant(ui->actionModeAutoreply->isChecked())},
             {"JS8HB", QVariant(ui->actionModeJS8HB->isChecked())},
             {"HBACK", QVariant(ui->actionHeartbeatAcknowledgements->isChecked())},
-            {"MULTI_DECODER", QVariant(ui->actionModeMultiDecoder->isChecked())},
             {"HB_INTERVAL", QVariant(m_hbInterval)},
             {"HB_TIMER_ACTIVE", QVariant(m_hb_loop->isActive())},
             {"MONITOR", QVariant(ui->monitorButton->isChecked())},
@@ -359,7 +358,7 @@ if(type == "STATION.SET_SPOT") {
         return;
     }
 
-    /** @brief STATION.SET_HBACK: Toggle heartbeat acknowledgments.
+    /** @brief STATION.SET_HBACK: Toggle heartbeat acknowledgements.
      *  @note API 2.6+ */
     if (type == "STATION.SET_HBACK") {
         auto checked = QVariant(message.value()).toBool();
@@ -370,15 +369,16 @@ if(type == "STATION.SET_SPOT") {
         });
         return;
     }
-
+    
     /** @brief STATION.SET_MULTI_DECODER: Toggle multi-decoder mode.
-     *  @note API 2.6+ */
+     *  @deprecated API 4.x: Slated for removal in JS8Call 4.0
+     *  @note API 2.6+ through 3.x (no-op). Removed in 4.0.
+     */
     if (type == "STATION.SET_MULTI_DECODER") {
-        auto checked = QVariant(message.value()).toBool();
-        ui->actionModeMultiDecoder->setChecked(checked);
         sendNetworkMessage("STATION.SET_MULTI_DECODER", "", {
             {"_ID", id},
-            {"MULTI_DECODER", QVariant(ui->actionModeMultiDecoder->isChecked())},
+            {"MULTI_DECODER", QVariant(true)},
+            {"DEPRECATED", QVariant(true)},
         });
         return;
     }
@@ -761,9 +761,9 @@ if(type == "STATION.SET_SPOT") {
       int depth = m_txMessageQueue.size();
       if(m_transmitting && depth==0) depth=1;
       sendNetworkMessage("TX.QUEUE_DEPTH", "", {
-	  {"_ID", id},
-	  {"DEPTH", QVariant(depth)}
-	});
+      {"_ID", id},
+      {"DEPTH", QVariant(depth)}
+    });
       return;
     }
     /** @} */ // End TX Commands

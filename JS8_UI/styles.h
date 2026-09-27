@@ -1,10 +1,23 @@
 /**
  * @file styles.h
- * @brief header file that defines platform specific label, button, widget and
- * dialog styles used in functions in the UI_Constructor class that assembles
- * the UI and provides the proper "look and feel" for each desktop platform
+ * @brief Platform-specific label, button, widget, and dialog styles used by
+ *        the UI_Constructor class to assemble JS8Call's user interface.
  *
- * styles.h was added on 11 Apr, 2026 and is intended to eventually become the
+ * @details
+ * Provides QSS (Qt Style Sheet) stylesheet strings and a small helper widget
+ * used to give JS8Call a native "look and feel" on macOS, Windows, and
+ * Linux/other platforms.
+ *  -# **General control styles**: buttonStyle() and logFrameStyle(), which
+ *     style generic QPushButton/QToolButton widgets and the header bar's
+ *     frequency display frame.
+ *  -# **Styles namespace**: platform-specific constants for the two main
+ *     regions of the UI:
+ *       - Header Bar  -- LogWidgetStyle, DialFreqUpDownButtonStyle,
+ *         OffsetSliderWidget, LabCallsignStyle, LabUTCStyle.
+ *       - Control Bar -- MonitorTxButtonStyle, ControlButtonStyle,
+ *         LogQSOButtonStyle, TuneButtonStyle, ModeButtonStyle.
+ *
+ * styles.h was added on 11 Apr, 2026 and is intended to be the
  * default StyleSheet configuration for the JS8Call user interface.
  */
 
@@ -18,176 +31,46 @@
 #include <QLabel>
 #include <QWidget>
 
-/**
- * @brief Provides platform-adaptive stylesheet strings for status bar QLabel
- * widgets.
- *
- * This module defines styling for QLabel-based status indicators,
- * with platform-specific geometry (border-radius, padding, border style)
- * targeting macOS, Windows, and Linux. A minimal fallback is provided for other
- * platforms, e.g. possibly compiling on BSD Unix, iOS, Android, etc..
- *
- * @section tx_status Transmit Status Appearance
- * The @c TxStatusAppearance enum represents four logical states for the TX
- * status label:
- * - @c Receiving    – Active receive; rendered with a green background, black text.
- * - @c Transmitting – Active transmit; rendered with a red background, black text.
- * - @c Decoding     – Decoding in progress; currently shares colors with @c
- * Receiving, but is defined separately to allow future change.
- * - @c IdleTimeout  – Idle or timed-out; rendered with a black background, white text.
- *
- * @fn static inline QString makeStyle(const QString& bg, const QString& fg)
- * @brief Constructs a platform-appropriate QSS stylesheet string for a QLabel.
- * @param bg Background color as a CSS color string.
- * @param fg Foreground (text) color as a CSS color string..
- * @return A QSS QString suitable for use with @c QWidget::setStyleSheet().
- *
- * @fn inline QString txStatusLabelStyle(TxStatusAppearance appearance)
- * @brief Returns the QSS stylesheet string for a given TX status state.
- * @param appearance The desired @c TxStatusAppearance state.
- * @return A QSS QString for the requested appearance, or an empty QString()
- *         for any unhandled @c default case (compiler safety fallback).
- */
-static inline QString statusLabelStyle(const QString &bg = "#6699ff",
-                                       const QString &fg = "#000000") {
-#if defined(Q_OS_MACOS)
-    return QStringLiteral("QLabel{background-color: %1; color: %2; "
-                          "border-radius: 6px; padding: 2px 8px; "
-                          "border: 1px solid rgba(0,0,0,0.15)}")
-        .arg(bg, fg);
-#elif defined(Q_OS_WIN)
-    return QStringLiteral("QLabel{background-color:%1; color:%2; "
-                          "border-radius:4px; padding:0px 8px; "
-                          "border:1px solid rgba(0,0,0,0.25)}")
-        .arg(bg, fg);
-#else // Linux/other
-    return QStringLiteral("QLabel{background-color:%1; color:%2; "
-                          "border-radius:1px; padding:1px 6px; "
-                          "border:1px inset rgba(0,0,0,0.18)}")
-        .arg(bg, fg);
-#endif
-}
-
-enum class TxStatusAppearance {
-    Receiving,    // green on black text
-    Transmitting, // red
-    Decoding,     // same as Receiving
-    IdleTimeout   // black bg, white fg
-};
-
-QString txStatusLabelStyle(TxStatusAppearance appearance);
-
-static inline QString makeStyle(const QString &bg, const QString &fg) {
-#if defined(Q_OS_LINUX)
-    return QString("QLabel{background-color:%1; color:%2; "
-                   "border-radius:1px; padding:1px 6px; "
-                   "border:1px inset rgba(0,0,0,0.18);}")
-        .arg(bg, fg);
-#elif defined(Q_OS_WIN)
-    return QString("QLabel{background-color:%1; color:%2; "
-                   "border-radius:4px; padding:0px 8px; "
-                   "border:1px solid rgba(0,0,0,0.25);}")
-        .arg(bg, fg);
-#elif defined(Q_OS_MACOS)
-    return QString("QLabel{background-color:%1; color:%2; "
-                   "border-radius:6px; padding:2px 8px; "
-                   "border:1px solid rgba(0,0,0,0.15);}")
-        .arg(bg, fg);
-#else
-    return QString("QLabel{background-color:%1; color:%2;}").arg(bg, fg);
-#endif
-}
-
-inline QString txStatusLabelStyle(TxStatusAppearance appearance) {
-    switch (appearance) {
-    case TxStatusAppearance::Receiving:
-        return makeStyle("#22ff22", "#000000");
-    case TxStatusAppearance::Transmitting:
-        return makeStyle("#ff2222", "#000000");
-    case TxStatusAppearance::Decoding:
-        return makeStyle("#22ff22", "#000000");
-    case TxStatusAppearance::IdleTimeout:
-        return makeStyle("#000000", "#ffffff");
-    default:
-        return QString(); // no style for compiler fallback
-    }
-}
-
-/**
- * @brief Constructs a unified cross-platform QSS stylesheet for the
- * QProgressBar.
- *
- * Generates a stylesheet that produces a consistent progress bar appearance
- * across all platforms, with a white background (@c #ffffff) and a light-blue
- * chunk fill
- * (@c #a5cdff). Border is suppressed entirely; text is centered. The bar
- * dimensions are fully constrained via @c min-height / @c max-height to prevent
- * platform layout interference.
- *
- * @param small     If @c true, renders a compact variant (height: 10px, radius:
- * 3px); if @c false (default), renders the standard size (height: 14px, radius:
- * 5px).
- * @return A QSS QString suitable for use with @c QWidget::setStyleSheet().
- */
-static inline QString progress_bar_stylesheet(bool small = false) {
-    const QString base = QString("QProgressBar {"
-                                 "  border: 0px;"
-                                 "  background-color: #ffffff;"
-                                 "  color: #000000;"
-                                 "  text-align: center;"
-                                 "  padding: 0px;"
-                                 "  %1"
-                                 "}"
-                                 "QProgressBar::chunk {"
-                                 "  background-color: #a5cdff;"
-                                 "  border-radius: %2px;"
-                                 "  %3"
-                                 "}");
-
-    const int height = small ? 10 : 14; // overall control height
-    const int radius = small ? 3 : 5;   // roundness of the bar ends
-    const QString barDim =
-        QString("min-height:%1px; max-height:%1px; border-radius:%2px;")
-            .arg(height)
-            .arg(radius);
-    const QString chunkDim = QString("min-height:%1px;").arg(height);
-    return base.arg(barDim, QString::number(radius), chunkDim);
-}
+// =============================================================================
+// General control styles
+// =============================================================================
 
 /**
  * @brief Returns a platform-native QPushButton/QToolButton stylesheet.
  *
- * Generates a stylesheet that approximates the native button conventions of the
- * specific platform, using system-appropriate fonts, geometry, and accent
- * colors. Hover, pressed, and disabled pseudo-states are defined for all active
- * variants.
+ * Generates a stylesheet that approximates the native button conventions of
+ * the target platform, using system-appropriate fonts, geometry, and accent
+ * colors. Hover, pressed, and disabled pseudo-states are defined.
+ * Also styles the drop-down menu indicator/padding used by
+ * QToolButton#replyPushButton when it has an attached menu.
  *
  * @return A QSS QString suitable for use with @c QWidget::setStyleSheet(),
- *         or an empty default Qt style on unsupported platforms.
+ *         or an empty QString() on unsupported platforms (falls back to the
+ *         default Qt style).
  */
 inline QString buttonStyle() {
-#if defined(Q_OS_WIN)
+#if defined(Q_OS_MACOS)
     return R"(
         QPushButton, QToolButton {
             background-color: #6699ff;
             color: black;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             padding: 3px 9px;
-            min-height: 15px;
-            max-height: 15px;
-            font-family: "Segoe UI";
+            min-height: 12;
+            max-height: 12px;
+            font-family: "-apple-system";
         }
         QPushButton:hover, QToolButton:hover {
-            background-color: #4d7fff;
+            background-color: #006EE6;
             color: white;
         }
         QPushButton:pressed, QToolButton:pressed {
             background-color: #003EAA;
         }
         QPushButton:disabled, QToolButton:disabled {
-            background-color: #ececec;
-            color: #888888;
+            background-color: rgba(0, 0, 0, 20);
+            color: rgba(0, 0, 0, 100);
         }
         QToolButton#replyPushButton::menu-button {
             width: 12px;
@@ -201,28 +84,28 @@ inline QString buttonStyle() {
         }
     )";
 
-#elif defined(Q_OS_MACOS)
+#elif defined(Q_OS_WIN)
     return R"(
         QPushButton, QToolButton {
-            background-color: #6699ff;
+            background-color: #0078D4;
             color: black;
             border: none;
-            border-radius: 6px;
+            border-radius: 4px;
             padding: 3px 9px;
-            min-height: 15px;
-            max-height: 15px;
-            font-family: "-apple-system";
+            min-height: 12px;
+            max-height: 12px;
+            font-family: "Segoe UI";
         }
         QPushButton:hover, QToolButton:hover {
-            background-color: #4d7fff;
+            background-color: #006ABB;
             color: white;
         }
         QPushButton:pressed, QToolButton:pressed {
             background-color: #003EAA;
         }
         QPushButton:disabled, QToolButton:disabled {
-            background-color: #ececec;
-            color: #888888;
+            background-color: rgba(0, 0, 0, 20);
+            color: rgba(0, 0, 0, 100);
         }
         QToolButton#replyPushButton::menu-button {
             width: 12px;
@@ -239,22 +122,24 @@ inline QString buttonStyle() {
 #elif defined(Q_OS_LINUX)
     return R"(
        QPushButton, QToolButton {
-           background-color: #6699ff;
+           background-color: #3584E4;
            color: black;
            border: none;
-           border-radius: 5px;
+           border-radius: 0px;
            padding: 3px 9px;
+           min-height: 12px;
+           max-height: 12px;
            font-family: "Ubuntu", "Noto Sans";
        }
        QPushButton:hover, QToolButton:hover {
-           background-color: #4d7fff;
+           background-color: #1F76E1;
        }
        QPushButton:pressed, QToolButton:pressed {
            background-color: #003EAA;
        }
        QPushButton:disabled, QToolButton:disabled {
-           background-color: #ececec;
-           color: #888888;
+           background-color: rgba(0, 0, 0, 20);
+           color: rgba(0, 0, 0, 100);
        }
        QToolButton#replyPushButton::menu-button {
            width: 12px;
@@ -273,8 +158,20 @@ inline QString buttonStyle() {
 #endif
 }
 
-// defines the background, color, font and size of the header bar frequency
-// display, the #else section contains the definitions for linux
+/**
+ * @brief Returns the stylesheet for the header bar's frequency display.
+ *
+ * Styles @c QFrame#frame (the header bar background) and
+ * @c QLabel#currentFreq (the large frequency readout), including its font,
+ * color, and border radius.
+ *
+ * @return A QSS QString suitable for use with @c QWidget::setStyleSheet().
+ */
+
+// =============================================================================
+// Header bar frequency display
+// =============================================================================
+
 static inline QString logFrameStyle() {
 #if defined(Q_OS_MACOS)
     return QStringLiteral("QFrame#frame { background-color: #F2F2F0; }"
@@ -283,10 +180,12 @@ static inline QString logFrameStyle() {
                           " background-color: black;"
                           " border-radius:6px; padding:0px 8px; "
                           " font-family: Monaco, 'Courier New', monospace;"
-                          " font-size: 20pt;"
+                          " font-size: 15pt;"
                           " font-weight: bold;"
-                          " min-width: 200px;"
-                          " min-height: 40px;"
+                          " min-width: 150px;"
+                          " max-width: 150px;"
+                          " min-height: 20px;"
+                          " max-height: 50px;"
                           "}");
 #elif defined(Q_OS_WIN)
     return QStringLiteral("QFrame#frame { background-color: #DDEEFF; }"
@@ -295,111 +194,166 @@ static inline QString logFrameStyle() {
                           " background-color: black;"
                           " border-radius:4px; padding:0px 8px; "
                           " font-family: Consolas, 'Courier New', monospace;"
-                          " font-size: 20pt;"
+                          " font-size: 15pt;"
                           " font-weight: bold;"
-                          " min-width: 200px;"
-                          " min-height: 40px;"
+                          " min-width: 150px;"
+                          " max-width: 150px;"
+                          " min-height: 20px;"
+                          " max-height: 50px;"
                           "}");
 #else
+    // Linux and other platforms
     return QStringLiteral("QFrame#frame { background-color: #F2F2F0; }"
                           "QLabel#currentFreq {"
                           " color: #39FF14;"
                           " background-color: black;"
                           " border-radius:0px; padding:0px 8px; "
-                          " font-size: 28pt;"
+                          " font-size: 15pt;"
                           " font-weight: bold;"
-                          " min-width: 200px;"
-                          " min-height: 40px;"
+                          " min-width: 150px;"
+                          " max-width: 150px;"
+                          " min-height: 20px;"
+                          " max-height: 50px;"
                           "}");
 #endif
 }
 
+// =============================================================================
+// Styles namespace
+// =============================================================================
+
 /**
  * @namespace Styles
- * @brief Defines platform-specific style constants for JS8Call's header bar controls.
- *
- * This namespace provides a set of constant strings that determine the appearance of
- * various header bar UI elements in JS8Call, including frequency widgets, buttons, and labels.
- * Each definition adapts to the conventions of MacOS, Windows, or other (which includes linux)
- * platforms, ensuring a consistent and native look and feel per-platform.
+ * @brief Platform-specific style constants for JS8Call's Header Bar and
+ *        Control Bar.
  *
  * @details
- * - Styles include visual treatments for log widgets, frequency buttons,
- *   status labels, and a variety of push buttons (grid, monitor, log, mode, spot, etc.).
- * - Platform differences (MacOS, Windows, other) are handled using preprocessor
- *   directives, with each block tailored to the target system's design conventions.
- * - For each supported platform, constants such as @c LogWidgetStyle,
- *   @c DialFreqUpDownButtonStyle, @c LabUTCStyle, and others are defined.
+ * This namespace provides constant QSS strings and one helper widget that
+ * determine the appearance of the Header Bar and Control Bar. Exactly one
+ * of the three preprocessor branches below (macOS, Windows, or
+ * Linux/other) is compiled, always in that order, so each platform gets a
+ * matching, complete set of definitions:
+ *
+ * **Header Bar**
+ *  - @c LogWidgetStyle             -- background of the log/header frame.
+ *  - @c DialFreqUpDownButtonStyle  -- small +/- frequency step buttons.
+ *  - @c OffsetSliderWidget         -- labeled offset slider widget.
+ *  - @c LabCallsignStyle           -- callsign label text.
+ *  - @c LabUTCStyle                -- UTC clock label (LED-style readout).
+ *
+ * **Control Bar**
+ *  - @c MonitorTxButtonStyle -- Monitor/Tx toggle button (green when
+ *    monitoring, red while transmitting).
+ *  - @c ControlButtonStyle   -- general on/off toggle buttons.
+ *  - @c LogQSOButtonStyle    -- "Log QSO" button.
+ *  - @c TuneButtonStyle      -- "Tune" button.
+ *  - @c ModeButtonStyle      -- mode-select button.
  */
 #if defined(Q_OS_MACOS)
 namespace Styles {
 
+// ---------------------------------------------------------------------------
+// Header Bar
+// ---------------------------------------------------------------------------
+
+/// Background style for the header bar frame (macOS).
 constexpr const char *LogWidgetStyle =
     "QFrame#logWidget { background-color: #F2F2F0; }";
 
-constexpr const char *DialFreqUpDownButtonStyle =
-    "QPushButton {"
-    "    background-color: #000000;"
-    "    color: #39FF14;"
-    "    font-size: 10pt;"
-    "    border:0px solid;"
-    "    border-radius:2px;"
-    "}"
-    "QPushButton:pressed {"
-    "    background-color: #222;"
-    "}";
+/// Style for the small frequency up/down step buttons (macOS).
+constexpr const char *DialFreqUpDownButtonStyle = "QPushButton {"
+                                                  "    background: transparent;"
+                                                  "    color: #000000;"
+                                                  "    font-size: 10pt;"
+                                                  "    padding: 0px;"
+                                                  "    border: none;"
+                                                  "    margin: 0px;"
+                                                  "    min-height: 14px;"
+                                                  "    max-height: 14px;"
+                                                  "    min-width: 10px;"
+                                                  "    max-width: 10px;"
+                                                  "}";
 
+/**
+ * @class OffsetSliderWidget
+ * @brief A labeled "Offset:" slider used to select the RX/TX audio offset,
+ *        in Hz, in the header bar.
+ *
+ * Composes a caption label, a horizontal QSlider (range 0-3000 Hz, default
+ * 1500 Hz), and a value label that updates live as the slider moves. The
+ * slider's own stylesheet is fixed here so its appearance does not change
+ * with the system theme (light/dark mode).
+ */
 class OffsetSliderWidget : public QWidget {
   public:
+    /**
+     * @brief Constructs the widget and lays out caption, slider, and value
+     *        label horizontally.
+     * @param parent Optional parent widget.
+     */
     explicit OffsetSliderWidget(QWidget *parent = nullptr) : QWidget(parent) {
         auto *layout = new QHBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(4);
+
         auto *caption = new QLabel("Offset:", this);
         caption->setStyleSheet("QLabel { color: black; }");
+
         slider = new QSlider(Qt::Horizontal, this);
-        // Lock the QSlider's appearance regardless of the system theme
         slider->setStyleSheet(R"(
             QSlider {
                 background: transparent;
-                min-height: 24px;
+                min-height: 14px;
+                min-width: 100px;
+                max-width: 100px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
-                height: 6px;
-                background: #a5cdff;
-                border-radius: 3px;
+                height: 4px;
+                background: #3F9BFF;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 background: #6699ff;
                 border: 1px solid #c2c8d1;
-                width: 16px;
-                margin: -3px 0;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
                 border-radius: 6px;
             }
             QSlider::sub-page:horizontal {
-                background: #a5cdff;
-                border-radius: 3px;
+                background: #3F9BFF;
+                border-radius: 2px;
             }
             QSlider::add-page:horizontal {
                 background: #e0e0e0;
-                border-radius: 3px;
+                border-radius: 2px;
             }
         )");
         slider->setRange(0, 3000);
         slider->setValue(1500);
         valueLabel = new QLabel("0 Hz", this);
         valueLabel->setStyleSheet("QLabel { color: black; }");
-        valueLabel->setMinimumWidth(60);
+        valueLabel->setMinimumWidth(20);
         layout->addWidget(caption);
-        layout->addWidget(slider, 1);
+        layout->addWidget(slider);
         layout->addWidget(valueLabel);
         connect(slider, &QSlider::valueChanged, this, [this](int val) {
             valueLabel->setText(QString("%1 Hz").arg(val));
-            if (onValueChanged) onValueChanged(val);
+            if (onValueChanged)
+                onValueChanged(val);
         });
     }
 
+    /// @brief Returns the currently selected offset, in Hz.
     int offset() const { return slider->value(); }
+
+    /// @brief Programmatically sets the offset, in Hz.
+    /// @param hz New offset value; clamped to the slider's [0, 3000] range.
     void setValue(int hz) { slider->setValue(hz); }
+
+    /// @brief Registers a callback invoked whenever the offset changes.
+    /// @param cb Callback receiving the new offset in Hz.
     void setOnValueChanged(std::function<void(int)> cb) { onValueChanged = cb; }
 
   private:
@@ -408,142 +362,160 @@ class OffsetSliderWidget : public QWidget {
     std::function<void(int)> onValueChanged;
 };
 
+/// Style for the callsign label in the header bar (macOS).
 constexpr const char *LabCallsignStyle = "QLabel {"
                                          "    font-size: 12pt;"
                                          "    line-height:12pt;"
                                          "    color : black;"
                                          "}";
 
+/// Style for the UTC clock label; rendered as a black LED-style readout
+/// (macOS).
 constexpr const char *LabUTCStyle =
     "QLabel {"
     "    border-radius:6px;"
-    "    font-size: 14pt;"
-    "    line-height:14pt;"
+    "    font-size: 12pt;"
+    "    line-height:12pt;"
     "    font-family: Monaco, 'Courier New', monospace;"
     "    font-weight: bold;"
     "    background-color: black;"
-    "    color : #39FF14;"
+    "    color: #39FF14;"
     "}";
 
-constexpr const char *ButtonGridStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
+// ---------------------------------------------------------------------------
+// Control Bar
+// ---------------------------------------------------------------------------
 
+/// Style for the Tx toggle button: green when monitoring, red while
+/// transmitting (macOS).
 constexpr const char *MonitorTxButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
+    "    background-color: rgba(0, 0, 255, 40);"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 6px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#22FF22;"
-    "    color:black;"
+    "    background-color: #22FF22;"
+    "    color: black;"
     "}"
     "QPushButton[transmitting=\"true\"] {"
-    "    background-color:#FF2222;"
-    "    color:black;"
+    "    background-color: #FF2222;"
+    "    color: black;"
     "}";
 
-constexpr const char *MonitorButtonStyle =
+/// General-purpose control bar toggle button style, with a disabled state
+/// (macOS).
+constexpr const char *ControlButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
+    "    background-color: rgba(0, 0, 255, 40);"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 6px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#22FF22;"
+    "    background-color: #22FF22;"
     "    color:black;"
+    "}"
+    "QPushButton:disabled {"
+    "    background-color: rgba(230, 230, 230, 255);"
+    "    color: rgba(0, 0, 0, 100);"
+    "}"
+    "QPushButton:disabled:checked {"
+    "    background-color: #a0d8a0;"
+    "    color: rgba(0, 0, 0, 100);"
     "}";
 
+/// Style for the "Log QSO" button (macOS).
 constexpr const char *LogQSOButtonStyle =
     "QPushButton {"
-    "    background-color:#6699ff;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
+    "    background-color: #6699ff;"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 6px;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    background-color: #6699ff;"
+    "    color: black;"
     "}";
 
+/// Style for the "Tune" button: turns red while active (macOS).
 constexpr const char *TuneButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
+    "    background-color: rgba(0, 0, 255, 40);"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 6px;"
+    "}"
+    "QPushButton:hover {"
+    "background-color: #ffcc00;"
+    "    color: black;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    background-color: #FF2222;"
+    "    color: black;"
     "}";
 
+/// Style for the mode-select button (macOS).
 constexpr const char *ModeButtonStyle =
     "QPushButton {"
-    "    padding:0.25em 0.25em; font-weight:bold;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    padding: 0.25em 0.25em; font-weight:bold;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 6px;"
+    "    background-color: #6699ff;"
+    "    color: black;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    background-color: #6699ff;"
+    "    color: black;"
     "}";
 
-constexpr const char *SpotButtonStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:6px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
-    "}";
-
-}
+} // namespace Styles
 #elif defined(Q_OS_WIN)
 namespace Styles {
 
+// ---------------------------------------------------------------------------
+// Header Bar
+// ---------------------------------------------------------------------------
+
+/// Background style for the header bar frame (Windows).
 constexpr const char *LogWidgetStyle =
     "QFrame#logWidget { background-color: #DDEEFF; }";
 
-constexpr const char *DialFreqUpDownButtonStyle =
-    "QPushButton {"
-    "    background-color: #000000;"
-    "    color: #39FF14;"
-    "    font-size: 12pt;"
-    "    border:0px solid;"
-    "    border-radius:2px;"
-    "}"
-    "QPushButton:pressed {"
-    "    background-color: #222;"
-    "}";
+/// Style for the small frequency up/down step buttons (Windows).
+constexpr const char *DialFreqUpDownButtonStyle = "QPushButton {"
+                                                  "    background: transparent;"
+                                                  "    color: #000000;"
+                                                  "    font-size: 10pt;"
+                                                  "    padding: 0px;"
+                                                  "    border: none;"
+                                                  "    margin: 0px;"
+                                                  "    min-height: 14px;"
+                                                  "    max-height: 14px;"
+                                                  "    min-width: 10px;"
+                                                  "    max-width: 10px;"
+                                                  "}";
 
+/**
+ * @class OffsetSliderWidget
+ * @brief A labeled "Offset:" slider used to select the RX/TX audio offset,
+ *        in Hz, in the header bar (Windows).
+ */
 class OffsetSliderWidget : public QWidget {
   public:
     explicit OffsetSliderWidget(QWidget *parent = nullptr) : QWidget(parent) {
@@ -555,46 +527,55 @@ class OffsetSliderWidget : public QWidget {
         slider->setStyleSheet(R"(
             QSlider {
                 background: transparent;
-                min-height: 24px;
+                min-height: 14px;
+                min-width: 100px;
+                max-width: 100px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
-                height: 6px;
-                background: #a5cdff;
-                border-radius: 3px;
+                height: 4px;
+                background: #1499FF;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
-                background: #6699ff;
+                background: #0078D4;
                 border: 1px solid #c2c8d1;
-                width: 16px;
-                margin: -3px 0;
-                border-radius: 5px;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
             }
             QSlider::sub-page:horizontal {
-                background: #a5cdff;
-                border-radius: 3px;
+                background: #1499FF;
+                border-radius: 2px;
             }
             QSlider::add-page:horizontal {
                 background: #e0e0e0;
-                border-radius: 3px;
+                border-radius: 2px;
             }
         )");
         slider->setRange(0, 3000);
         slider->setValue(1500);
         valueLabel = new QLabel("0 Hz", this);
         valueLabel->setStyleSheet("QLabel { color: black; }");
-        valueLabel->setMinimumWidth(60);
+        valueLabel->setMinimumWidth(20);
         layout->addWidget(caption);
-        layout->addWidget(slider, 1);
+        layout->addWidget(slider);
         layout->addWidget(valueLabel);
         connect(slider, &QSlider::valueChanged, this, [this](int val) {
             valueLabel->setText(QString("%1 Hz").arg(val));
-            if (onValueChanged) onValueChanged(val);
+            if (onValueChanged)
+                onValueChanged(val);
         });
     }
 
+    /// @brief Returns the currently selected offset, in Hz.
     int offset() const { return slider->value(); }
+
+    /// @brief Programmatically sets the offset, in Hz.
     void setValue(int hz) { slider->setValue(hz); }
+
+    /// @brief Registers a callback invoked whenever the offset changes.
     void setOnValueChanged(std::function<void(int)> cb) { onValueChanged = cb; }
 
   private:
@@ -603,132 +584,164 @@ class OffsetSliderWidget : public QWidget {
     std::function<void(int)> onValueChanged;
 };
 
+/// Style for the callsign label in the header bar (Windows).
 constexpr const char *LabCallsignStyle = "QLabel {"
                                          "    font-size: 12pt;"
                                          "    line-height:12pt;"
                                          "    color : black;"
                                          "}";
 
+/// Style for the UTC clock label; rendered as a black LED-style readout
+/// (Windows).
 constexpr const char *LabUTCStyle =
     "QLabel {"
-    "    border-radius:4px;"
-    "    font-size: 14pt;"
-    "    line-height:14pt;"
+    "    border-radius: 4px;"
+    "    font-size: 12pt;"
+    "    line-height: 12pt;"
     "    font-family: Consolas, 'Courier New', monospace;"
     "    font-weight: bold;"
     "    background-color: black;"
-    "    color : #39FF14;"
+    "    color: #39FF14;"
     "}";
 
-constexpr const char *ButtonGridStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
+// ---------------------------------------------------------------------------
+// Control Bar
+// ---------------------------------------------------------------------------
 
+/// Style for the Tx toggle button: green when monitoring, red while
+/// transmitting (Windows).
 constexpr const char *MonitorTxButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
+    "    background-color: lightgray;"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 4px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#22FF22;"
-    "    color:black;"
+    "    background-color: #22FF22;"
+    "    color: black;"
     "}"
     "QPushButton[transmitting=\"true\"] {"
-    "    background-color:#FF2222;"
-    "    color:black;"
+    "    background-color: #FF2222;"
+    "    color: black;"
     "}";
 
-constexpr const char *MonitorButtonStyle =
+/// General-purpose control bar toggle button style, with a disabled state
+/// (Windows).
+constexpr const char *ControlButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
+    "    background-color: lightgray;"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style:s olid;"
+    "    border-width: 0px;"
+    "    border-radius: 4px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#22FF22;"
-    "    color:black;"
+    "    background-color: #22FF22;"
+    "    color: black;"
+    "}"
+    "QPushButton:hover {"
+    "    color: red;"
+    "}"
+    "QPushButton:disabled {"
+    "    background-color: rgba(230, 230, 230, 255);"
+    "    color: rgba(0, 0, 0, 100);"
+    "}"
+    "QPushButton:disabled:checked {"
+    "    background-color: #a0d8a0;"
+    "    color: rgba(0, 0, 0, 100);"
     "}";
 
+/// Style for the "Log QSO" button (Windows).
 constexpr const char *LogQSOButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
+    "    background-color: #0078D4;"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 4px;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    background-color: #0078D4;"
+    "    color: black;"
     "}";
 
-constexpr const char *TuneButtonStyle = LogQSOButtonStyle; // Same as above
+/// Style for the "Tune" button: turns red while active (Windows).
+constexpr const char *TuneButtonStyle =
+    "QPushButton {"
+    "    background-color: lightgray;"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 4px;"
+    "}"
+    "QPushButton:hover {"
+    "background-color: #ffcc00;"
+    "    color: black;"
+    "}"
+    "QPushButton:checked {"
+    "    background-color: #FF2222;"
+    "    color: black;"
+    "}";
 
+/// Style for the mode-select button (Windows).
 constexpr const char *ModeButtonStyle =
     "QPushButton {"
-    "    padding:0.25em 0.25em; font-weight:bold;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    padding: 0.25em 0.25em; font-weight:bold;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 4px;"
+    "    background-color: #0078D4;"
+    "    color: black;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
+    "    background-color: #0078D4;"
+    "    color: black;"
     "}";
 
-constexpr const char *SpotButtonStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    color:black;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:4px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "    color:black;"
-    "}";
-
-}
+} // namespace Styles
 #else
 namespace Styles {
+// Linux and other platforms
 
-// background color of the header bar - must be the same as the frequency display above
+// ---------------------------------------------------------------------------
+// Header Bar
+// ---------------------------------------------------------------------------
+
+/// Background style for the header bar's log/status frame (Linux/other).
 constexpr const char *LogWidgetStyle =
     "QFrame#logWidget { background-color: #F2F2F0; }";
 
-// definition of the frequency displqy for the up/down buttons
-constexpr const char *DialFreqUpDownButtonStyle =
-    "QPushButton {"
-    "    background-color: #000000;"
-    "    color: #39FF14;"
-    "    font-size: 12pt;"
-    "    border:1px solid;"
-    "    border-radius:0px;"
-    "}"
-    "QPushButton:pressed {"
-    "    background-color: #222;"
-    "}";
+/// Style for the small frequency up/down step buttons (Linux/other).
+constexpr const char *DialFreqUpDownButtonStyle = "QPushButton {"
+                                                  "    background: transparent;"
+                                                  "    color: #000000;"
+                                                  "    font-size: 10pt;"
+                                                  "    padding: 0px;"
+                                                  "    border: none;"
+                                                  "    margin: 0px;"
+                                                  "    min-height: 14px;"
+                                                  "    max-height: 14px;"
+                                                  "    min-width: 10px;"
+                                                  "    max-width: 10px;"
+                                                  "}";
 
+/**
+ * @class OffsetSliderWidget
+ * @brief A labeled "Offset:" slider used to select the RX/TX audio offset,
+ *        in Hz, in the header bar (Linux/other).
+ */
 class OffsetSliderWidget : public QWidget {
   public:
     explicit OffsetSliderWidget(QWidget *parent = nullptr) : QWidget(parent) {
@@ -740,46 +753,55 @@ class OffsetSliderWidget : public QWidget {
         slider->setStyleSheet(R"(
             QSlider {
                 background: transparent;
-                min-height: 24px;
+                min-height: 14px;
+                min-width: 100px;
+                max-width: 100px;
             }
             QSlider::groove:horizontal {
                 border: 1px solid #b0b0b0;
-                height: 6px;
-                background: #a5cdff;
-                border-radius: 3px;
+                height: 4px;
+                background: #6DA6EB;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
-                background: #6699ff;
+                background: #3584E4;
                 border: 1px solid #c2c8d1;
-                width: 16px;
-                margin: -3px 0;
-                border-radius: 5px;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
             }
             QSlider::sub-page:horizontal {
-                background: #a5cdff;
-                border-radius: 3px;
+                background: #6DA6EB;
+                border-radius: 2px;
             }
             QSlider::add-page:horizontal {
                 background: #e0e0e0;
-                border-radius: 3px;
+                border-radius: 2px;
             }
         )");
         slider->setRange(0, 3000);
         slider->setValue(1500);
         valueLabel = new QLabel("0 Hz", this);
         valueLabel->setStyleSheet("QLabel { color: black; }");
-        valueLabel->setMinimumWidth(60);
+        valueLabel->setMinimumWidth(20);
         layout->addWidget(caption);
-        layout->addWidget(slider, 1);
+        layout->addWidget(slider);
         layout->addWidget(valueLabel);
         connect(slider, &QSlider::valueChanged, this, [this](int val) {
             valueLabel->setText(QString("%1 Hz").arg(val));
-            if (onValueChanged) onValueChanged(val);
+            if (onValueChanged)
+                onValueChanged(val);
         });
     }
 
+    /// @brief Returns the currently selected offset, in Hz.
     int offset() const { return slider->value(); }
+
+    /// @brief Programmatically sets the offset, in Hz.
     void setValue(int hz) { slider->setValue(hz); }
+
+    /// @brief Registers a callback invoked whenever the offset changes.
     void setOnValueChanged(std::function<void(int)> cb) { onValueChanged = cb; }
 
   private:
@@ -788,107 +810,123 @@ class OffsetSliderWidget : public QWidget {
     std::function<void(int)> onValueChanged;
 };
 
-// definition of the display of the callsign label
+/// Style for the callsign label in the header bar (Linux/other).
 constexpr const char *LabCallsignStyle = "QLabel {"
-                                         "    font-size: 14pt;"
+                                         "    font-size: 12pt;"
                                          "    line-height:12pt;"
                                          "    color : black;"
                                          "}";
 
-// definition of the display of the of the date/time label
+/// Style for the UTC clock label; rendered as a black LED-style readout
+/// (Linux/other).
 constexpr const char *LabUTCStyle =
     "QLabel {"
-    "    border-radius:0px;"
-    "    font-size: 18pt;"
-    "    line-height:18pt;"
-    "    font-family: \"DejaVu Sans Mono\", \"Liberation Mono\", \"Noto Mono\", \"Ubuntu Mono\", monospace;"
+    "    border-radius: 0px;"
+    "    font-size: 12pt;"
+    "    line-height: 12pt;"
+    "    font-family: \"DejaVu Sans Mono\", \"Liberation Mono\", \"Noto "
+    "Mono\", \"Ubuntu Mono\", monospace;"
     "    font-weight: bold;"
     "    background-color: black;"
-    "    color : #39FF14;"
+    "    color: #39FF14;"
     "}";
 
-// defintion of the display of the button grid
-constexpr const char *ButtonGridStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
+// ---------------------------------------------------------------------------
+// Control Bar
+// ---------------------------------------------------------------------------
 
-// defintion of the display of the Tx button
+/// Style for the Tx toggle button: green when monitoring, red while
+/// transmitting (Linux/other).
 constexpr const char *MonitorTxButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
+    "    background-color: lightgray;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 0px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#22FF22;"
+    "    background-color: #22FF22;"
     "}"
     "QPushButton[transmitting=\"true\"] {"
-    "    background-color:#FF2222;"
+    "    background-color: #FF2222;"
     "}";
 
-// definition of the display of the Rx button
-constexpr const char *MonitorButtonStyle =
+/// General-purpose control bar toggle button style, with a disabled state
+/// (Linux/other).
+constexpr const char *ControlButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
+    "    background-color: lightgray;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 0px;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#22FF22;"
+    "    background-color: #22FF22;"
+    "}"
+    "QPushButton:hover {"
+    "    color: red;"
+    "}"
+    "QPushButton:disabled {"
+    "    background-color: rgba(230, 230, 230, 255);"
+    "    color: rgba(0, 0, 0, 100);"
+    "}"
+    "QPushButton:disabled:checked {"
+    "    background-color: #a0d8a0;"
+    "    color: rgba(0, 0, 0, 100);"
     "}";
 
-// defintion of the display of the Log and Tune buttons
+/// Style for the "Log QSO" button (Linux/other).
 constexpr const char *LogQSOButtonStyle =
     "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
+    "    background-color: #3584E4;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 0px;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
+    "    background-color: #3584E4;"
     "}";
 
-constexpr const char *TuneButtonStyle = LogQSOButtonStyle; // Same as above
+/// Style for the "Tune" button: turns red while active (Linux/other).
+constexpr const char *TuneButtonStyle =
+    "QPushButton {"
+    "    background-color: lightgray;"
+    "    color: black;"
+    "    padding: 0.25em 0.25em; font-weight:normal;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 0px;"
+    "}"
+    "QPushButton:hover {"
+    "background-color: #ffcc00;"
+    "    color: black;"
+    "}"
+    "QPushButton:checked {"
+    "    background-color: #FF2222;"
+    "    color: black;"
+    "}";
 
-// definition of the display of the Mode button
+/// Style for the mode-select button (Linux/other).
 constexpr const char *ModeButtonStyle =
     "QPushButton {"
-    "    padding:0.25em 0.25em; font-weight:bold;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
-    "    background-color:#6699ff;"
+    "    padding: 0.25em 0.25em; font-weight:bold;"
+    "    border-style: solid;"
+    "    border-width: 0px;"
+    "    border-radius: 0px;"
+    "    background-color: #3584E4;"
+    "}"
+    "QPushButton:hover {"
+    "    color: white;"
     "}"
     "QPushButton:checked {"
-    "    background-color:#6699ff;"
+    "    background-color: #3584E4;"
     "}";
 
-// defintion of the display of the Spot button
-constexpr const char *SpotButtonStyle =
-    "QPushButton {"
-    "    background-color:lightgray;"
-    "    padding:0.25em 0.25em; font-weight:normal;"
-    "    border-style:solid;"
-    "    border-width:0px;"
-    "    border-radius:0px;"
-    "}"
-    "QPushButton:checked {"
-    "    background-color:#6699ff;"
-    "}";
-
-}
+} // namespace Styles
 #endif

@@ -92,7 +92,6 @@
 #include <QPair>
 #include <QPixmap>
 #include <QPointer>
-#include <QProgressBar>
 #include <QProgressDialog>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -101,6 +100,7 @@
 #include <QSet>
 #include <QSoundEffect>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QStringBuilder>
 #include <QStyleFactory>
 #include <QtCore/QtGlobal>
@@ -111,6 +111,8 @@
 #include <QTimeZone>
 #include <QTimer>
 #include <QToolButton>
+#include <QPushButton>
+#include <QMenu>
 #include <QToolTip>
 #include <QUdpSocket>
 #include <QUrl>
@@ -234,7 +236,6 @@ class UI_Constructor : public QMainWindow {
   public slots:
     void showSoundInError(const QString &errorMsg);
     void showSoundOutError(const QString &errorMsg);
-    void showStatusMessage(const QString &statusMsg);
     void dataSink(qint64 frames); // JS8_Mainwindow/dataSink.cpp
     /**
      * The name `guiUpdate` suggests updating of the views from the models
@@ -251,7 +252,6 @@ class UI_Constructor : public QMainWindow {
     bool hasExistingMessageBufferToMe(int *pOffset);
     bool hasExistingMessageBuffer(int submode, int offset, bool drift,
                                   int *pPrevOffset);
-    bool hasClosedExistingMessageBuffer(int offset);
     void logCallActivity(CallDetail d, bool spot = true);
     void logHeardGraph(QString from, QString to);
     QString lookupCallInCompoundCache(QString const &call);
@@ -305,6 +305,7 @@ class UI_Constructor : public QMainWindow {
     void closeEvent(QCloseEvent *) override;
     void childEvent(QChildEvent *) override;
     bool eventFilter(QObject *, QEvent *) override;
+    void resizeEvent(QResizeEvent *) override;
 
   private slots:
     void initialize_fonts();
@@ -326,8 +327,6 @@ class UI_Constructor : public QMainWindow {
     void on_actionClear_Call_Activity_triggered();
     void on_actionSetOffset_triggered();
     void on_actionShow_Fullscreen_triggered(bool checked);
-    void on_actionShow_Statusbar_triggered(bool checked);
-    void on_actionShow_Frequency_Clock_triggered(bool checked);
     void on_actionShow_Band_Activity_triggered(bool checked);
     void on_actionShow_Band_Heartbeats_and_ACKs_triggered(bool checked);
     void on_actionShow_Call_Activity_triggered(bool checked);
@@ -339,8 +338,8 @@ class UI_Constructor : public QMainWindow {
     void openSettings(int tab = 0);
     void prepareApi();
     void prepareSpotting();
-    void on_spotButton_clicked(bool checked);
-    void on_monitorButton_clicked(bool);
+    void handleSpotButton_clicked(bool checked);
+    void handleMonitorButton_clicked(bool);
     void on_actionAbout_triggered();
     void resetPushButtonToggleText(QPushButton *btn);
     void on_stopTxButton_clicked();
@@ -360,9 +359,7 @@ class UI_Constructor : public QMainWindow {
     void decodeStart();
     void decodeBusy(bool b);
     void decodeDone();
-    void on_startTxButton_toggled(bool checked);
-    void toggleTx(bool start);
-    void on_logQSOButton_clicked();
+    void handleLogQSOButton_clicked();
     void on_actionModeJS8HB_toggled(bool checked);
     void on_actionModeJS8Normal_triggered();
     void on_actionModeJS8Fast_triggered();
@@ -370,7 +367,6 @@ class UI_Constructor : public QMainWindow {
     void on_actionModeJS8Slow_triggered();
     void on_actionModeJS8Ultra_triggered();
     void on_actionHeartbeatAcknowledgements_toggled(bool checked);
-    void on_actionModeMultiDecoder_toggled(bool checked);
     void on_actionModeAutoreply_toggled(bool checked);
     bool canCurrentModeSendHeartbeat() const;
     void prepareMonitorControls();
@@ -432,7 +428,7 @@ class UI_Constructor : public QMainWindow {
     bool isFreqOffsetFree(int f, int bw);
     int findFreeFreqOffset(int fmin, int fmax, int bw);
     void setDrift(int n);
-    void on_tuneButton_clicked(bool);
+    void handleTuneButton_clicked(bool);
     void acceptQSO(QDateTime const &, QString const &call, QString const &grid,
                    Frequency dial_freq, QString const &mode,
                    QString const &submode, QString const &rpt_sent,
@@ -452,10 +448,10 @@ class UI_Constructor : public QMainWindow {
     void stop_tuning();
     void stopTuneATU();
     void auto_tx_mode(bool);
-    void on_monitorButton_toggled(bool checked);
-    void on_monitorTxButton_toggled(bool checked);
-    void on_tuneButton_toggled(bool checked);
-    void on_spotButton_toggled(bool checked);
+    void handleMonitorButton_toggled(bool checked);
+    void handleMonitorTxButton_toggled(bool checked);
+    void handleTuneButton_toggled(bool checked);
+    void handleSpotButton_toggled(bool checked);
 
     void emitPTT(bool on);
     void emitTones();
@@ -563,6 +559,7 @@ class UI_Constructor : public QMainWindow {
     void setFreq(int);
     void transmit();
 
+    bool canEnableHBReplies();
     bool presentlyWantHBReplies();
 
     QString m_nextFreeTextMsg;
@@ -674,20 +671,10 @@ class UI_Constructor : public QMainWindow {
 
     char m_msg[100][80];
 
-    // labels and widgets in status and header bar
-    QLabel tx_status_label;
-    QLabel config_label;
-    QLabel mode_label;
-    QLabel frequency_label;
-    QLabel auto_reply_label;
-    QLabel last_tx_label;
-    QLabel auto_tx_label;
-    QProgressBar progressBar;
-    QLabel wpm_label;
+    QMenu *modeSpeedMenu = nullptr;
+
     Styles::OffsetSliderWidget *freqOffsetWidget = nullptr;
     int m_sliderFreqBeforeHB = 0;
-
-    // QPointer<QProcess> proc_js8;
 
     QTimer m_guiTimer;
     // Timer to switch off PTT after end of transmission.
@@ -991,7 +978,9 @@ class UI_Constructor : public QMainWindow {
     void readSettings();
     void set_application_font(QFont const &);
     void writeSettings();
-    void createStatusBar();
+    void updateCallActivityHeaderLabel();
+    void createControlBar();
+    void bindStatusButtonToAction(QPushButton *button, QAction *action, QString const &label);
     void statusChanged();
     void rigFailure(QString const &reason);
     void spotSetLocal();
@@ -1017,7 +1006,6 @@ class UI_Constructor : public QMainWindow {
     void updateButtonDisplay();
     void updateTextDisplay();
     void updateTextWordCheckerDisplay();
-    void updateTextStatsDisplay(QString text, int count);
     void updateTxButtonDisplay();
     bool isMyCallIncluded(QString const &text);
     bool isAllCallIncluded(QString const &text);
@@ -1036,7 +1024,6 @@ class UI_Constructor : public QMainWindow {
     void processCompoundActivity();
     void processBufferedActivity(); // JS8_Mainwindow/processBufferedActivity.cpp
     void processCommandActivity(); // JS8_Mainwindow/processCommandActivity.cpp
-    void processHeartbeatRateLimit(const QString &callsign); // JS8_Mainwindow/processHeartbeatRateLimit.cpp
     QString inboxPath();
     QString hbBlockingPath() const;
     void pushNotificationHandler(); // JS8_Mainwindow/pushNotificationHandler.cpp
@@ -1070,7 +1057,6 @@ class UI_Constructor : public QMainWindow {
     void tryBandHop();
     void add_child_to_event_filter(QObject *);
     void remove_child_from_event_filter(QObject *);
-    void setup_status_bar();
     QString columnLabel(QString defaultLabel);
     void ensureMessageDock();
 
@@ -1082,4 +1068,3 @@ class UI_Constructor : public QMainWindow {
 };
 
 #endif // MAINWINDOW_H
-
