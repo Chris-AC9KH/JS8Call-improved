@@ -39,6 +39,7 @@
 #include <cstdlib>
 #include <limits>
 #include <numbers>
+#include <vector>
 
 namespace js8 {
 namespace aided {
@@ -441,9 +442,11 @@ struct Refinement {
  *
  * The baseline (delta 0,0,0) replays the ACTUAL first-pass per-symbol
  * extraction: recorded window starts plus the recorded FrequencyTracker
- * correction for each symbol. Search hypotheses are refinements RELATIVE to
- * that baseline (trial start = recorded start + deltaSamples, recorded
- * tracker rotation followed by the candidate residual freq/drift
+ * correction for each symbol. That correction depends on timing, not on the
+ * residual frequency/drift hypothesis, so each used (timing, symbol) window
+ * is replayed once and reused throughout the grid. Search hypotheses are
+ * refinements RELATIVE to that baseline (trial start = recorded start +
+ * deltaSamples, recorded tracker rotation followed by the candidate freq/drift
  * derotation), so the gate can never claim a fake gain by rediscovering a
  * correction the first pass already applied.
  *
@@ -498,25 +501,64 @@ inline Refinement refineSync(std::complex<float> const *samples,
         }
     }
 
+#ifndef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
+    constexpr int timingChoices = kTimingDeltaMax - kTimingDeltaMin + 1;
+    struct CachedWindow {
+        std::array<std::complex<float>, 32> samples{};
+        bool usable = false;
+    };
+    // Keep the ~100 KiB cache off the decoder thread's stack. Only used
+    // symbols are populated; failed tracker replays remain skipped exactly
+    // as in the uncached scorer.
+    std::vector<CachedWindow> correctedWindows(
+        timingChoices * kTotalSymbols);
+    auto const cached = [&](int dt, int k) -> CachedWindow & {
+        return correctedWindows[static_cast<std::size_t>(
+            (dt - kTimingDeltaMin) * kTotalSymbols + k)];
+    };
+    auto const cacheTiming = [&](int dt) {
+        for (int k = 0; k < kTotalSymbols; ++k) {
+            if (!(weights[static_cast<std::size_t>(k)] > 0.0f))
+                continue;
+            int const start =
+                baselines[static_cast<std::size_t>(k)].startSamples + dt;
+            auto &entry = cached(dt, k);
+            for (int n = 0; n < window; ++n)
+                entry.samples[static_cast<std::size_t>(n)] = samples[start + n];
+            entry.usable = replayTrackerCorrection(
+                entry.samples.data(), window,
+                baselines[static_cast<std::size_t>(k)].trackerHz,
+                sampleRateHz);
+        }
+    };
+#endif
+
     // Score one (timing, freq, drift) hypothesis with the weighted 8-tone
     // contrast. The recorded tracker rotation is replayed first (baseline),
     // then the candidate refinement derotation (absolute-time, matching the
     // decoder's coarse correction sign convention).
     auto const scoreHypothesis = [&](int dt, double df, double dd) {
         double metric = 0.0;
+#ifdef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
         std::complex<float> replayed[32];
+#endif
         for (int k = 0; k < kTotalSymbols; ++k) {
             float const w = weights[static_cast<std::size_t>(k)];
             if (!(w > 0.0f))
                 continue;
             int const start =
                 baselines[static_cast<std::size_t>(k)].startSamples + dt;
+#ifdef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
             for (int n = 0; n < window; ++n)
                 replayed[n] = samples[start + n];
             if (!replayTrackerCorrection(
                     replayed, window,
                     baselines[static_cast<std::size_t>(k)].trackerHz,
                     sampleRateHz))
+#else
+            auto const &entry = cached(dt, k);
+            if (!entry.usable)
+#endif
                 continue;
             double binRe[kTones] = {};
             double binIm[kTones] = {};
@@ -527,10 +569,19 @@ inline Refinement refineSync(std::complex<float> const *samples,
                     twoPi * df * t + std::numbers::pi * dd * t * t;
                 double const c = std::cos(angle);
                 double const s = std::sin(angle);
+#ifdef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
                 double const yr = static_cast<double>(replayed[n].real()) * c +
                                   static_cast<double>(replayed[n].imag()) * s;
                 double const yi = static_cast<double>(replayed[n].imag()) * c -
                                   static_cast<double>(replayed[n].real()) * s;
+#else
+                double const yr =
+                    static_cast<double>(entry.samples[n].real()) * c +
+                    static_cast<double>(entry.samples[n].imag()) * s;
+                double const yi =
+                    static_cast<double>(entry.samples[n].imag()) * c -
+                    static_cast<double>(entry.samples[n].real()) * s;
+#endif
                 for (int tone = 0; tone < kTones; ++tone) {
                     binRe[tone] += yr * twRe[tone][n] - yi * twIm[tone][n];
                     binIm[tone] += yi * twRe[tone][n] + yr * twIm[tone][n];
@@ -556,12 +607,21 @@ inline Refinement refineSync(std::complex<float> const *samples,
         return metric;
     };
 
+#ifndef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
+    cacheTiming(0);
+#endif
     out.baselineMetric = scoreHypothesis(0, 0.0, 0.0);
     out.baselineFinite = std::isfinite(out.baselineMetric);
     if (!out.baselineFinite)
         return out;
     out.searched = true;
     out.best.metric = out.baselineMetric;
+
+#ifndef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
+    for (int d = kTimingDeltaMin; d <= kTimingDeltaMax; ++d)
+        if (d != 0)
+            cacheTiming(d);
+#endif
 
     for (int dd = 0; dd < kDriftSteps; ++dd) {
         for (int f = 0; f < kFreqSteps; ++f) {

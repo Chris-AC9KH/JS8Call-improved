@@ -43,6 +43,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -102,8 +103,8 @@ namespace detail {
 // points; benchmark them against captured signals before tuning.
 constexpr double kMaxDeltaFHz = 1.0;
 constexpr double kMaxDriftHzPerSec = 0.05;
-constexpr double kGoodPhaseRmsRad = 0.12; // ~7 deg: full coherent weight
-constexpr double kPoorPhaseRmsRad = 0.35; // ~20 deg: fall back entirely
+constexpr double kGoodPhaseRmsRad = 0.20; // ~11 deg: full coherent weight
+constexpr double kPoorPhaseRmsRad = 0.60; // ~34 deg: fall back entirely
 
 inline double wrapPhase(double angle) {
     constexpr double twoPi = 2.0 * std::numbers::pi;
@@ -433,12 +434,29 @@ inline double coherentBlendWeight(CarrierPhaseFit const &fit) {
         return 0.0;
     if (!std::isfinite(fit.rmsRad))
         return 0.0;
-    if (fit.rmsRad <= detail::kGoodPhaseRmsRad)
+    double good = detail::kGoodPhaseRmsRad;
+    double poor = detail::kPoorPhaseRmsRad;
+    auto const configured = [](char const *name, double fallback) {
+        char const *env = std::getenv(name);
+        if (!env)
+            return fallback;
+        char *end = nullptr;
+        double const value = std::strtod(env, &end);
+        return end != env && *end == '\0' && std::isfinite(value) &&
+                       value >= 0.0
+                   ? value : fallback;
+    };
+    good = configured("JS8_COHERENT_GOOD_RMS_RAD", good);
+    poor = configured("JS8_COHERENT_POOR_RMS_RAD", poor);
+    if (!(poor > good)) {
+        good = detail::kGoodPhaseRmsRad;
+        poor = detail::kPoorPhaseRmsRad;
+    }
+    if (fit.rmsRad <= good)
         return 1.0;
-    if (fit.rmsRad >= detail::kPoorPhaseRmsRad)
+    if (fit.rmsRad >= poor)
         return 0.0;
-    double const alpha = (detail::kPoorPhaseRmsRad - fit.rmsRad) /
-                         (detail::kPoorPhaseRmsRad - detail::kGoodPhaseRmsRad);
+    double const alpha = (poor - fit.rmsRad) / (poor - good);
     return std::clamp(alpha, 0.0, 1.0);
 }
 
@@ -554,21 +572,43 @@ inline CoherentToneResult computeCoherentToneScores(
             predictCarrierPhase(fit, effectiveTime);
         if (!std::isfinite(predicted))
             return CoherentToneResult{};
+#ifndef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
+        if (!std::isfinite(symbol.trackerHz))
+            return CoherentToneResult{};
+        // Both rotations are common to all eight tones of this symbol. Keep
+        // the tracker, tone-dependent timing, and carrier multiplies in the
+        // original order; only reuse the two shared exponentials.
+        double const dphi =
+            2.0 * std::numbers::pi * symbol.trackerHz / sampleRateHz;
+        std::complex<double> const trackerRotation =
+            std::exp(std::complex<double>{
+                0.0, -dphi * (static_cast<double>(windowSamples) + 1.0) * 0.5});
+        std::complex<double> const carrierRotation =
+            std::exp(std::complex<double>{0.0, -predicted});
+#endif
         result.predictedPhase.push_back(predicted);
         std::array<float, 8> numerators{};
         std::array<float, 8> magnitudes{};
         for (std::size_t tone = 0; tone < 8; ++tone) {
             std::complex<double> bin{symbol.bins[tone].real(),
                                      symbol.bins[tone].imag()};
+#ifdef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
             bin = normalizeFrequencyTrackerPhase(bin, symbol.trackerHz,
                                                  sampleRateHz, windowSamples);
+#else
+            bin = bin * trackerRotation;
+#endif
             bin = normalizeTimingPhase(bin, static_cast<int>(tone),
                                        symbol.timingShiftSamples,
                                        windowSamples);
             if (!std::isfinite(bin.real()) || !std::isfinite(bin.imag()))
                 return CoherentToneResult{};
+#ifdef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
             std::complex<double> const rotated =
                 bin * std::exp(std::complex<double>{0.0, -predicted});
+#else
+            std::complex<double> const rotated = bin * carrierRotation;
+#endif
             double const projection = rotated.real();
             if (!std::isfinite(projection))
                 return CoherentToneResult{};

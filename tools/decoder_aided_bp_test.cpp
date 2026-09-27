@@ -65,6 +65,20 @@ int syndromeCount(std::array<int8_t, N> const &cw) {
     return ncheck;
 }
 
+void runGraphEdgeSlots() {
+    bool reciprocal = BP_EDGE_SLOTS.valid;
+    for (int checkIndex = 0; checkIndex < M; ++checkIndex) {
+        for (int edge = 0; edge < Nm[checkIndex].valid_neighbors; ++edge) {
+            int const bit = Nm[checkIndex].neighbors[edge];
+            int const bitEdge = BP_EDGE_SLOTS.inBit[checkIndex][edge];
+            reciprocal &= bitEdge < BP_MAX_CHECKS &&
+                          Mn[bit][bitEdge] == checkIndex &&
+                          BP_EDGE_SLOTS.inCheck[bit][bitEdge] == edge;
+        }
+    }
+    check(reciprocal, "all BP edges have reciprocal lookup positions");
+}
+
 void runConvergedWord() {
     std::printf("[converged word]\n");
     // All-zero word is always a valid codeword: strong bit-0 LLRs converge
@@ -147,13 +161,71 @@ void runZeroIterationBound() {
           "bestCw exposes the evaluated word");
 }
 
+void runParityFingerprint() {
+    // Compare results from separately compiled mapped/linear BP binaries.
+    // Includes failed last-iterate words and best words, not just successes.
+    std::uint64_t fingerprint = 14695981039346656037ull;
+    auto const mix = [&](std::uint64_t value) {
+        for (int i = 0; i < 8; ++i) {
+            fingerprint ^= (value >> (i * 8)) & 0xff;
+            fingerprint *= 1099511628211ull;
+        }
+    };
+    std::uint32_t state = 0xB01D4D1u;
+    std::array<int, 79> tones{};
+    JS8::encode(0, JS8::Costas::array(ModeA::NCOSTAS),
+                "TESTTEST1234", tones.data());
+    for (int trial = 0; trial < 192; ++trial) {
+        std::array<float, N> llr{};
+        for (int bit = 0; bit < N; ++bit) {
+            state = state * 1664525u + 1013904223u;
+            float value = static_cast<float>(state >> 8) / 8388608.0f - 1.0f;
+            if (trial % 3 != 0) {
+                int const symbol = bit / 3;
+                int const global = symbol < 29 ? symbol + 7 : symbol + 14;
+                bool const one = (tones[global] >> (2 - bit % 3)) & 1;
+                value = (one ? 1.0f : -1.0f) *
+                        (1.0f + trial % 7) + 2.2f * value;
+            } else {
+                value *= 2.5f;
+            }
+            llr[bit] = value;
+        }
+        for (float scale : {1.0f, 0.8f, 1.25f}) {
+            BPOptions options;
+            options.maxIterations = trial % 7 == 0 ? 80 : 30;
+            options.earlyAbort = options.maxIterations == 30;
+            options.llrScale = scale;
+            std::array<int8_t, K> decoded{};
+            std::array<int8_t, N> cw{};
+            auto const result = bpdecode174(llr, decoded, cw, options);
+            mix(static_cast<std::uint32_t>(result.hardErrors));
+            mix(result.iterations);
+            mix(result.finalChecks);
+            mix(result.bestChecks);
+            mix(result.earlyAborted);
+            mix(result.bestCwValid);
+            for (int8_t value : result.bestCw)
+                mix(static_cast<std::uint8_t>(value));
+            for (int8_t value : cw)
+                mix(static_cast<std::uint8_t>(value));
+            for (int8_t value : decoded)
+                mix(static_cast<std::uint8_t>(value));
+        }
+    }
+    std::printf("BP parity fingerprint: %016llx (576 runs)\n",
+                static_cast<unsigned long long>(fingerprint));
+}
+
 } // namespace
 
 int main() {
+    runGraphEdgeSlots();
     runConvergedWord();
     runFailedDecode();
     runDeterminism();
     runZeroIterationBound();
+    runParityFingerprint();
 
     std::printf("\n%s (%d failure%s)\n", failures == 0 ? "ALL TESTS PASSED"
                                                       : "TESTS FAILED",

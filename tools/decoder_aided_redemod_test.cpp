@@ -20,11 +20,13 @@
 #include "JS8_Mode/decoder_aided_redemod.h"
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <numbers>
+#include <random>
 #include <vector>
 
 namespace {
@@ -135,6 +137,202 @@ js8::aided::Refinement runSearch(std::vector<std::complex<float>> const &line,
                                  std::array<float, 79> const &weights) {
     return js8::aided::refineSync(line.data(), static_cast<int>(line.size()),
                                   b, kWindow, kRate, tones, weights);
+}
+
+// Frozen, uncached scorer from before tracker-window reuse. This is a
+// comparison oracle for the entire grid, including the order in which equal
+// hypotheses are selected. Keep it independent of the production scorer.
+js8::aided::Refinement originalRefineSync(
+    std::complex<float> const *samples, int numSamples,
+    std::array<js8::aided::SymbolBaseline, 79> const &baselines,
+    int window, double sampleRateHz, std::array<int, 79> const &tones,
+    std::array<float, 79> const &weights) {
+    using namespace js8::aided;
+    Refinement out{};
+    if (samples == nullptr || numSamples <= 0 || window <= 0 || window > 32 ||
+        !std::isfinite(sampleRateHz) || !(sampleRateHz > 0.0))
+        return out;
+    if (!symbolBoundsValid(baselines, window, numSamples, kTimingDeltaMax))
+        return out;
+    for (int k = 0; k < kTotalSymbols; ++k) {
+        if (tones[k] < 0 || tones[k] >= kTones)
+            return out;
+        float const w = weights[k];
+        if (!std::isfinite(w) || w < 0.0f ||
+            (w > 0.0f && !std::isfinite(static_cast<double>(
+                              baselines[k].trackerHz))))
+            return out;
+    }
+    constexpr double twoPi = 2.0 * std::numbers::pi;
+    double twRe[kTones][32];
+    double twIm[kTones][32];
+    for (int tone = 0; tone < kTones; ++tone)
+        for (int n = 0; n < window; ++n) {
+            double const angle = -twoPi * static_cast<double>(tone * n) / window;
+            twRe[tone][n] = std::cos(angle);
+            twIm[tone][n] = std::sin(angle);
+        }
+    auto const score = [&](int dt, double df, double dd) {
+        double metric = 0.0;
+        std::complex<float> replayed[32];
+        for (int k = 0; k < kTotalSymbols; ++k) {
+            float const w = weights[k];
+            if (!(w > 0.0f))
+                continue;
+            int const start = baselines[k].startSamples + dt;
+            for (int n = 0; n < window; ++n)
+                replayed[n] = samples[start + n];
+            if (!replayTrackerCorrection(replayed, window,
+                                         baselines[k].trackerHz, sampleRateHz))
+                continue;
+            double binRe[kTones] = {};
+            double binIm[kTones] = {};
+            for (int n = 0; n < window; ++n) {
+                double const t = static_cast<double>(start + n) / sampleRateHz;
+                double const angle = twoPi * df * t +
+                                     std::numbers::pi * dd * t * t;
+                double const c = std::cos(angle);
+                double const s = std::sin(angle);
+                double const yr = static_cast<double>(replayed[n].real()) * c +
+                                  static_cast<double>(replayed[n].imag()) * s;
+                double const yi = static_cast<double>(replayed[n].imag()) * c -
+                                  static_cast<double>(replayed[n].real()) * s;
+                for (int tone = 0; tone < kTones; ++tone) {
+                    binRe[tone] += yr * twRe[tone][n] - yi * twIm[tone][n];
+                    binIm[tone] += yi * twRe[tone][n] + yr * twIm[tone][n];
+                }
+            }
+            int const expected = tones[k];
+            double const expPower = binRe[expected] * binRe[expected] +
+                                    binIm[expected] * binIm[expected];
+            double others[kTones - 1];
+            int oi = 0;
+            for (int tone = 0; tone < kTones; ++tone)
+                if (tone != expected)
+                    others[oi++] = binRe[tone] * binRe[tone] +
+                                   binIm[tone] * binIm[tone];
+            double const cont = contrastEight(expPower, others);
+            if (std::isfinite(cont))
+                metric += static_cast<double>(w) * cont;
+        }
+        return metric;
+    };
+    out.baselineMetric = score(0, 0.0, 0.0);
+    out.baselineFinite = std::isfinite(out.baselineMetric);
+    if (!out.baselineFinite)
+        return out;
+    out.searched = true;
+    out.best.metric = out.baselineMetric;
+    for (int dd = 0; dd < kDriftSteps; ++dd)
+        for (int f = 0; f < kFreqSteps; ++f) {
+            double const df = kFreqStartHz + f * kFreqStepHz;
+            for (int d = kTimingDeltaMin; d <= kTimingDeltaMax; ++d) {
+                if (d == 0 && df == 0.0 && kDriftValues[dd] == 0.0)
+                    continue;
+                double const metric = score(d, df, kDriftValues[dd]);
+                if (std::isfinite(metric) && metric > out.best.metric) {
+                    out.best.deltaSamples = d;
+                    out.best.deltaHz = df;
+                    out.best.driftHzPerSec = kDriftValues[dd];
+                    out.best.metric = metric;
+                }
+            }
+        }
+    int const d = out.best.deltaSamples - kTimingDeltaMin;
+    int f = -1;
+    for (int i = 0; i < kFreqSteps; ++i)
+        if (kFreqStartHz + i * kFreqStepHz == out.best.deltaHz)
+            f = i;
+    out.atBoundary = (d == 0 || d == (kTimingDeltaMax - kTimingDeltaMin) ||
+                      f == 0 || f == kFreqSteps - 1);
+    return out;
+}
+
+void runCachedSearchParity() {
+    std::printf("[tracker window cache vs original full search]\n");
+    bool identical = true;
+    double oldMs = 0.0, newMs = 0.0;
+    int cases = 0;
+    for (int window : {12, 20, 32}) {
+        for (int seed = 0; seed < 7; ++seed) {
+            std::mt19937 rng(0xA1D300u + 37u * seed + window);
+            std::normal_distribution<float> noise(0.0f, 1.0f);
+            std::vector<std::complex<float>> line(96 + 79 * window + 8);
+            for (auto &v : line)
+                v = {noise(rng), noise(rng)};
+            std::array<js8::aided::SymbolBaseline, 79> baselines{};
+            std::array<int, 79> tones{};
+            std::array<float, 79> weights{};
+            for (int k = 0; k < 79; ++k) {
+                baselines[k] = {64 + k * window, (k % 5 - 2) * 0.17f};
+                tones[k] = static_cast<int>(rng() % 8);
+                weights[k] = k % 4 == 0 ? 0.0f : (k % 3 + 1) * 0.25f;
+            }
+            if (seed == 1)
+                weights.fill(1.0f);
+            if (seed == 2)
+                js8::aided::buildCostasWeights(weights);
+            if (seed == 5)
+                weights.fill(0.0f);
+            if (seed == 3) {
+                // A corrupt used window is skipped by both implementations.
+                line[static_cast<std::size_t>(baselines[10].startSamples + 2)] =
+                    {std::numeric_limits<float>::quiet_NaN(), 0.0f};
+            }
+            if (seed == 4) {
+                // Unused symbols may have corrupt tracker metadata.
+                baselines[8].trackerHz =
+                    std::numeric_limits<float>::quiet_NaN();
+            }
+            if (seed == 6)
+                baselines[10].trackerHz =
+                    std::numeric_limits<float>::quiet_NaN();
+            js8::aided::Refinement old, optimized;
+            auto const timed = [&](auto &&run, double &elapsed) {
+                auto const start = std::chrono::steady_clock::now();
+                auto const result = run();
+                elapsed += std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - start)
+                               .count();
+                return result;
+            };
+            auto const original = [&] {
+                return originalRefineSync(line.data(), line.size(), baselines,
+                                          window, 200.0, tones, weights);
+            };
+            auto const cached = [&] {
+                return js8::aided::refineSync(line.data(), line.size(),
+                                               baselines, window, 200.0, tones,
+                                               weights);
+            };
+            if (seed % 2 == 0) {
+                old = timed(original, oldMs);
+                optimized = timed(cached, newMs);
+            } else {
+                optimized = timed(cached, newMs);
+                old = timed(original, oldMs);
+            }
+            auto const equalMetric = [](double a, double b) {
+                return a == b || (std::isnan(a) && std::isnan(b));
+            };
+            identical &= old.searched == optimized.searched &&
+                         old.baselineFinite == optimized.baselineFinite &&
+                         equalMetric(old.baselineMetric,
+                                     optimized.baselineMetric) &&
+                         equalMetric(old.best.metric, optimized.best.metric) &&
+                         old.best.deltaSamples == optimized.best.deltaSamples &&
+                         old.best.deltaHz == optimized.best.deltaHz &&
+                         old.best.driftHzPerSec ==
+                             optimized.best.driftHzPerSec &&
+                         old.atBoundary == optimized.atBoundary &&
+                         js8::aided::refinementAccepted(old) ==
+                             js8::aided::refinementAccepted(optimized);
+            ++cases;
+        }
+    }
+    check(identical, "all metrics, choices and acceptance bit-identical");
+    std::printf("    %d paired calls, original %.1f ms cached %.1f ms\n",
+                cases, oldMs, newMs);
 }
 
 void runCodewordToTones() {
@@ -740,6 +938,7 @@ void runRescueDemonstration() {
 } // namespace
 
 int main() {
+    runCachedSearchParity();
     runCodewordToTones();
     runConfidenceWeighting();
     runBaselineRefinement();

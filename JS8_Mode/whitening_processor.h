@@ -1,6 +1,6 @@
 /**
  * @file whitening_processor.h
- * @brief Noise whitening and LLR normalization helper used by the JS8 decoder.
+ * @brief Noise whitening and soft likelihoods used by the JS8 decoder.
  */
 
 #pragma once
@@ -26,15 +26,17 @@ namespace js8 {
 /**
  * @brief Compute per-tone/symbol noise medians and whiten LLRs for a JS8 frame.
  *
- * Given symbol magnitudes (sans Costas) and winners, produces normalized
- * LLR0/LLR1, optionally applying noise-based whitening and erasure. Fully
+ * Given symbol magnitudes (sans Costas) and winners, produces noise-scaled
+ * LLR0/LLR1, optionally applying whitening and erasure. Fully
  * templated on matrix dimensions, so it stays header-only; used inside the JS8
  * decoder per candidate.
  */
 template <int NROWS, int ND, int N> class WhiteningProcessor {
   public:
+    // Retained for paired benchmarks of the previous decoder behavior.
+    enum class Normalization { None, FrameSigma283 };
     /**
-     * @brief Result of a whitening/LRR normalization pass.
+     * @brief Result of a whitening/LLR pass.
      *
      * `llr0` and `llr1` are populated in column order (three outputs per
      * symbol) to match the decoder's expectations. The boolean flags indicate
@@ -54,7 +56,7 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
     };
 
     /**
-     * @brief Compute normalized LLR arrays for a single candidate frame.
+     * @brief Compute noise-scaled LLR arrays for a single candidate frame.
      *
      * The template parameters describe the matrix dimensions used by the
      * decoder: `NROWS` is the number of tones (rows), `ND` is the number of
@@ -68,7 +70,7 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
      * @param symbolWinners For each symbol column, the index [0..NROWS-1]
      *        identifying the winning tone.
      * @param erasureThreshold When > 0.0, magnitudes below this threshold
-     *        (after whitening) are erased (set to zero).
+     *        (after fixed scaling) are erased (set to zero).
      * @param debug When true, emits extra debug logging about noise metrics.
      * @param coherentBlend Optional physical coherent numerators in
      *        `s1` orientation (`[tone][symbol]`), holding
@@ -77,13 +79,20 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
      *        numerators, so no symbol is ever renormalized. When absent (or
      *        when its alpha/amplitude is not usable) the legacy noncoherent
      *        scores are used exactly.
+     * @param llrScale One fixed multiplier shared by every frame. Applied
+     *        before erasure; must be positive and finite.
+     * @param normalization Optional old per-frame normalization for benchmarks.
      * @return A `Result` containing `llr0`, `llr1` and processing statistics.
      */
     static Result process(std::array<std::array<float, ND>, NROWS> const &s1,
-                           std::array<int, ND> const &symbolWinners,
-                           float erasureThreshold, bool debug,
-                           std::optional<CoherentBlend<NROWS, ND>> const
-                               &coherentBlend = std::nullopt) {
+                          std::array<int, ND> const &symbolWinners,
+                          float erasureThreshold, bool debug,
+                          std::optional<CoherentBlend<NROWS, ND>> const
+                              &coherentBlend = std::nullopt,
+                          float llrScale = 1.0f,
+                          Normalization normalization = Normalization::None) {
+        if (!(llrScale > 0.0f) || !std::isfinite(llrScale))
+            llrScale = 1.0f;
         auto const median =
             [](std::vector<float> &values) -> std::optional<float> {
             if (values.empty())
@@ -192,8 +201,8 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
             std::getenv("JS8_DISABLE_WHITENING") != nullptr;
         // Coherent data is used only when the whole blended input validates:
         // any non-finite numerator, amplitude, or weight falls back to the
-        // legacy path bit-identically (per-symbol partial blends could still
-        // shift the shared downstream LLR normalization).
+        // noncoherent path bit-identically (partial blends could otherwise
+        // produce a mix of incompatible evidence within one frame).
         bool coherentUsable = false;
         float coherentAlpha = 0.0f;
         if (coherentBlend && coherentBlend->alpha > 0.0f &&
@@ -297,6 +306,11 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
             result.llr0[i2] = logSumExp(1, 1) - logSumExp(1, 0);
             result.llr0[i4] = logSumExp(0, 1) - logSumExp(0, 0);
 
+            // A global calibration preserves relative reliability between
+            // symbols and between strong and weak received frames.
+            for (int bit = i1; bit <= i4; ++bit)
+                result.llr0[bit] *= llrScale;
+
             // llr0 and llr1 are unified: they carry the same, properly
             // soft-calculated symbol information (pass diversity comes from the
             // bit-range masking and LDPC feedback downstream).
@@ -344,14 +358,16 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
             float const variance = llr2av - llrav * llrav;
             float const llrsig = std::sqrt(variance > 0.0f ? variance : llr2av);
 
-            for (float &val : llr)
-                val = (val / llrsig) * 2.83f;
+            if (llrsig > 0.0f && std::isfinite(llrsig))
+                for (float &val : llr)
+                    val = (val / llrsig) * 2.83f;
         };
 
-        // Normalize and process metrics
-
-        normalizeLLR(result.llr0);
-        normalizeLLR(result.llr1);
+        // Only the opt-in baseline reproduces the former per-frame rescaling.
+        if (normalization == Normalization::FrameSigma283) {
+            normalizeLLR(result.llr0);
+            normalizeLLR(result.llr1);
+        }
 
         if (whiteningAvailable && debug) {
             auto const total =

@@ -34,8 +34,19 @@ namespace js8 {
  * codeword to retry LDPC. Used inside the JS8 decode loop between
  * LDPC passes.
  */
-/** Default erasure threshold applied to shrunk LLRs (when enabled). */
-constexpr float LLR_ERASURE_THRESHOLD_DEFAULT = 0.25f;
+/** Default erasure threshold (zero retains all likelihood evidence). */
+constexpr float LLR_ERASURE_THRESHOLD_DEFAULT = 0.0f;
+
+/** Fixed LLR calibration shared across all frames (one means no adjustment). */
+inline float llrGlobalScale() {
+    if (auto const env = std::getenv("JS8_LLR_SCALE"); env) {
+        char *end = nullptr;
+        float const value = std::strtof(env, &end);
+        if (end != env && *end == '\0' && std::isfinite(value) && value > 0.0f)
+            return value;
+    }
+    return 2.0f;
+}
 /** Minimum magnitude to consider a bit "confident" when sign matches. */
 constexpr float LLR_FEEDBACK_CONFIDENT_MIN = 3.0f;
 /** Maximum magnitude considered "uncertain" (will be shrunk). */

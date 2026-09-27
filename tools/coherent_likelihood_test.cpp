@@ -13,6 +13,8 @@
 //      unit-variance normalization), alpha continuity at 0/0.01/1
 //  10. tracker phase compensation using the real FrequencyTracker code and
 //      decoder-style DFTs (frequency sign, timing offsets x tones 0/3/7)
+//  11. frame-to-frame reliability, fixed scaling, and erasure calibration
+//  12. cached symbol rotations vs the original per-tone coherent scorer
 //
 // Build/run (Qt6Core is needed only for the whitening fallback check):
 //   clang++ -std=c++20 -O2 -I.. $(pkg-config --cflags Qt6Core) \
@@ -24,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -105,6 +108,190 @@ makeDataBins(int trueTone, double phase, double amplitude, double noiseSigma,
                                 static_cast<float>(value.imag())};
     }
     return bins;
+}
+
+// Frozen per-tone implementation. Comparing a complete candidate result
+// catches changes to margins, phase metadata, and invalid-input fallback as
+// well as differences in the eight actual likelihood numerators.
+js8::CoherentToneResult oldCoherentToneScores(
+    std::vector<js8::CoherentPilot> const &pilots,
+    std::vector<js8::CoherentDataSymbol> const &data, int minPilots,
+    double minSpanSeconds, int windowSamples, double sampleRateHz) {
+    js8::CoherentToneResult result;
+    if (windowSamples <= 0 || !(sampleRateHz > 0.0))
+        return result;
+    auto const fit = js8::fitCarrierPhase(pilots, minPilots, minSpanSeconds,
+                                          windowSamples, sampleRateHz);
+    result.telemetry.fitted = fit.fitted;
+    result.telemetry.pilotCount = fit.pilotCount;
+    result.telemetry.phaseRmsRad = fit.rmsRad;
+    result.telemetry.phaseRmsDeg = fit.rmsRad * 180.0 / std::numbers::pi;
+    result.telemetry.phi0 = fit.phi0;
+    result.telemetry.deltaF = fit.deltaF;
+    result.telemetry.fdot = fit.fdot;
+    result.telemetry.pilotAmplitude = fit.amplitude;
+    result.telemetry.alpha = js8::coherentBlendWeight(fit);
+    if (!fit.fitted || !(result.telemetry.alpha > 0.0))
+        return result;
+    if (!std::isfinite(fit.amplitude) || !(fit.amplitude > 0.0))
+        return js8::CoherentToneResult{};
+    result.amplitude = fit.amplitude;
+    result.coherentNumerators.reserve(data.size());
+    result.predictedPhase.reserve(data.size());
+    double coherentMarginSum = 0.0;
+    double noncoherentMarginSum = 0.0;
+    std::size_t marginCount = 0;
+    for (auto const &symbol : data) {
+        double const effectiveTime = js8::effectiveSymbolTimeSeconds(
+            symbol.baseTimeSeconds, symbol.timingShiftSamples, sampleRateHz);
+        if (!std::isfinite(effectiveTime))
+            return js8::CoherentToneResult{};
+        double const predicted = js8::predictCarrierPhase(fit, effectiveTime);
+        if (!std::isfinite(predicted))
+            return js8::CoherentToneResult{};
+        result.predictedPhase.push_back(predicted);
+        std::array<float, 8> numerators{};
+        std::array<float, 8> magnitudes{};
+        for (std::size_t tone = 0; tone < 8; ++tone) {
+            std::complex<double> bin{symbol.bins[tone].real(),
+                                     symbol.bins[tone].imag()};
+            bin = js8::normalizeFrequencyTrackerPhase(
+                bin, symbol.trackerHz, sampleRateHz, windowSamples);
+            bin = js8::normalizeTimingPhase(bin, static_cast<int>(tone),
+                                             symbol.timingShiftSamples,
+                                             windowSamples);
+            if (!std::isfinite(bin.real()) || !std::isfinite(bin.imag()))
+                return js8::CoherentToneResult{};
+            std::complex<double> const rotated =
+                bin * std::exp(std::complex<double>{0.0, -predicted});
+            double const projection = rotated.real();
+            if (!std::isfinite(projection))
+                return js8::CoherentToneResult{};
+            numerators[tone] = static_cast<float>(
+                fit.amplitude * projection - 0.5 * fit.amplitude * fit.amplitude);
+            magnitudes[tone] = static_cast<float>(std::abs(bin));
+        }
+        result.coherentNumerators.push_back(numerators);
+        auto const coherentMargin = js8::topTwoMargin(numerators);
+        auto const noncoherentMargin = js8::topTwoMargin(magnitudes);
+        if (coherentMargin && noncoherentMargin) {
+            coherentMarginSum += *coherentMargin;
+            noncoherentMarginSum += *noncoherentMargin;
+            ++marginCount;
+        }
+    }
+    result.alpha = result.telemetry.alpha;
+    result.telemetry.enabled = true;
+    if (marginCount > 0) {
+        result.telemetry.avgCoherentToneMargin =
+            coherentMarginSum / static_cast<double>(marginCount);
+        result.telemetry.avgNoncoherentToneMargin =
+            noncoherentMarginSum / static_cast<double>(marginCount);
+    }
+    return result;
+}
+
+void runSharedRotationParity() {
+    std::printf("[shared coherent rotations vs per-tone scorer]\n");
+    constexpr std::array<std::array<int, 3>, 5> modes = {{
+        {{384, 12, 375}}, {{600, 12, 240}}, {{1200, 20, 200}},
+        {{1920, 32, 200}}, {{3840, 32, 100}},
+    }};
+    bool identical = true;
+    std::vector<js8::CoherentPilot> benchmarkPilots;
+    std::vector<js8::CoherentDataSymbol> benchmarkData;
+    for (auto const &mode : modes) {
+        double const symbolSeconds = mode[0] / kSampleRate;
+        for (int seed = 0; seed < 4; ++seed) {
+            std::mt19937 rng(426u + seed * 11u + mode[0]);
+            auto const pilots = makePilots(0.6, 0.03, 0.0, symbolSeconds,
+                                            2.0, 0.01, rng);
+            std::uniform_real_distribution<float> noise(-0.6f, 0.6f);
+            std::vector<js8::CoherentDataSymbol> data(58);
+            for (int j = 0; j < 58; ++j) {
+                auto &symbol = data[static_cast<std::size_t>(j)];
+                symbol.baseTimeSeconds = (j < 29 ? j + 7 : j + 14) *
+                                         symbolSeconds;
+                symbol.trackerHz = (j % 5 - 2) * 0.13;
+                symbol.timingShiftSamples = (j % 4 - 1) * 0.25;
+                for (int tone = 0; tone < 8; ++tone) {
+                    symbol.bins[tone] = {noise(rng), noise(rng)};
+                    if (tone == j % 8)
+                        symbol.bins[tone] += std::complex<float>{1.5f, 0.4f};
+                }
+            }
+            auto const compare = [&](auto const &bins) {
+                auto const old = oldCoherentToneScores(
+                    pilots, bins, 12, 0.5 * 78 * symbolSeconds, mode[1],
+                    static_cast<double>(mode[2]));
+                auto const current = js8::computeCoherentToneScores(
+                    pilots, bins, 12, 0.5 * 78 * symbolSeconds, mode[1],
+                    static_cast<double>(mode[2]));
+                auto const sameDouble = [](double a, double b) {
+                    return a == b || (std::isnan(a) && std::isnan(b));
+                };
+                return old.coherentNumerators == current.coherentNumerators &&
+                       old.predictedPhase == current.predictedPhase &&
+                       old.alpha == current.alpha &&
+                       old.amplitude == current.amplitude &&
+                       old.telemetry.enabled == current.telemetry.enabled &&
+                       old.telemetry.fitted == current.telemetry.fitted &&
+                       old.telemetry.pilotCount == current.telemetry.pilotCount &&
+                       sameDouble(old.telemetry.phaseRmsRad,
+                                  current.telemetry.phaseRmsRad) &&
+                       old.telemetry.avgCoherentToneMargin ==
+                           current.telemetry.avgCoherentToneMargin &&
+                       old.telemetry.avgNoncoherentToneMargin ==
+                           current.telemetry.avgNoncoherentToneMargin;
+            };
+            identical &= compare(data);
+            if (seed == 0 && mode[0] == 1920) {
+                benchmarkPilots = pilots;
+                benchmarkData = data;
+            }
+            data[17].trackerHz = std::numeric_limits<double>::quiet_NaN();
+            identical &= compare(data);
+            data[17].trackerHz = 0.0;
+            data[18].bins[2] = {
+                std::numeric_limits<float>::infinity(), 0.0f};
+            identical &= compare(data);
+        }
+    }
+    check(identical,
+          "all scores, margins, fallback and metadata bit-identical");
+
+    // Timed only after parity checks; alternating the order limits cache bias.
+    constexpr int repetitions = 3000;
+    double oldMs = 0.0, newMs = 0.0;
+    double checksum = 0.0;
+    for (int trial = 0; trial < repetitions; ++trial) {
+        auto const timed = [&](auto &&call, double &total) {
+            auto const start = std::chrono::steady_clock::now();
+            auto const result = call();
+            total += std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - start).count();
+            checksum += result.coherentNumerators[0][0];
+        };
+        auto const old = [&] {
+            return oldCoherentToneScores(benchmarkPilots, benchmarkData, 12,
+                                         6.24, 32, 200.0);
+        };
+        auto const current = [&] {
+            return js8::computeCoherentToneScores(benchmarkPilots,
+                                                  benchmarkData, 12, 6.24,
+                                                  32, 200.0);
+        };
+        if (trial % 2 == 0) {
+            timed(old, oldMs);
+            timed(current, newMs);
+        } else {
+            timed(current, newMs);
+            timed(old, oldMs);
+        }
+    }
+    check(std::isfinite(checksum), "timed scorer results stay finite");
+    std::printf("    %d paired frames, per-tone %.1f ms shared %.1f ms\n",
+                repetitions, oldMs, newMs);
 }
 
 // Decoder-style forward DFT bin (FFTW_FORWARD sign convention).
@@ -388,6 +575,134 @@ void runReliabilityPreserved() {
     check(strong > 3.0f * weak, "strong symbol LLR dominates weak symbol");
 }
 
+void runLlrCalibration() {
+    std::printf("[absolute LLR calibration]\n");
+    using Processor = js8::WhiteningProcessor<8, 58, 174>;
+    std::array<std::array<float, 58>, 8> weak{};
+    for (auto &row : weak)
+        row.fill(0.4f);
+    std::array<int, 58> winners{};
+    for (int j = 0; j < 58; ++j) {
+        winners[j] = j % 2 == 0 ? 7 : 0;
+        weak[winners[j]][j] = 0.7f;
+    }
+    auto medium = weak;
+    auto strong = weak;
+    for (int j = 0; j < 58; ++j) {
+        medium[winners[j]][j] = 0.9f;
+        strong[winners[j]][j] = 1.2f;
+    }
+    auto const a = Processor::process(weak, winners, 0.0f, false);
+    auto const b = Processor::process(medium, winners, 0.0f, false);
+    auto const c = Processor::process(strong, winners, 0.0f, false);
+    bool finiteAndSigned = true;
+    bool monotonic = true;
+    for (int j = 0; j < 58; ++j) {
+        for (int bit = 0; bit < 3; ++bit) {
+            int const i = 3 * j + bit;
+            float const sign = winners[j] == 7 ? 1.0f : -1.0f;
+            finiteAndSigned &= std::isfinite(a.llr0[i]) &&
+                               std::isfinite(b.llr0[i]) &&
+                               std::isfinite(c.llr0[i]) &&
+                               sign * a.llr0[i] > 0.0f;
+            monotonic &= sign * a.llr0[i] < sign * b.llr0[i] &&
+                         sign * b.llr0[i] < sign * c.llr0[i];
+        }
+    }
+    check(finiteAndSigned, "finite LLRs with correct binary bit signs");
+    check(monotonic, "increasing tone evidence increases confidence");
+    check(std::abs(c.llr0[0]) > 2.0f * std::abs(a.llr0[0]),
+          "strong frame retains greater confidence than weak frame");
+
+    auto const scaled = Processor::process(weak, winners, 0.0f, false,
+                                           std::nullopt, 1.5f);
+    check(std::abs(scaled.llr0[0] - 1.5f * a.llr0[0]) < 1.0e-5f,
+          "one fixed scale multiplies all frame LLRs");
+    auto const old = Processor::process(
+        weak, winners, 0.0f, false, std::nullopt, 1.0f,
+        Processor::Normalization::FrameSigma283);
+    auto const oldStrong = Processor::process(
+        strong, winners, 0.0f, false, std::nullopt, 1.0f,
+        Processor::Normalization::FrameSigma283);
+    check(std::abs(old.llr0[0] - oldStrong.llr0[0]) < 1.0e-5f,
+          "old frame normalization erases this confidence difference");
+
+    // The same numerator family and noise denominator are used in the
+    // coherent case; its blend must also keep cross-frame confidence.
+    auto makeBlend = [&](auto const &magnitudes) {
+        js8::CoherentBlend<8, 58> blend;
+        blend.amplitude = 1.0;
+        blend.alpha = 0.5f;
+        for (int tone = 0; tone < 8; ++tone)
+            for (int j = 0; j < 58; ++j)
+                blend.numerators[tone][j] = magnitudes[tone][j] - 0.5f;
+        return blend;
+    };
+    auto const coherentWeak = Processor::process(
+        weak, winners, 0.0f, false, makeBlend(weak));
+    auto const coherentStrong = Processor::process(
+        strong, winners, 0.0f, false, makeBlend(strong));
+    check(std::isfinite(coherentWeak.llr0[0]) &&
+              std::isfinite(coherentStrong.llr0[0]) &&
+              std::abs(coherentStrong.llr0[0]) >
+                  std::abs(coherentWeak.llr0[0]),
+          "coherent blending preserves cross-frame reliability");
+
+    // Isolate one weak bit while keeping the rest of the frame well defined.
+    auto borderline = weak;
+    borderline[winners[0]][0] = 0.401f;
+    auto const raw = Processor::process(borderline, winners, 0.0f, false);
+    float const threshold = std::abs(raw.llr0[0]) * 1.1f;
+    auto const erased = Processor::process(borderline, winners, threshold,
+                                           false);
+    auto const kept = Processor::process(borderline, winners, threshold,
+                                         false, std::nullopt, 1.5f);
+    check(raw.llr0[0] != 0.0f && erased.llr0[0] == 0.0f &&
+              erased.llr1[0] == 0.0f && erased.erasureApplied &&
+              erased.erasures >= 2,
+          "threshold erases low-confidence bit in both passes");
+    check(kept.llr0[0] != 0.0f && kept.erasureApplied,
+          "global scale is applied before the erasure threshold");
+    auto const disabled = Processor::process(borderline, winners, 0.0f, false);
+    check(!disabled.erasureApplied && disabled.erasures == 0 &&
+              disabled.llr0[0] != 0.0f,
+          "zero erasure threshold retains low-confidence bits");
+
+    std::array<std::array<float, 58>, 8> silent{};
+    std::array<int, 58> silentWinners{};
+    auto const zero = Processor::process(silent, silentWinners, 0.0f, false);
+    auto const zeroOld = Processor::process(
+        silent, silentWinners, 0.0f, false, std::nullopt, 1.0f,
+        Processor::Normalization::FrameSigma283);
+    check(std::all_of(zero.llr0.begin(), zero.llr0.end(), [](float value) {
+              return std::isfinite(value) && value == 0.0f;
+          }) &&
+              std::all_of(zeroOld.llr0.begin(), zeroOld.llr0.end(),
+                          [](float value) {
+                              return std::isfinite(value) && value == 0.0f;
+                          }),
+          "silent frame remains finite in both calibration modes");
+}
+
+void runPhaseGateCalibration() {
+    std::printf("[phase quality gate calibration]\n");
+    js8::CarrierPhaseFit fit;
+    fit.fitted = true;
+    fit.pilotCount = 21;
+    fit.rmsRad = 0.4;
+    check(std::abs(js8::coherentBlendWeight(fit) - 0.5) < 1.0e-6,
+          "calibrated phase gate blends partially at 0.4 radians");
+    ::setenv("JS8_COHERENT_GOOD_RMS_RAD", "0.25", 1);
+    ::setenv("JS8_COHERENT_POOR_RMS_RAD", "0.75", 1);
+    check(std::abs(js8::coherentBlendWeight(fit) - 0.7) < 1.0e-6,
+          "optional looser phase gate is applied");
+    ::setenv("JS8_COHERENT_POOR_RMS_RAD", "0.1", 1);
+    check(std::abs(js8::coherentBlendWeight(fit) - 0.5) < 1.0e-6,
+          "invalid phase gate falls back to defaults");
+    ::unsetenv("JS8_COHERENT_GOOD_RMS_RAD");
+    ::unsetenv("JS8_COHERENT_POOR_RMS_RAD");
+}
+
 // Alpha continuity: alpha=0 reproduces noncoherent output exactly, and a tiny
 // alpha stays genuinely close instead of renormalizing the whole symbol.
 void runAlphaContinuity() {
@@ -616,6 +931,7 @@ void runTimingOffsetIndependence() {
 } // namespace
 
 int main() {
+    runSharedRotationParity();
     runPerfectSignal();
     runCoherentNumeratorScale();
     runFrequencyOffset();
@@ -626,6 +942,8 @@ int main() {
     runNonFiniteInputs();
     runDisabledFallbackExact();
     runReliabilityPreserved();
+    runLlrCalibration();
+    runPhaseGateCalibration();
     runAlphaContinuity();
     runFrequencyTrackerCompensation();
     runTimingShiftWithResidualFrequency();

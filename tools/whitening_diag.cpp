@@ -53,7 +53,11 @@ std::mutex fftw_mutex;
 Q_LOGGING_CATEGORY(decoder_js8, "decoder.js8", QtWarningMsg)
 
 // Include implementation (in the diagnostic binary only).
+#ifdef JS8_DIAG_DECODER_SOURCE
+#include JS8_DIAG_DECODER_SOURCE
+#else
 #include "../JS8_Mode/JS8.cpp"
+#endif
 
 namespace
 {
@@ -338,6 +342,85 @@ namespace
         run_mode_benchmark<ModeC>(2, "C");
         run_mode_benchmark<ModeE>(3, "E");
         run_mode_benchmark<ModeI>(4, "I");
+    }
+
+    // Full waveform / complete-frame calibration comparison. Re-synthesize
+    // identical noise for every variant (the decoder may update its own copy
+    // of the receive buffer). SNR here is the harness's real-sample SNR dB,
+    // not the complex matched-bin SNR of llr_frame_benchmark.cpp.
+    void run_llr_calibration(int trials, double first, double last,
+                             double step, bool finalistsOnly = false,
+                             bool gatesOnly = false) {
+        constexpr char const *messages[] = {
+            "TESTTEST1234", "TESTTEST1235", "AAAAAAAAAAAA", "ZZZZZZZZZZZZ"
+        };
+        struct Variant { char const *name; char const *scale;
+                         char const *threshold; bool normalized;
+                         char const *gateGood = nullptr;
+                         char const *gatePoor = nullptr; };
+        constexpr Variant variants[] = {
+#ifdef JS8_DIAG_LEGACY
+            {"legacy", "1", ".25", false},
+#else
+            {"normalized", "1", ".25", true, ".12", ".35"},
+            {"raw1", "1", ".25", false, ".12", ".35"},
+            {"scale1.5", "1.5", "0", false, ".12", ".35"},
+            {"scale2", "2", "0", false, ".12", ".35"},
+            {"scale2-t.1", "2", ".1", false, ".12", ".35"},
+            {"gate.20/.60", "2", "0", false, ".20", ".60"},
+            {"gate.25/.75", "2", "0", false, ".25", ".75"},
+#endif
+        };
+        std::printf("kind,snrDb,decoded,trials,falsePos,wallMs\n");
+        for (double snrDb = first; snrDb <= last + 1e-8; snrDb += step) {
+            for (auto const &variant : variants) {
+                if (gatesOnly && std::strcmp(variant.name, "scale2") != 0 &&
+                    !variant.gateGood)
+                    continue;
+                if (finalistsOnly &&
+                    (std::strcmp(variant.name, "raw1") == 0 ||
+                     std::strcmp(variant.name, "scale2-t.1") == 0 ||
+                     std::strcmp(variant.name, "gate.20/.60") == 0 ||
+                     std::strcmp(variant.name, "gate.25/.75") == 0))
+                    continue;
+                if (variant.gateGood) {
+                    ::setenv("JS8_COHERENT_GOOD_RMS_RAD", variant.gateGood, 1);
+                    ::setenv("JS8_COHERENT_POOR_RMS_RAD", variant.gatePoor, 1);
+                } else {
+                    ::unsetenv("JS8_COHERENT_GOOD_RMS_RAD");
+                    ::unsetenv("JS8_COHERENT_POOR_RMS_RAD");
+                }
+                ::setenv("JS8_LLR_SCALE", variant.scale, 1);
+                ::setenv("JS8_LLR_ERASURE_THRESH", variant.threshold, 1);
+                if (variant.normalized)
+                    ::setenv("JS8_LLR_FRAME_NORMALIZATION", "1", 1);
+                else
+                    ::unsetenv("JS8_LLR_FRAME_NORMALIZATION");
+                int successes = 0, falsePos = 0;
+                long long wallMs = 0;
+                for (int trial = 0; trial < trials; ++trial) {
+                    auto const message = messages[trial % 4];
+                    SynthConfig cfg;
+                    cfg.snrDb = snrDb;
+                    cfg.seed = 0x7134u + 7919u * trial;
+                    cfg.startPhase = 0.3 + trial * 0.37;
+                    auto const count = synth_frame<ModeA>(cfg, message);
+                    set_mode_params(0, static_cast<int>(count), cfg.baseHz);
+                    auto const r = run_decode(false, true);
+                    bool exact = false;
+                    for (auto const &payload : r.payloads)
+                        if (payload == message)
+                            exact = true;
+                        else
+                            ++falsePos;
+                    successes += exact;
+                    wallMs += r.wallMs;
+                }
+                std::printf("%s,%.2f,%d,%d,%d,%lld\n", variant.name,
+                            snrDb, successes, trials, falsePos, wallMs);
+                std::fflush(stdout);
+            }
+        }
     }
 
     struct Scenario {
@@ -704,6 +787,15 @@ main(int argc, char **argv)
     QCoreApplication app(argc, argv);
 
     for (int i = 1; i < argc; ++i) {
+        if ((std::string(argv[i]) == "--llr-calibration" ||
+             std::string(argv[i]) == "--llr-calibration-final" ||
+             std::string(argv[i]) == "--llr-calibration-gate") && argc == 6) {
+            run_llr_calibration(std::atoi(argv[2]), std::atof(argv[3]),
+                                std::atof(argv[4]), std::atof(argv[5]),
+                                std::string(argv[i]) == "--llr-calibration-final",
+                                std::string(argv[i]) == "--llr-calibration-gate");
+            return 0;
+        }
         if (std::string(argv[i]) == "--coherent-benchmark") {
             run_coherent_benchmark();
             return 0;
