@@ -446,7 +446,7 @@
         </widget>
         <widget class="QSplitter" name="textHorizontalSplitter">
          <property name="sizePolicy">
-          <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
            <horstretch>0</horstretch>
            <verstretch>4</verstretch>
           </sizepolicy>
@@ -602,7 +602,7 @@
             <bool>true</bool>
            </property>
            <property name="placeholderText">
-            <string>INCOMING AND OUTGOING MESSAGES WILL APPEAR HERE.</string>
+            <string>INCOMING AND OUTGOING MSG's</string>
            </property>
           </widget>
           <widget class="TransmitTextEdit" name="extFreeTextMsgEdit">
@@ -634,7 +634,7 @@ QTextEdit[transmitting=&quot;true&quot;] {
             <bool>false</bool>
            </property>
            <property name="placeholderText">
-            <string>TYPE YOUR OUTGOING MESSAGES HERE.</string>
+            <string>TYPE OUTGOING MSG HERE</string>
            </property>
           </widget>
          </widget>
