@@ -350,6 +350,8 @@ class UI_Constructor : public QMainWindow {
     void on_actionCopyright_Notice_triggered();
     void on_actionUser_Guide_triggered();
     bool decode(qint32 k);
+    /** @brief Publishes queued work and the next sample-clock decode deadline. */
+    void publishDecodePressure(qint32 k);
     bool isDecodeReady(int submode, qint32 k, qint32 k0,
                        qint32 *pCurrentDecodeStart, qint32 *pNextDecodeStart,
                        qint32 *pStart, qint32 *pSz, qint32 *pCycle);

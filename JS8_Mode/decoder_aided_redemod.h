@@ -37,6 +37,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <numbers>
 #include <vector>
@@ -434,6 +435,7 @@ struct Refinement {
     double baselineMetric = std::numeric_limits<double>::quiet_NaN();
     bool baselineFinite = false;
     bool searched = false;   ///< False when inputs were rejected up front.
+    bool cancelled = false;  ///< Incomplete searches can never be accepted.
     bool atBoundary = false; ///< Best sits on the search box boundary.
 };
 
@@ -462,10 +464,20 @@ inline Refinement refineSync(std::complex<float> const *samples,
                              int numSamples,
                              std::array<SymbolBaseline, kTotalSymbols> const
                                  &baselines,
-                             int window, double sampleRateHz,
-                             std::array<int, kTotalSymbols> const &tones,
-                             std::array<float, kTotalSymbols> const &weights) {
+                              int window, double sampleRateHz,
+                              std::array<int, kTotalSymbols> const &tones,
+                              std::array<float, kTotalSymbols> const &weights,
+                              std::function<bool()> const &shouldCancel = {}) {
     Refinement out{};
+    auto const stop = [&] {
+        if (!shouldCancel || !shouldCancel())
+            return false;
+        out.cancelled = true;
+        out.searched = false;
+        return true;
+    };
+    if (stop())
+        return out;
     if (samples == nullptr || numSamples <= 0 || window <= 0 || window > 32 ||
         !std::isfinite(sampleRateHz) || !(sampleRateHz > 0.0))
         return out;
@@ -616,6 +628,8 @@ inline Refinement refineSync(std::complex<float> const *samples,
         return out;
     out.searched = true;
     out.best.metric = out.baselineMetric;
+    if (stop())
+        return out;
 
 #ifndef JS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
     for (int d = kTimingDeltaMin; d <= kTimingDeltaMax; ++d)
@@ -627,6 +641,8 @@ inline Refinement refineSync(std::complex<float> const *samples,
         for (int f = 0; f < kFreqSteps; ++f) {
             double const df = kFreqStartHz + f * kFreqStepHz;
             for (int d = kTimingDeltaMin; d <= kTimingDeltaMax; ++d) {
+                if (stop())
+                    return out;
                 if (d == 0 && df == 0.0 && kDriftValues[dd] == 0.0)
                     continue; // Baseline already scored.
                 double const metric =
@@ -669,7 +685,8 @@ inline Refinement refineSync(std::complex<float> const *samples,
  * positive metric over a degenerate zero baseline).
  */
 inline bool refinementAccepted(Refinement const &r) {
-    if (!r.searched || !std::isfinite(r.best.metric) || !r.baselineFinite)
+    if (!r.searched || r.cancelled || !std::isfinite(r.best.metric) ||
+        !r.baselineFinite)
         return false;
     if (r.atBoundary)
         return false;

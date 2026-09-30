@@ -442,6 +442,23 @@ void runBaselineRefinement() {
           "perfect sync produces no bogus refinement");
 }
 
+void runCancelledRefinement() {
+    std::printf("[cancelled refinement cannot be accepted]\n");
+    std::array<int8_t, 174> cw{};
+    for (int i = 0; i < 174; i += 3)
+        cw[static_cast<std::size_t>(i)] = 1;
+    auto const tones = tonesFromBits(cw);
+    auto const line = synthLine(tones, kFrameStart, 0.0, 0.7, 0.2, 0.0);
+    int checkpoints = 0;
+    auto const stopped = js8::aided::refineSync(
+        line.data(), static_cast<int>(line.size()),
+        makeBaselines(kFrameStart), kWindow, kRate, tones,
+        unitDataWeights(), [&] { return ++checkpoints >= 10; });
+    check(stopped.cancelled && !stopped.searched &&
+              !js8::aided::refinementAccepted(stopped) && checkpoints == 10,
+          "partial hypothesis grid cannot pass the acceptance gate");
+}
+
 void runKnownTimingError() {
     std::printf("[known timing error]\n");
     // Note: with continuous-phase FSK the power-contrast metric is exactly
@@ -939,6 +956,7 @@ void runRescueDemonstration() {
 
 int main() {
     runCachedSearchParity();
+    runCancelledRefinement();
     runCodewordToTones();
     runConfidenceWeighting();
     runBaselineRefinement();

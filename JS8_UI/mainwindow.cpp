@@ -1512,6 +1512,8 @@ bool UI_Constructor::decode(qint32 k) {
     }
 #endif
 
+    publishDecodePressure(k);
+
     // pause decoder if we are currently transmitting
     if (m_transmitting) {
         // We used to use isMessageQueuedForTransmit, and some form of checking
@@ -1952,6 +1954,7 @@ void UI_Constructor::decodeStart() {
     // the decode _not_ busy
 
     decodeBusy(true);
+    m_decoder.pendingDecode(false); // the pending queue was just drained
     qCDebug(decoder_js8) << "--> decoder starting"
                          << " --> kin:" << dec_data.params.kin
                          << " --> newdat:" << dec_data.params.newdat

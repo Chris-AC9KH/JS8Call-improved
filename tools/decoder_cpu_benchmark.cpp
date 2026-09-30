@@ -51,6 +51,7 @@
 #include <QEventLoop>
 #include <QLoggingCategory>
 #include <QThread>
+#include <QTimer>
 
 #include "JS8_Include/commons.h"
 #include "JS8_Mode/JS8.h"
@@ -285,6 +286,9 @@ std::atomic<int> aidedSearches{0};
 std::atomic<int> aidedAccepted{0};
 std::atomic<int> rescueStarts{0};
 std::atomic<int> coherentBlends{0};
+std::atomic<int> skippedDeep{0};
+std::atomic<int> skippedRescue{0};
+std::atomic<int> skippedAided{0};
 
 void collectTelemetry(QtMsgType, QMessageLogContext const &context,
                       QString const &message) {
@@ -301,6 +305,13 @@ void collectTelemetry(QtMsgType, QMessageLogContext const &context,
     } else if (message.startsWith(QStringLiteral("coherent likelihood")) &&
                message.contains(QStringLiteral("coherentEnabled true"))) {
         ++coherentBlends;
+    } else if (message.startsWith(QStringLiteral("adaptive optional skip"))) {
+        if (message.endsWith(QStringLiteral("deep")))
+            ++skippedDeep;
+        else if (message.endsWith(QStringLiteral("rescue")))
+            ++skippedRescue;
+        else if (message.endsWith(QStringLiteral("aided")))
+            ++skippedAided;
     }
 }
 } // namespace
@@ -313,6 +324,8 @@ int main(int argc, char **argv) {
         return 2;
     auto const samples = makeSamples(crowded, seconds);
     bool const autosync = argc > 4 && std::string_view(argv[4]) == "autosync";
+    bool const pressure = argc > 5 && std::string_view(argv[5]) == "pressure";
+    bool const progress = argc > 6 && std::string_view(argv[6]) == "progress";
     auto const events = schedule(seconds, autosync);
     bool const diagnostics = argc > 3 && std::string_view(argv[3]) == "diag";
     QLoggingCategory::setFilterRules(
@@ -351,6 +364,11 @@ int main(int argc, char **argv) {
     double totalCpu = 0.0, totalWall = 0.0, maxPass = 0.0;
     double hypotheticalDone = 0.0, maxLag = 0.0;
     int lateEvents = 0;
+    QTimer pressureTimer;
+    pressureTimer.setSingleShot(true);
+    QObject::connect(&pressureTimer, &QTimer::timeout, &loop, [&] {
+        decoder.pendingDecode(true);
+    });
     for (auto const &event : events) {
         auto const upTo = std::min(samples.size(),
                                    std::size_t(event.tick) * (rate / 10));
@@ -376,13 +394,25 @@ int main(int argc, char **argv) {
         dec_data.params.nutc = code_time(0, 0, (event.tick / 10) % 60);
         auto const wallStart = std::chrono::steady_clock::now();
         double const cpuStart = cpuMillis();
+        if (pressure) {
+            decoder.pendingDecode(false);
+            decoder.nextDecodeReady(
+                std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(100));
+            pressureTimer.start(1);
+        }
         decoder.decode();
         loop.exec();
+        pressureTimer.stop();
+        decoder.pendingDecode(false);
         double const elapsedCpu = cpuMillis() - cpuStart;
         double const elapsedWall = std::chrono::duration<double, std::milli>(
                                        std::chrono::steady_clock::now() - wallStart)
                                        .count();
         totalCpu += elapsedCpu;
+        if (progress)
+            std::fprintf(stderr, "event tick=%d modes=%d cpuMs=%.1f decodes=%zu\n",
+                         event.tick, event.modes, elapsedCpu, decoded);
         totalWall += elapsedWall;
         maxPass = std::max(maxPass, elapsedWall);
         double const scheduledMs = event.tick * 100.0;
@@ -469,9 +499,11 @@ int main(int argc, char **argv) {
 #endif
     if (diagnostics)
         std::printf("telemetry aidedEligible=%d searched=%d crcAccepted=%d "
-                    "rescueStarts=%d coherentBlends=%d\n",
+                    "rescueStarts=%d coherentBlends=%d "
+                    "skippedDeep=%d skippedRescue=%d skippedAided=%d\n",
                     aidedEligible.load(), aidedSearches.load(),
                     aidedAccepted.load(), rescueStarts.load(),
-                    coherentBlends.load());
+                    coherentBlends.load(), skippedDeep.load(),
+                    skippedRescue.load(), skippedAided.load());
     return 0;
 }

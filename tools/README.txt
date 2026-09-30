@@ -54,6 +54,13 @@ In the tools directory there are the following shell scripts for linux:
   -DJS8_BENCHMARK_ORIGINAL_RANK_SCAN in the reference build;
   -DJS8_BENCHMARK_VERIFY_RANK_SCAN verifies every score against the original
   bit-for-bit and must not be used for CPU timings.
+  Passing "pressure" as the fifth argument after "autosync" injects a queued
+  frame shortly after each decode begins, exercising inline cancellation.
+  This is a correctness/stress scenario, not a Pi performance estimate.
+
+- optional_work_test.cpp covers deadline and pending-queue admission without
+  Qt. JS8_DISABLE_ADAPTIVE_OPTIONAL=1 disables the runtime optional-work gate
+  for paired decode comparisons.
 
 Decoder calibration overrides: JS8_LLR_SCALE (positive fixed multiplier,
 default 2), JS8_LLR_ERASURE_THRESH (nonnegative, default 0),

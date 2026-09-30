@@ -12,7 +12,9 @@
 #include <QObject>
 #include <QSemaphore>
 #include <QThread>
+#include "optional_work.h"
 #include <array>
+#include <chrono>
 #include <functional>
 #include <string>
 #include <variant>
@@ -145,11 +147,16 @@ class Decoder : public QObject {
 
         QSemaphore m_semaphore; ///< Internal semaphore used by the worker
         QThread m_thread;       ///< Thread running the worker
+        js8::OptionalWorkSignal m_optionalPressure;
         Worker *m_worker;       ///< Non-owning pointer to the worker instance
 
     public:
         /** Construct a decoder controller. */
         Decoder(QObject *parent = nullptr);
+
+        /** Publish ready work without exposing the UI queue to the worker. */
+        void pendingDecode(bool pending) noexcept;
+        void nextDecodeReady(std::chrono::steady_clock::time_point when) noexcept;
 
     signals:
 

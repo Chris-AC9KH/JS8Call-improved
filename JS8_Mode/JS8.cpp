@@ -12,6 +12,7 @@
 #include "JS8_Mode/whitening_processor.h"
 #include "decoder_aided_redemod.h"
 #include "ldpc_feedback.h"
+#include "optional_work.h"
 #include "soft_combiner.h"
 
 #include <QDebug>
@@ -615,6 +616,7 @@ struct BPOptions {
     int maxIterations = BP_MAX_ITERATIONS;
     bool earlyAbort = true;
     float llrScale = 1.0f;
+    std::function<bool()> const *shouldCancel = nullptr;
 };
 
 struct BPResult {
@@ -623,6 +625,7 @@ struct BPResult {
     int finalChecks = M;
     int bestChecks = M + 1;
     bool earlyAborted = false;
+    bool cancelled = false;
     // Minimum-syndrome hard word observed during this call (first minimum
     // wins ties deterministically). Exposed for decoder-aided
     // re-demodulation WITHOUT changing the normal `cw` output: on failure
@@ -869,6 +872,10 @@ BPResult bpdecode174(std::array<float, N> const &llr,
 
     // Preserve the legacy inclusive iteration bound for the normal decoder.
     for (int iter = 0; iter <= options.maxIterations; ++iter) {
+        if (options.shouldCancel && (*options.shouldCancel)()) {
+            result.cancelled = true;
+            return result;
+        }
         result.iterations = iter;
 
         // Update bit log likelihood ratios.
@@ -1593,9 +1600,11 @@ template <typename Mode> class DecodeMode {
     }
 
     std::optional<Decode> js8dec(bool const syncStats, bool const lsubtract,
-                                 float &f1, float &xdt, int &nharderrors,
-                                 float &xsnr, int &ldpcRescueBudget,
-                                  JS8::Event::Emitter emitEvent) {
+                                  float &f1, float &xdt, int &nharderrors,
+                                  float &xsnr, int &ldpcRescueBudget,
+                                  JS8::Event::Emitter emitEvent,
+                                  js8::OptionalWorkBudget *optional,
+                                  bool optionalCandidate = false) {
 #ifdef JS8_CPU_BENCHMARK
         BenchmarkScope benchmarkScope{benchmarkDecodeCalls, benchmarkDecodeNanos};
 #endif
@@ -1959,6 +1968,12 @@ template <typename Mode> class DecodeMode {
             return std::nullopt;
         }
 
+        // A deep candidate is optional. Check before touching the combiner or
+        // starting its full BP sequence, so a pending frame cannot inherit
+        // partial evidence from an abandoned attempt.
+        if (optionalCandidate && optional && optional->stop())
+            return std::nullopt;
+
         if (syncStats)
             emitEvent(
                 JS8::Event::SyncState{JS8::Event::SyncState::Type::CANDIDATE,
@@ -2054,6 +2069,12 @@ template <typename Mode> class DecodeMode {
                                        &finalize = std::nullopt)
             -> std::optional<Decode> {
             BPResult bp;
+            std::array<int8_t, N> savedCw{};
+            std::array<int8_t, K> savedDecoded{};
+            if (options.shouldCancel) {
+                savedCw = cw;
+                savedDecoded = decoded;
+            }
 #ifndef JS8_BENCHMARK_DISABLE_BP_CACHE
             bool reused = false;
             if (ipass == 2 && rememberForRescue &&
@@ -2087,6 +2108,13 @@ template <typename Mode> class DecodeMode {
                 }
             }
 #endif
+            if (bp.cancelled) {
+                cw = savedCw;
+                decoded = savedDecoded;
+                if (bpOut)
+                    *bpOut = bp;
+                return std::nullopt;
+            }
             if (bpOut != nullptr)
                 *bpOut = bp;
             nharderrors = bp.hardErrors;
@@ -2216,10 +2244,21 @@ template <typename Mode> class DecodeMode {
         // Spend the bounded rescue budget only on a genuinely close near miss.
         // We retry the single best LLR variant with a longer BP run, no early
         // abort, and three modest LLR temperatures to escape trapping states.
-        if (m_enableLdpcRescue && ldpcRescueBudget > 0 &&
-            bestRescuePass > 0 && bestRescueChecks <= BP_RESCUE_MAX_CHECKS) {
+        bool const rescueEligible = m_enableLdpcRescue && ldpcRescueBudget > 0 &&
+                                    bestRescuePass > 0 &&
+                                    bestRescueChecks <= BP_RESCUE_MAX_CHECKS;
+        bool const rescueAllowed =
+            rescueEligible &&
+            (!optional || optional->allow(js8::OptionalStage::Rescue));
+        if (rescueEligible && !rescueAllowed)
+            qCDebug(decoder_js8) << "adaptive optional skip rescue";
+        if (rescueAllowed) {
+            auto const rescueStarted = js8::OptionalWorkBudget::Clock::now();
             --ldpcRescueBudget;
             rescueAttempted = true;
+            std::function<bool()> const cancelRescue = [optional] {
+                return optional && optional->stop();
+            };
 
             if (decoder_js8().isDebugEnabled()) {
                 qCDebug(decoder_js8)
@@ -2230,10 +2269,14 @@ template <typename Mode> class DecodeMode {
             }
 
             for (float const scale : BP_RESCUE_LLR_SCALES) {
+                if (optional && optional->stop())
+                    break;
                 BPOptions options;
                 options.maxIterations = BP_RESCUE_ITERATIONS;
                 options.earlyAbort = false;
                 options.llrScale = scale;
+                options.shouldCancel = optional ? &cancelRescue : nullptr;
+                BPResult rescueBp;
 
                 // Remember rescue attempts as well so bestRescueChecks (and the
                 // associated bestRescueCw snapshot) reflect the best syndrome
@@ -2241,7 +2284,10 @@ template <typename Mode> class DecodeMode {
                 // the best-input bookkeeping with the same LLRs; no decode
                 // behavior changes.
                 if (auto result = tryDecode(bestRescueLlr, bestRescuePass,
-                                            options, true)) {
+                                            options, true, &rescueBp)) {
+                    if (optional)
+                        optional->observe(js8::OptionalStage::Rescue,
+                                          rescueStarted);
                     if (decoder_js8().isDebugEnabled()) {
                         qCDebug(decoder_js8)
                             << "LDPC rescue succeeded"
@@ -2250,7 +2296,11 @@ template <typename Mode> class DecodeMode {
                     }
                     return result;
                 }
+                if (rescueBp.cancelled)
+                    break;
             }
+            if (optional)
+                optional->observe(js8::OptionalStage::Rescue, rescueStarted);
         }
 
         // Decoder-aided re-demodulation. When the normal bounded LDPC/rescue
@@ -2266,8 +2316,17 @@ template <typename Mode> class DecodeMode {
         // budget (one unit per aided group). Only a valid CRC can accept the
         // result; any failure falls through to the normal failure path with
         // the original outputs restored.
-        if (m_enableAidedRedemod && bestRescueChecks > 0 &&
-            bestRescueChecks <= js8::aided::kMaxSyndrome) {
+        bool const aidedEligible = m_enableAidedRedemod &&
+                                   bestRescueChecks > 0 &&
+                                   bestRescueChecks <=
+                                       js8::aided::kMaxSyndrome;
+        bool const aidedAllowed =
+            aidedEligible &&
+            (!optional || optional->allow(js8::OptionalStage::Aided));
+        if (aidedEligible && !aidedAllowed)
+            qCDebug(decoder_js8) << "adaptive optional skip aided";
+        if (aidedAllowed) {
+            auto const aidedStarted = js8::OptionalWorkBudget::Clock::now();
             static_assert(js8::aided::kCodeBits == N &&
                               js8::aided::kDataSymbols == ND &&
                               js8::aided::kTotalSymbols == NN &&
@@ -2351,7 +2410,8 @@ template <typename Mode> class DecodeMode {
                 js8::aided::Refinement const refinement =
                     js8::aided::refineSync(
                         cd0.data(), NP2, aidedBaselines, Mode::NDOWNSPS,
-                        static_cast<double>(FS2), expectedTones, symWeights);
+                        static_cast<double>(FS2), expectedTones, symWeights,
+                        [optional] { return optional && optional->stop(); });
 #ifdef JS8_CPU_BENCHMARK
                 ++benchmarkRefineCalls;
                 benchmarkRefineNanos +=
@@ -2369,7 +2429,8 @@ template <typename Mode> class DecodeMode {
                 aidedDf = refinement.best.deltaHz;
                 aidedDd = refinement.best.driftHzPerSec;
 
-                if (js8::aided::refinementAccepted(refinement)) {
+                if (js8::aided::refinementAccepted(refinement) &&
+                    (!optional || !optional->stop())) {
 
                     // Fresh full 79-symbol re-demodulation from cd0: recorded
                     // first-pass start plus the refined timing delta, exact
@@ -2487,16 +2548,22 @@ template <typename Mode> class DecodeMode {
                     // it on success exactly like the normal path.
                     int const savedNhard = nharderrors;
                     float const savedXsnr = xsnr;
+                    auto const savedS2 = s2;
                     s2 = s2Aided; // aided xsnr uses aided magnitudes
                     int aidedBest = M + 1;
                     BPResult aidedBp;
-                    if (auto res = tryDecode(aidedBins.llr0, 1, BPOptions{},
-                                             false, &aidedBp,
-                                             aidedFinalizeSync)) {
+                    std::function<bool()> const cancelAided = [optional] {
+                        return optional && optional->stop();
+                    };
+                    BPOptions aidedOptions;
+                    aidedOptions.shouldCancel = optional ? &cancelAided : nullptr;
+                    if (auto res = tryDecode(aidedBins.llr0, 1, aidedOptions,
+                                              false, &aidedBp,
+                                              aidedFinalizeSync)) {
                         aidedBest = aidedBp.bestChecks;
                         aidedAccepted = 1;
                         aidedResult = res;
-                    } else {
+                    } else if (!aidedBp.cancelled) {
                         aidedBest = std::min(aidedBest, aidedBp.bestChecks);
                         // Extended rescue scales stay inside the decoder's
                         // existing bounded rescue policy: one normal BP is
@@ -2504,14 +2571,20 @@ template <typename Mode> class DecodeMode {
                         // group runs only with rescue enabled and budget
                         // remaining, consuming exactly one unit for the whole
                         // aided group like the normal rescue group.
-                        if (m_enableLdpcRescue && ldpcRescueBudget > 0) {
+                        if (m_enableLdpcRescue && ldpcRescueBudget > 0 &&
+                            (!optional ||
+                             optional->allow(js8::OptionalStage::Rescue))) {
                             --ldpcRescueBudget;
                             for (float const scale : BP_RESCUE_LLR_SCALES) {
+                                if (optional && optional->stop())
+                                    break;
                                 ++aidedScales;
                                 BPOptions options;
                                 options.maxIterations = BP_RESCUE_ITERATIONS;
                                 options.earlyAbort = false;
                                 options.llrScale = scale;
+                                options.shouldCancel =
+                                    optional ? &cancelAided : nullptr;
                                 BPResult retryBp;
                                 if (auto retry =
                                         tryDecode(aidedBins.llr0, 1, options,
@@ -2523,6 +2596,8 @@ template <typename Mode> class DecodeMode {
                                     aidedResult = retry;
                                     break;
                                 }
+                                if (retryBp.cancelled)
+                                    break;
                                 aidedBest = std::min(aidedBest,
                                                      retryBp.bestChecks);
                             }
@@ -2536,6 +2611,7 @@ template <typename Mode> class DecodeMode {
                         // outputs and failure path are preserved.
                         nharderrors = savedNhard;
                         xsnr = savedXsnr;
+                        s2 = savedS2;
                     }
                 }
             }
@@ -2565,6 +2641,8 @@ template <typename Mode> class DecodeMode {
             }
 
             if (aidedResult) {
+                if (optional)
+                    optional->observe(js8::OptionalStage::Aided, aidedStarted);
                 // The aided sync produced this CRC success: expose it as the
                 // decode's sync (reporting and SIC seed already used the same
                 // context inside tryDecode). Only touched after acceptance;
@@ -2575,6 +2653,8 @@ template <typename Mode> class DecodeMode {
                 xdt = fs.xdtSeconds;
                 return aidedResult;
             }
+            if (optional)
+                optional->observe(js8::OptionalStage::Aided, aidedStarted);
         }
 
         if (decoder_js8().isDebugEnabled()) {
@@ -3672,7 +3752,8 @@ template <typename Mode> class DecodeMode {
     // Decode entry point.
 
     std::size_t operator()(struct dec_data const &data, int const kpos,
-                           int const ksz, JS8::Event::Emitter emitEvent) {
+                           int const ksz, JS8::Event::Emitter emitEvent,
+                           js8::OptionalWorkBudget *optional = nullptr) {
         // Copy the relevant frames for decoding
 
         auto const pos = std::max(0, kpos);
@@ -3755,15 +3836,27 @@ template <typename Mode> class DecodeMode {
             bool const subtract = ipass < 3;
             bool improved = false;
 
-            auto const tryCandidates = [&](auto const &candidateList) {
+            auto const tryCandidates = [&](auto const &candidateList,
+                                           bool deep) {
                 for (auto [f1, xdt, sync] : candidateList) {
+                    if (deep && optional &&
+                        !optional->allow(js8::OptionalStage::Deep)) {
+                        qCDebug(decoder_js8) << "adaptive optional skip deep";
+                        break;
+                    }
+                    auto const optionalStarted =
+                        js8::OptionalWorkBudget::Clock::now();
                     float xsnr = 0.0f;
                     int nharderrors = -1;
 
-                    if (auto decode =
-                            js8dec(data.params.syncStats, subtract, f1, xdt,
-                                   nharderrors, xsnr, ldpcRescueBudget,
-                                   emitEvent)) {
+                    auto decode = js8dec(data.params.syncStats, subtract, f1,
+                                         xdt, nharderrors, xsnr,
+                                         ldpcRescueBudget, emitEvent, optional,
+                                         deep);
+                    if (deep && optional)
+                        optional->observe(js8::OptionalStage::Deep,
+                                          optionalStarted);
+                    if (decode) {
                         // We don't need to be emitting duplicate events for
                         // something that's effectively the same SNR as a
                         // previous event.
@@ -3799,7 +3892,7 @@ template <typename Mode> class DecodeMode {
             // improvement, or on the final subtraction pass so weak independent
             // signals are not permanently starved by stronger traffic.
 
-            tryCandidates(candidates.normal);
+            tryCandidates(candidates.normal, false);
 
             bool const tryDeep =
                 m_enableDeepSearch && !candidates.deep.empty() &&
@@ -3813,7 +3906,7 @@ template <typename Mode> class DecodeMode {
                         << candidates.deep.size();
                 }
 
-                tryCandidates(candidates.deep);
+                tryCandidates(candidates.deep, true);
             }
 
             // If nothing from this pass improved our situation, there's no
@@ -3859,6 +3952,12 @@ class Worker : public QObject {
         // process it.
 
         struct dec_data &m_data;
+        js8::OptionalWorkSignal const *m_optionalSignal;
+        std::array<js8::OptionalWorkBudget::Duration, 5> m_modeCost{};
+        std::array<std::array<js8::OptionalWorkBudget::Duration,
+                              js8::OptionalWorkBudget::stages>, 5>
+            m_stageCost{};
+        std::array<bool, 5> m_modeObserved{};
 
         // Mode-specific decode strategy; we'll instantiate one of
         // these for each of the 5 modes; this class is an aggregate
@@ -3904,7 +4003,9 @@ class Worker : public QObject {
       public:
         // Constructor
 
-        explicit Impl(struct dec_data &data) : m_data(data) {}
+        explicit Impl(struct dec_data &data,
+                      js8::OptionalWorkSignal const *signal)
+            : m_data(data), m_optionalSignal(signal) {}
 
         // Execute a decoding pass, using the supplied event emitter to
         // emit events as they occur.
@@ -3926,14 +4027,39 @@ class Worker : public QObject {
             // a mode-specific decode pass if the mode is scheduled for
             // decoding during this pass.
 
-            for (auto &entry : m_decodes) {
+            for (std::size_t index = 0; index < m_decodes.size(); ++index) {
+                auto &entry = m_decodes[index];
                 if ((set & entry.mode) == entry.mode) {
+                    js8::OptionalWorkBudget::Duration reserve{0};
+                    bool unknownMandatory = false;
+                    for (std::size_t later = index + 1; later < m_decodes.size();
+                         ++later) {
+                        if (!(set & m_decodes[later].mode))
+                            continue;
+                        if (!m_modeObserved[later])
+                            unknownMandatory = true;
+                        else
+                            reserve += m_modeCost[later];
+                    }
+                    js8::OptionalWorkBudget budget{
+                        m_optionalSignal, reserve, m_stageCost[index],
+                        unknownMandatory};
+                    auto const started =
+                        js8::OptionalWorkBudget::Clock::now();
                     std::visit(
                         [&](auto &&decode) {
                             sum += decode(m_data, entry.kpos, entry.ksz,
-                                          emitEvent);
+                                          emitEvent, &budget);
                         },
                         entry.decode);
+                    auto const duration =
+                        std::chrono::duration_cast<
+                            js8::OptionalWorkBudget::Duration>(
+                            js8::OptionalWorkBudget::Clock::now() - started);
+                    m_modeCost[index] =
+                        std::max(m_modeCost[index] * 9 / 10,
+                                 duration + duration / 4);
+                    m_modeObserved[index] = true;
                 }
             }
 
@@ -3947,14 +4073,18 @@ class Worker : public QObject {
     // Data members
 
     QSemaphore *m_semaphore;
+    js8::OptionalWorkSignal const *m_optionalSignal;
     std::atomic<bool> m_quit = false;
     struct dec_data m_data;
 
   public:
     // Constructor
 
-    explicit Worker(QSemaphore *semaphore, QObject *parent = nullptr)
-        : QObject(parent), m_semaphore(semaphore) {}
+    explicit Worker(QSemaphore *semaphore,
+                    js8::OptionalWorkSignal const *optionalSignal,
+                    QObject *parent = nullptr)
+        : QObject(parent), m_semaphore(semaphore),
+          m_optionalSignal(optionalSignal) {}
 
     // Used to inform the worker that it's time to quit; the next
     // time it wakes up due to the semaphore being released, it
@@ -3988,7 +4118,9 @@ class Worker : public QObject {
         // can take a while. We only need the implementation while
         // we're running.
 
-        std::unique_ptr<Impl> impl = std::make_unique<Impl>(m_data);
+        std::unique_ptr<Impl> impl = std::make_unique<Impl>(
+            m_data, std::getenv("JS8_DISABLE_ADAPTIVE_OPTIONAL")
+                        ? nullptr : m_optionalSignal);
 
         // Wait until there's something that requires our attention,
         // which is going to either be needing to quit or needing to
@@ -4015,7 +4147,8 @@ class Worker : public QObject {
 #include "JS8.moc"
 
 JS8::Decoder::Decoder(QObject *parent)
-    : QObject(parent), m_semaphore(0), m_worker(new JS8::Worker(&m_semaphore)) {
+    : QObject(parent), m_semaphore(0),
+      m_worker(new JS8::Worker(&m_semaphore, &m_optionalPressure)) {
     m_worker->moveToThread(&m_thread);
 
     connect(&m_thread, &QThread::started, m_worker, &JS8::Worker::run);
@@ -4037,6 +4170,15 @@ void JS8::Decoder::quit() {
 void JS8::Decoder::decode() {
     m_worker->copy();
     m_semaphore.release();
+}
+
+void JS8::Decoder::pendingDecode(bool pending) noexcept {
+    m_optionalPressure.pending(pending);
+}
+
+void JS8::Decoder::nextDecodeReady(
+    std::chrono::steady_clock::time_point when) noexcept {
+    m_optionalPressure.nextReady(when);
 }
 
 /******************************************************************************/

@@ -161,6 +161,30 @@ void runZeroIterationBound() {
           "bestCw exposes the evaluated word");
 }
 
+void runOptionalCancellation() {
+    std::printf("[optional BP cancellation]\n");
+    std::array<float, N> llr{};
+    std::uint32_t state = 0xC10Cu;
+    for (auto &value : llr) {
+        state = state * 1664525u + 1013904223u;
+        value = 2.5f *
+                (static_cast<float>(state >> 8) / 8388608.0f - 1.0f);
+    }
+    std::array<int8_t, K> decoded{};
+    std::array<int8_t, N> cw{};
+    int checkpoints = 0;
+    std::function<bool()> const cancel = [&] {
+        return ++checkpoints == 4;
+    };
+    BPOptions options;
+    options.maxIterations = 80;
+    options.earlyAbort = false;
+    options.shouldCancel = &cancel;
+    auto const bp = bpdecode174(llr, decoded, cw, options);
+    check(bp.cancelled && checkpoints == 4 && bp.hardErrors < 0,
+          "cancelled extended BP cannot be mistaken for a decode");
+}
+
 void runParityFingerprint() {
     // Compare results from separately compiled mapped/linear BP binaries.
     // Includes failed last-iterate words and best words, not just successes.
@@ -225,6 +249,7 @@ int main() {
     runFailedDecode();
     runDeterminism();
     runZeroIterationBound();
+    runOptionalCancellation();
     runParityFingerprint();
 
     std::printf("\n%s (%d failure%s)\n", failures == 0 ? "ALL TESTS PASSED"
