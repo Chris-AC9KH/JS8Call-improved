@@ -819,7 +819,7 @@ void UI_Constructor::on_actionReset_Window_Sizes_triggered() {
 
     ui->mainSplitter->setSizes({ui->logHorizontalWidget->minimumHeight(),
                                 ui->mainSplitter->height() / 2,
-                                ui->macroHorizonalWidget->minimumHeight(),
+                                ui->macroHorizontalWidget->minimumHeight(),
                                 ui->mainSplitter->height() / 4});
 
     ui->textHorizontalSplitter->setSizes(

@@ -829,7 +829,7 @@ QTextEdit[transmitting=&quot;true&quot;] {
         </widget>
        </widget>
       </widget>
-      <widget class="QWidget" name="macroHorizonalWidget" native="true">
+      <widget class="QFrame" name="macroHorizontalWidget">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
          <horstretch>0</horstretch>
@@ -1104,7 +1104,7 @@ QTextEdit[transmitting=&quot;true&quot;] {
         </item>
        </layout>
       </widget>
-      <widget class="QWidget" name="controlHorizontalWidget" native="true">
+      <widget class="QFrame" name="controlHorizontalWidget">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
          <horstretch>0</horstretch>

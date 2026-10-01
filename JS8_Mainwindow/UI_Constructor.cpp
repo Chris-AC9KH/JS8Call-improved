@@ -119,6 +119,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
     ui->frame->setStyleSheet(logFrameStyle());
     ui->logWidget->setStyleSheet(Styles::LogWidgetStyle);
+    ui->macroHorizontalWidget->setStyleSheet(Styles::LogWidgetStyle);
+    ui->controlHorizontalWidget->setStyleSheet(Styles::LogWidgetStyle);
     ui->dialFreqUpButton->setStyleSheet(Styles::DialFreqUpDownButtonStyle);
     ui->dialFreqDownButton->setStyleSheet(Styles::DialFreqUpDownButtonStyle);
     ui->labCallsign->setStyleSheet(Styles::LabCallsignStyle);

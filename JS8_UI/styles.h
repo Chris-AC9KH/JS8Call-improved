@@ -256,9 +256,11 @@ namespace Styles {
 // Header Bar
 // ---------------------------------------------------------------------------
 
-/// Background style for the header bar frame (macOS).
+/// Background style for the header bar, macro and control bars (macOS)
+/// This pins the background color so dark mode theming can't make buttons
+/// invisible
 constexpr const char *LogWidgetStyle =
-    "QFrame#logWidget { background-color: #F2F2F0; }";
+    "QFrame#logWidget, QFrame#macroHorizontalWidget, QFrame#controlHorizontalWidget { background-color: #F2F2F0; }";
 
 /// Style for the small frequency up/down step buttons (macOS).
 constexpr const char *DialFreqUpDownButtonStyle = "QPushButton {"
@@ -493,9 +495,11 @@ namespace Styles {
 // Header Bar
 // ---------------------------------------------------------------------------
 
-/// Background style for the header bar frame (Windows).
+/// Background style for the header bar, macro and control bars (Windows)
+/// This pins the background color so dark mode theming can't make buttons
+/// invisible
 constexpr const char *LogWidgetStyle =
-    "QFrame#logWidget { background-color: #DDEEFF; }";
+    "QFrame#logWidget, QFrame#macroHorizontalWidget, QFrame#controlHorizontalWidget { background-color: #DDEEFF; }";
 
 /// Style for the small frequency up/down step buttons (Windows).
 constexpr const char *DialFreqUpDownButtonStyle = "QPushButton {"
@@ -719,9 +723,11 @@ namespace Styles {
 // Header Bar
 // ---------------------------------------------------------------------------
 
-/// Background style for the header bar's log/status frame (Linux/other).
+/// Background style for the header bar, macro and control bars (Linux/other)
+/// This pins the background color so dark mode theming can't make buttons
+/// invisible
 constexpr const char *LogWidgetStyle =
-    "QFrame#logWidget { background-color: #F2F2F0; }";
+    "QFrame#logWidget, QFrame#macroHorizontalWidget, QFrame#controlHorizontalWidget { background-color: #F2F2F0; }";
 
 /// Style for the small frequency up/down step buttons (Linux/other).
 constexpr const char *DialFreqUpDownButtonStyle = "QPushButton {"
