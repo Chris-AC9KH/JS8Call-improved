@@ -138,8 +138,8 @@
 #include <unordered_map>
 #include <vector>
 
-#if QT_VERSION < QT_VERSION_CHECK(6,11, 1)
-#error "Qt >= 6.11.1 is required to build JS8Call. Please upgrade your Qt toolchain."
+#if QT_VERSION < QT_VERSION_CHECK(6,12,0)
+#error "Qt >= 6.12.0 is required to build JS8Call. Please upgrade your Qt toolchain."
 #endif
 
 Q_DECLARE_LOGGING_CATEGORY(mainwindow_js8)

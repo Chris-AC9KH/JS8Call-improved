@@ -16,9 +16,9 @@ candidate policy. Read it and follow it. Do not restate it here or in a PR body.
 
 ## Building
 
-Requirements come from `CMakeLists.txt`: CMake 3.22 or newer, a C++20 compiler, Qt 6.11 or newer
+Requirements come from `CMakeLists.txt`: CMake 3.22 or newer, a C++20 compiler, Qt 6.12 or newer
 (components Multimedia, Network, SerialPort, Widgets, WebSockets), Boost 1.77 or newer, FFTW3 and
-Hamlib. Qt 6.11 is a hard floor, not a recommendation.
+Hamlib. Qt 6.12 is a hard floor, not a recommendation.
 
 The full per-platform instructions are in `docs/build_for_Linux.md`, `docs/build_for_MacOS.md` and
 `docs/build_for_Windows.md`. Read the one for the platform before running anything. If

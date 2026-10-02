@@ -113,7 +113,7 @@ option(JS8_RIG_NONE_CAN_SPLIT "Allow split operation with \"None\" as rig.")
 find_package(Boost 1.77 REQUIRED)
 find_package(FFTW3      REQUIRED COMPONENTS single threads)
 find_package(Hamlib     REQUIRED)
-find_package(Qt6   6.11 REQUIRED COMPONENTS Multimedia Network SerialPort Widgets WebSockets)
+find_package(Qt6   6.12 REQUIRED COMPONENTS Multimedia Network SerialPort Widgets WebSockets)
 
 include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${FFTW3_INCLUDE_DIRS})
