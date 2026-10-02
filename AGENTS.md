@@ -91,7 +91,7 @@ Every PR description must state:
 
 ## Where new code goes
 
-See the "Minimise code in the large files" section of `CONTRIBUTING.md`. Follow it before writing
+See the "Where code belongs" section of `CONTRIBUTING.md`. Follow it before writing
 the code, not after a reviewer asks. Extracting a large block out of `mainwindow.cpp` in response
 to review costs a whole round trip.
 

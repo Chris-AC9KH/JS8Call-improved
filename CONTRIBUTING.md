@@ -59,7 +59,18 @@
     Under no circumstances submit PR's to a release candidate branch to get your latest and greatest feature into it, change
     libraries, etc.. New features go to main, only bug fixes are submitted to a release candidate.
 
-#  Minimise code in the large files
+#  Where code belongs
+-   **Read the code documentation first.**
+    The generated documentation at https://js8call.com/JS8Call-improved/ describes what each class does and which of its
+    member functions own which job. Check it before adding code. To read it offline, generate it from your clone with
+    `.github/workflows/misc/Doxyfile`; `docs/DOXYGEN.md` shows how.
+
+-   **Extend before you add.**
+    Before writing a new function, check whether an existing one already owns the concern and extend that instead; do not
+    create a second path for the same job. A new function needs a reason, such as more than one caller or moving code out
+    of a large file (see below). New API code, commands and outbound events alike, belongs in
+    `UI_Constructor::networkMessage()` (`JS8_Mainwindow/networkMessage.cpp`).
+
 -   **The largest hand-written files are closed to substantial new code.**
     `JS8_UI/mainwindow.cpp`, `JS8_UI/Configuration.cpp` and `JS8_Mode/JS8.cpp` have grown to the point where adding to them
     makes them harder to maintain and harder to review. If a change wants more than a few dozen lines in any of these,
