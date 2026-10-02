@@ -2404,7 +2404,7 @@ void UI_Constructor::prepareSending(qint64 nowMS) {
             m_currentMessage = QString::fromLatin1(msgsent).trimmed();
             m_currentMessageBits = msgibits;
 
-            emitTxEvent(true);
+            networkMessage(Message("TX.START"), true);
             emitTones();
         }
 
@@ -3251,7 +3251,7 @@ void UI_Constructor::restoreMessage() {
  * @note Sends TX.END if the message had started keying.
  */
 void UI_Constructor::resetMessageTransmitQueue() {
-    emitTxEvent(false);
+    networkMessage(Message("TX.END"), true);
     m_txFrameCount = 0;
     m_txFrameCountSent = 0;
     m_txFrameQueue.clear();

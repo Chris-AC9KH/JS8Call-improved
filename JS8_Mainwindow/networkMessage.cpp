@@ -16,11 +16,33 @@
  * state or querying current values to send back to the client.
  *
  * @param message The network message to process
+ * @param internal true when JS8Call itself raises an outbound event, so a
+ *        client cannot fake one by sending its type
  */
-void UI_Constructor::networkMessage(Message const &message) {
+void UI_Constructor::networkMessage(Message const &message, bool internal) {
     auto type = message.type();
 
     if (type == "PING") {
+        return;
+    }
+
+    /** @brief TX.START / TX.END: sent once each per transmitted message,
+     * TX.START at its first keyed frame (never for TUNE), TX.END when it
+     * ends or is halted. Raised from prepareSending() and
+     * resetMessageTransmitQueue().
+     * @note API 3.1+
+     */
+    if (internal) {
+        bool start = type == "TX.START";
+        if (m_txEventStarted != start) {
+            m_txEventStarted = start;
+            sendNetworkMessage(type, "",
+                {
+                    {"_ID", QVariant(-1)},
+                    {"UTC", QVariant(DriftingDateTime::currentDateTimeUtc()
+                                         .toMSecsSinceEpoch())},
+                });
+        }
         return;
     }
 

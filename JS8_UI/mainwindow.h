@@ -455,10 +455,9 @@ class UI_Constructor : public QMainWindow {
 
     void emitPTT(bool on);
     void emitTones();
-    void emitTxEvent(bool start); // JS8_Mainwindow/emitTxEvent.cpp
     void udpNetworkMessage(Message const &message);
     void tcpNetworkMessage(Message const &message);
-    void networkMessage(Message const &message); // JS8_Mainwindow/networkMessage.cpp
+    void networkMessage(Message const &message, bool internal = false); // JS8_Mainwindow/networkMessage.cpp
     bool canSendNetworkMessage();
     void sendNetworkMessage(QString const &type, QString const &message);
     void sendNetworkMessage(QString const &type, QString const &message,
