@@ -1284,6 +1284,16 @@ void UI_Constructor::createControlBar()
             &UI_Constructor::handleTuneButton_clicked);
     connect(ui->tuneButton, &QPushButton::toggled, this,
             &UI_Constructor::handleTuneButton_toggled);
+    
+    // Tune is only usable while TX is enabled
+    auto syncTuneToTx = [this](bool txEnabled) {
+        if (!txEnabled && ui->tuneButton->isChecked()) {
+            ui->tuneButton->setChecked(false);
+        }
+        ui->tuneButton->setEnabled(txEnabled);
+    };
+    connect(ui->monitorTxButton, &QPushButton::toggled, this, syncTuneToTx);
+    syncTuneToTx(ui->monitorTxButton->isChecked());
 
     // Spot
     ui->spotButton->setToolTip(tr("Spot to reporting networks"));
