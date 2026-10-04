@@ -4729,6 +4729,10 @@ void UI_Constructor::on_tableWidgetCalls_cellDoubleClicked(int row, int col) {
 }
 
 void UI_Constructor::handleTuneButton_clicked(bool checked) {
+    if (checked && !ui->monitorTxButton->isChecked()) {
+        ui->tuneButton->setChecked(false);
+        return;
+    }
     static bool lastChecked = false;
     if (lastChecked == checked)
         return;
