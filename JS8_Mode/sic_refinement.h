@@ -157,6 +157,18 @@ inline bool solveSicLinearSystem3(double const normal[3][3],
     return true;
 }
 
+/**
+ * @brief Converts SIC timing to the nearest 12-kHz sample for fit and subtraction.
+ * @return The signed sample offset of the reference waveform.
+ */
+inline int sicStartSample(float seconds) {
+    return static_cast<int>(std::round(static_cast<double>(seconds) * 12000.0));
+}
+
+/**
+ * @brief Refines a decoded reference while guarding its matched correlation.
+ * @return The accepted reference and timing/frequency fit diagnostics.
+ */
 template <int SymbolSamples, std::size_t Symbols, typename Samples, typename Tones>
 SicRefinementResult refineSicReference(
     std::vector<std::complex<float>> nominal, Samples const &samples,
@@ -230,8 +242,7 @@ SicRefinementResult refineSicReference(
         }
     };
 
-    int const nominalStart =
-        static_cast<int>(std::round(static_cast<double>(dt) * sampleRate));
+    int const nominalStart = sicStartSample(dt);
     result.nominalMetric = metricFor(result.reference, nominalStart, 1);
     result.refinedMetric = result.nominalMetric;
 
@@ -929,6 +940,7 @@ SicRefinementResult refineSicReference(
 // member definition structurally unchanged (its std::array<int, NN> parameter
 // is seen as three preprocessor arguments because of the template comma) while
 // wrapping the ordinary two-argument call with post-decode refinement.
+// The caller's finalized fs supplies the timing also used for subtraction.
 #define JS8_SIC_GENREF_SELECT(_1, _2, _3, NAME, ...) NAME
 #define JS8_SIC_GENREF_DEFINITION(_1, _2, _3) \
     genjs8refsigRaw(_1, _2, _3)
@@ -941,7 +953,8 @@ SicRefinementResult refineSicReference(
             std::getenv("JS8_DISABLE_SIC_TIMING_DRIFT") == nullptr;          \
         auto sicRefinement =                                                  \
             ::js8::refineSicReference<Mode::NSPS, NN>(                       \
-                std::move(sicReference), dd, _itone, xdt2, allowTimingDrift);\
+                std::move(sicReference), dd, _itone, fs.xdtSeconds,          \
+                allowTimingDrift);                                         \
         if (decoder_js8().isDebugEnabled()) {                                \
             double const metricGainDb =                                      \
                 sicRefinement.nominalMetric > 0.0 &&                         \

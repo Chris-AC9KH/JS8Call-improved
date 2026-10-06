@@ -34,7 +34,7 @@ In the tools directory there are the following shell scripts for linux:
   and fixed-seed noise through one persistent five-mode JS8 decoder worker.
   Its "noise" input tests ghost candidates without known transmissions; the
   optional fourth argument "autosync" exercises all five modes once per
-  second (stress case). Build once normally and once with the five reference
+  second (stress case). Build once normally and once with the four reference
   switches listed at the top of decoder_cpu_benchmark.cpp to compare all
   optimizations without changing any other decoder features. Both builds
   should include -DJS8_CPU_BENCHMARK for
@@ -61,6 +61,46 @@ In the tools directory there are the following shell scripts for linux:
 - optional_work_test.cpp covers deadline and pending-queue admission without
   Qt. JS8_DISABLE_ADAPTIVE_OPTIONAL=1 disables the runtime optional-work gate
   for paired decode comparisons.
+
+- llr_frame_benchmark strong checks clean and single-symbol-interfered frames
+  at high matched-bin SNRs, across payloads and damaged-symbol positions.
+  whitening_diag --strong-interference checks one, three and six simultaneous
+  waveform signals in all five modes, with coherent likelihoods on and off.
+  Both return nonzero on a regression. decoder_aided_bp_test also checks
+  saturated check-node messages and error correction after repeated combining.
+
+- llr_frame_benchmark coherent-fallback and whitening_diag
+  --coherent-fallback-waveform exercise data-phase reversals with unchanged
+  Costas pilots. The existing second LDPC pass must retain noncoherent evidence.
+  whitening_diag --aided-noncoherent checks re-demodulation with coherent scoring
+  disabled; build it with -fsanitize=undefined -ftrivial-auto-var-init=pattern
+  to catch uninitialized extraction metadata. sic_decode_context_test.cpp
+  checks that SIC refinement uses the finalized decode timing; build it with
+  Qt6Core flags and the repository include path, as for coherent_likelihood_test.
+
+- decoder_comparison_benchmark.cpp compares complete per-mode DSP pipelines on
+  paired 12-kHz waveforms: sensitivity, impairments, collisions and noise.
+  Compile the same file twice with JS8_COMPARISON_SOURCE set to each target's
+  absolute JS8_Mode/JS8.cpp path, and use that target's include paths,
+  FrequencyTracker.cpp and generated JS8.moc/moc_JS8.cpp files. Both targets
+  need identical compiler, Qt6Core and FFTW flags. JS8_COMPARISON_LABEL names
+  the CSV build. For example, run each binary with "sensitivity 100 all" or
+  "collisions 50 A". Input hashes must match for corresponding trials.
+  Decoder state resets between trials; normal within-trial combining remains
+  active. CPU times exclude synthesis and initialization. This harness supplies
+  no live queue-pressure deadline, so it does not measure application backlog.
+  Its nominal matched-symbol SNR is not the application's reported SNR.
+  "acquisition 20 all" checks strong nominal/zero/late starts across all modes
+  and the Normal-mode seed that failed with block-coherent acquisition. It
+  returns nonzero on a missed or unexpected payload.
+  "weak-reference 100 all" sweeps -32 through -18 dB against a known 2500-Hz
+  white-noise reference. "weak-display 500 A" covers weaker matched-symbol
+  points and records the decoder's reported SNR for correct payloads. CSV
+  referenceSnrDb is the controlled signal/noise ratio; reportedSnrDb is the
+  highest correct decoded SNR in that window, or NaN if none decoded. Do not
+  equate the reported estimator with the controlled reference or omit misses.
+  "point 2000 C 8 500" checks one matched-symbol SNR with new trial seeds,
+  starting at trial 500, for an independent follow-up on a suspected difference.
 
 Decoder calibration overrides: JS8_LLR_SCALE (positive fixed multiplier,
 default 2), JS8_LLR_ERASURE_THRESH (nonnegative, default 0),

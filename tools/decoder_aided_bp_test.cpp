@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <mutex>
 
 #include <QLoggingCategory>
@@ -185,6 +186,68 @@ void runOptionalCancellation() {
           "cancelled extended BP cannot be mistaken for a decode");
 }
 
+void runBoundedMessages() {
+    std::printf("[bounded BP arithmetic]\n");
+    bool finite = true;
+    for (float value : {-std::numeric_limits<float>::infinity(), -10000.0f,
+                        -8.0f, 0.0f, 8.0f, 10000.0f,
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::quiet_NaN()}) {
+        float const bounded = js8::bp::channelLlr(value);
+        finite &= std::isfinite(bounded) && std::abs(bounded) <= 8.0f;
+    }
+    check(finite, "extreme channel evidence stays finite and bounded");
+    check(js8::bp::channelLlr(2.5f) == 2.5f &&
+              js8::bp::channelLlr(-2.5f) == -2.5f,
+          "weak channel evidence is unchanged");
+    check(std::isfinite(js8::bp::checkMessage(1.0f)) &&
+              std::isfinite(js8::bp::checkMessage(-1.0f)),
+          "saturated check products produce finite messages");
+
+    std::array<int, NN> tones{};
+    JS8::encode(0, JS8::Costas::array(ModeA::NCOSTAS),
+                "TESTTEST1234", tones.data());
+    std::array<int8_t, N> expected{};
+    for (int bit = 0; bit < N; ++bit) {
+        int const symbol = bit / 3;
+        int const global = symbol < 29 ? symbol + 7 : symbol + 14;
+        expected[bit] = (tones[global] >> (2 - bit % 3)) & 1;
+    }
+    bool recovered = true;
+    for (float magnitude : {20.0f, 100.0f, 10000.0f}) {
+        std::array<float, N> llr{};
+        for (int bit = 0; bit < N; ++bit)
+            llr[bit] = (2 * expected[bit] - 1) * magnitude;
+        llr[90] *= -1.0f;
+        std::array<int8_t, K> decoded{};
+        std::array<int8_t, N> cw{};
+        auto const bp = bpdecode174(llr, decoded, cw);
+        recovered &= bp.hardErrors == 1 && cw == expected &&
+                     checkCRC12(decoded);
+    }
+    check(recovered, "strong frames recover an equally confident wrong bit");
+
+    js8::SoftCombiner<N> combiner(true, false);
+    std::array<float, N> llr{};
+    for (int bit = 0; bit < N; ++bit)
+        llr[bit] = (2 * expected[bit] - 1) * 6.0f;
+    llr[90] *= -1.0f;
+    auto const key = combiner.makeKey(ModeA::NSUBMODE, 1000.0f, 0.0f,
+                                     llr, llr);
+    bool combinedRecovered = true;
+    for (int repeat = 1; repeat <= 20; ++repeat) {
+        auto const combined = combiner.combine(key, llr, llr,
+                                               std::chrono::seconds{60});
+        std::array<int8_t, K> decoded{};
+        std::array<int8_t, N> cw{};
+        auto const bp = bpdecode174(combined.llr0, decoded, cw);
+        combinedRecovered &= combined.repeats == repeat &&
+                             bp.hardErrors == 1 && cw == expected &&
+                             checkCRC12(decoded);
+    }
+    check(combinedRecovered, "accumulated repeats retain error correction");
+}
+
 void runParityFingerprint() {
     // Compare results from separately compiled mapped/linear BP binaries.
     // Includes failed last-iterate words and best words, not just successes.
@@ -250,6 +313,7 @@ int main() {
     runDeterminism();
     runZeroIterationBound();
     runOptionalCancellation();
+    runBoundedMessages();
     runParityFingerprint();
 
     std::printf("\n%s (%d failure%s)\n", failures == 0 ? "ALL TESTS PASSED"

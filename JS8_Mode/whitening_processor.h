@@ -38,16 +38,16 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
     /**
      * @brief Result of a whitening/LLR pass.
      *
-     * `llr0` and `llr1` are populated in column order (three outputs per
-     * symbol) to match the decoder's expectations. The boolean flags indicate
+     * `llr0` carries blended evidence; `llr1` retains the noncoherent fallback.
+     * Both use column order (three outputs per symbol). The boolean flags indicate
      * whether whitening and/or erasure were applied; `erasures` counts the
      * number of individual LLR elements that were set to zero. The `avgAbs*`
      * fields contain sum-like metrics collected during processing to aid
      * debugging and tuning.
      */
     struct Result {
-        std::array<float, 3 * ND> llr0;    ///< LLR values for the 0-hypothesis
-        std::array<float, 3 * ND> llr1;    ///< LLR values for the 1-hypothesis
+        std::array<float, 3 * ND> llr0;    ///< Primary, possibly coherent LLRs
+        std::array<float, 3 * ND> llr1;    ///< Noncoherent fallback LLRs
         bool whiteningApplied;             ///< True when whitening was applied
         bool erasureApplied;               ///< True when erasure was applied
         std::size_t erasures;              ///< Number of LLR elements erased
@@ -56,7 +56,7 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
     };
 
     /**
-     * @brief Compute noise-scaled LLR arrays for a single candidate frame.
+     * @brief Compute primary and noncoherent fallback LLRs for a candidate frame.
      *
      * The template parameters describe the matrix dimensions used by the
      * decoder: `NROWS` is the number of tones (rows), `ND` is the number of
@@ -261,6 +261,7 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
                 float const power = ps[i] * ps[i];
                 w[i] = 0.5f * power * invSigma2;
             }
+            auto const noncoherent = w;
 
             // Optionally blend conservatively estimated coherent numerators.
             // Both families share this symbol's invSigma2, so reliability
@@ -280,12 +281,13 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
 
             // Stable log-sum-exp of the tones whose natural-binary encoding has
             // bit `bit` set (given by `shift`) or clear, for a single bit group.
-            auto logSumExp = [&](int shift, int bit) -> float {
+            auto logSumExp = [](std::array<float, NROWS> const &scores,
+                               int shift, int bit) -> float {
                 float m = -std::numeric_limits<float>::infinity();
 
                 for (int i = 0; i < NROWS; ++i)
-                    if (((i >> shift) & 1) == bit && w[i] > m)
-                        m = w[i];
+                    if (((i >> shift) & 1) == bit && scores[i] > m)
+                        m = scores[i];
 
                 if (std::isinf(m))
                     return 0.0f; // empty group: contributes 0 to the diff
@@ -294,7 +296,7 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
 
                 for (int i = 0; i < NROWS; ++i)
                     if (((i >> shift) & 1) == bit)
-                        s += std::exp(w[i] - m);
+                        s += std::exp(scores[i] - m);
 
                 return m + std::log(s);
             };
@@ -302,21 +304,15 @@ template <int NROWS, int ND, int N> class WhiteningProcessor {
             // Each symbol emits three LLRs (one per bit) as the logsum-exp
             // difference across the two bit groups, combining all tones in each
             // group rather than using only the single largest magnitude.
-            result.llr0[i1] = logSumExp(2, 1) - logSumExp(2, 0);
-            result.llr0[i2] = logSumExp(1, 1) - logSumExp(1, 0);
-            result.llr0[i4] = logSumExp(0, 1) - logSumExp(0, 0);
-
-            // A global calibration preserves relative reliability between
-            // symbols and between strong and weak received frames.
-            for (int bit = i1; bit <= i4; ++bit)
-                result.llr0[bit] *= llrScale;
-
-            // llr0 and llr1 are unified: they carry the same, properly
-            // soft-calculated symbol information (pass diversity comes from the
-            // bit-range masking and LDPC feedback downstream).
-            result.llr1[i1] = result.llr0[i1];
-            result.llr1[i2] = result.llr0[i2];
-            result.llr1[i4] = result.llr0[i4];
+            for (int bit = 0; bit < 3; ++bit) {
+                int const shift = 2 - bit;
+                result.llr0[i1 + bit] =
+                    (logSumExp(w, shift, 1) - logSumExp(w, shift, 0)) * llrScale;
+                result.llr1[i1 + bit] = coherentUsable
+                    ? (logSumExp(noncoherent, shift, 1) -
+                       logSumExp(noncoherent, shift, 0)) * llrScale
+                    : result.llr0[i1 + bit];
+            }
 
             if (whiteningAvailable) {
                 // The LLRs are already noise-normalized through invSigma2, so

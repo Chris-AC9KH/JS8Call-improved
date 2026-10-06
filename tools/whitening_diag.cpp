@@ -88,6 +88,7 @@ namespace
 
         double snrLin   = std::pow(10.0, cfg.snrDb / 10.0);
         double noiseVar = (snrLin > 0.0) ? (1.0 / snrLin) : 1.0;
+        double const sampleScale = 2000.0 / std::max(1.0, std::sqrt(noiseVar));
         std::mt19937 rng(cfg.seed);
         std::normal_distribution<double> noise(0.0, std::sqrt(noiseVar));
 
@@ -122,7 +123,8 @@ namespace
         auto const count = std::min(samples.size(), std::size_t(JS8_RX_SAMPLE_SIZE));
         for (std::size_t i = 0; i < count; ++i)
         {
-            dec_data.d2[i] = static_cast<std::int16_t>(std::round(samples[i] * 2000.0));
+            dec_data.d2[i] = static_cast<std::int16_t>(
+                std::round(samples[i] * sampleScale));
         }
 
         return count;
@@ -721,6 +723,103 @@ namespace
         return violations;
     }
 
+    template <typename Mode>
+    int strong_interference_mode(int bit, bool phaseJump) {
+        constexpr std::array<char const *, 6> messages = {
+            "TESTTEST1234", "TESTTEST1235", "TESTTEST1236",
+            "TESTTEST1237", "TESTTEST1238", "TESTTEST1239"};
+        int failures = 0;
+        for (int signalCount : {1, 3, 6}) {
+            for (bool interfered : {false, true}) {
+                std::vector<double> samples(Mode::NMAX, 0.0);
+                for (int signal = 0; signal < signalCount; ++signal) {
+                    std::array<int, NN> tones{};
+                    JS8::encode(0, JS8::Costas::array(Mode::NCOSTAS),
+                                messages[signal], tones.data());
+                    double const base = 600.7 + signal * 350.0;
+                    double const baud = 12000.0 / Mode::NSPS;
+                    double phase = 0.3 + signal;
+                    double otherPhase = 1.1 + signal;
+                    for (int i = 0; i < NN * Mode::NSPS; ++i) {
+                        int const symbol = i / Mode::NSPS;
+                        phase += TAU * (base + tones[symbol] * baud) / 12000.0;
+                        double const channelPhase =
+                            phaseJump && !js8::aided::isCostasSymbol(symbol)
+                                ? std::numbers::pi : 0.0;
+                        samples[i] += 2000.0 * std::cos(phase + channelPhase);
+                        if (interfered && symbol == 44 + signal) {
+                            otherPhase += TAU *
+                                (base + (tones[symbol] ^ 1) * baud) / 12000.0;
+                            samples[i] += 2400.0 * std::cos(otherPhase);
+                        }
+                    }
+                }
+                std::mt19937 rng(0x372u);
+                std::normal_distribution<double> noise(0.0, 300.0);
+                for (std::size_t i = 0; i < samples.size(); ++i)
+                    dec_data.d2[i] = static_cast<std::int16_t>(
+                        std::round(samples[i] + noise(rng)));
+                set_mode_params(bit, Mode::NMAX, 600.7);
+                for (bool coherent : {false, true}) {
+                    auto result = run_decode(false, coherent);
+                    std::sort(result.payloads.begin(), result.payloads.end());
+                    result.payloads.erase(
+                        std::unique(result.payloads.begin(), result.payloads.end()),
+                        result.payloads.end());
+                    bool correct = result.payloads.size() ==
+                                   static_cast<std::size_t>(signalCount);
+                    for (int signal = 0; signal < signalCount; ++signal)
+                        correct &= std::find(result.payloads.begin(),
+                                             result.payloads.end(),
+                                             messages[signal]) !=
+                                   result.payloads.end();
+                    failures += !correct;
+                    std::printf("strong-waveform mode=%d signals=%d "
+                                "interfered=%d phaseJump=%d coherent=%d decodes=%zu %s\n",
+                                bit, signalCount, interfered, phaseJump, coherent,
+                                result.payloads.size(), correct ? "PASS" : "FAIL");
+                }
+            }
+        }
+        return failures;
+    }
+
+    int run_strong_interference(bool phaseJump = false) {
+        int const failures = strong_interference_mode<ModeA>(0, phaseJump) +
+                             strong_interference_mode<ModeB>(1, phaseJump) +
+                             strong_interference_mode<ModeC>(2, phaseJump) +
+                             strong_interference_mode<ModeE>(3, phaseJump) +
+                             strong_interference_mode<ModeI>(4, phaseJump);
+        return failures == 0 ? 0 : 1;
+    }
+
+    int run_aided_noncoherent() {
+        int searches = 0, wrongPayloads = 0;
+        for (char const *message : {"TESTTEST1234", "TESTTEST1235",
+                                   "AAAAAAAAAAAA", "ZZZZZZZZZZZZ"}) {
+            for (double snr : {-18.0, -20.0, -22.0}) {
+                SynthConfig cfg;
+                cfg.snrDb = snr;
+                cfg.seed = 0xC11u;
+                cfg.startPhase = 1.8;
+                cfg.freqOffsetHz = 0.35;
+                cfg.driftHzPerSec = 0.02;
+                cfg.timingShiftSmpl = ModeA::ASTART * 12000.0 +
+                                      0.03 * ModeA::NSPS;
+                auto const count = synth_frame<ModeA>(cfg, message);
+                set_mode_params(0, static_cast<int>(count), cfg.baseHz);
+                std::vector<std::string> lines;
+                auto const result = run_decode(false, false, true, true, &lines);
+                searches += countAidedToken(lines, "attempted", "1");
+                for (auto const &payload : result.payloads)
+                    wrongPayloads += payload != message;
+            }
+        }
+        std::printf("aided-noncoherent searches=%d wrongPayloads=%d\n",
+                    searches, wrongPayloads);
+        return searches > 0 && wrongPayloads == 0 ? 0 : 1;
+    }
+
     void run_aided_budget() {
         constexpr char const *messages[] = {
             "TESTTEST1234", "TESTTEST1235", "AAAAAAAAAAAA", "ZZZZZZZZZZZZ",
@@ -787,6 +886,12 @@ main(int argc, char **argv)
     QCoreApplication app(argc, argv);
 
     for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--strong-interference")
+            return run_strong_interference();
+        if (std::string(argv[i]) == "--coherent-fallback-waveform")
+            return run_strong_interference(true);
+        if (std::string(argv[i]) == "--aided-noncoherent")
+            return run_aided_noncoherent();
         if ((std::string(argv[i]) == "--llr-calibration" ||
              std::string(argv[i]) == "--llr-calibration-final" ||
              std::string(argv[i]) == "--llr-calibration-gate") && argc == 6) {

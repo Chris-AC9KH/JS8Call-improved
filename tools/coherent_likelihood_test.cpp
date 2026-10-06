@@ -750,6 +750,8 @@ void runAlphaContinuity() {
         js8::WhiteningProcessor<8, 58, 174>::process(s1, winners, 0.0f, false,
                                                      blend);
     check(atOne.llr0 != baseline.llr0, "alpha=1 uses coherent evidence");
+    check(atTiny.llr1 == baseline.llr1 && atOne.llr1 == baseline.llr1,
+          "coherent blending preserves the noncoherent second-pass evidence");
 
     // NaN coherent data can never corrupt the fallback: any non-finite
     // numerator disables blending frame-wide, so the output matches the

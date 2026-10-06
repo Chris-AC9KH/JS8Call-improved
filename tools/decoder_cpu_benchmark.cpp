@@ -1,7 +1,6 @@
 // Reproducible multi-mode decoder CPU replay. Compile twice from identical
-// sources. For the pre-optimization baseline add all five macros:
+// sources. For the pre-optimization baseline add all four macros:
 // -DJS8_BENCHMARK_UNOPTIMIZED_HOTSPOTS
-// -DJS8_BENCHMARK_ORIGINAL_COARSE_SYNC
 // -DJS8_BENCHMARK_DISABLE_BP_CACHE
 // -DJS8_BENCHMARK_FULL_BP_TANH
 // -DJS8_BENCHMARK_ORIGINAL_CHECK_TO_BIT_LOOP
@@ -12,8 +11,6 @@
 // -DJS8_BENCHMARK_ORIGINAL_RANK_SCAN compares the original candidate scan.
 // -DJS8_BENCHMARK_VERIFY_RANK_SCAN checks every unnormalized score bitwise.
 // -DJS8_CPU_BENCHMARK instruments the hot paths identically in both builds.
-// -DJS8_BENCHMARK_VERIFY_COARSE_SYNC compares every cached coarse metric with
-// the original implementation bit-for-bit (verification only, not timing).
 // Build (replace the moc_JS8.cpp path if the autogen layout differs):
 // clang++ -std=c++20 -O2 -I. -Ibuild/JS8Call_autogen/include \
 //   $(pkg-config --cflags Qt6Core fftw3f) tools/decoder_cpu_benchmark.cpp \
@@ -70,7 +67,6 @@ std::atomic<std::uint64_t> benchmarkSyncCalls{0};
 std::atomic<std::uint64_t> benchmarkSyncNanos{0};
 std::atomic<std::uint64_t> benchmarkBpCalls{0};
 std::atomic<std::uint64_t> benchmarkBpNanos{0};
-std::atomic<std::uint64_t> benchmarkSyncMismatches{0};
 std::atomic<std::uint64_t> benchmarkCandidateGenCalls{0};
 std::atomic<std::uint64_t> benchmarkCandidateGenNanos{0};
 std::atomic<std::uint64_t> benchmarkBasebandCalls{0};
@@ -486,10 +482,6 @@ int main(int argc, char **argv) {
                 benchmarkBpBitToCheckNanos.load() / 1.0e6,
                 benchmarkBpTanhNanos.load() / 1.0e6,
                 benchmarkBpCheckToBitNanos.load() / 1.0e6);
-#endif
-#ifdef JS8_BENCHMARK_VERIFY_COARSE_SYNC
-    std::printf("coarseSyncMismatches=%llu\n",
-                static_cast<unsigned long long>(benchmarkSyncMismatches.load()));
 #endif
 #ifdef JS8_BENCHMARK_VERIFY_RANK_SCAN
     std::printf("candidateScoresCompared=%llu candidateScoreMismatches=%llu\n",

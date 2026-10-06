@@ -8,6 +8,7 @@
 #include "JS8.h"
 #include "JS8_Include/commons.h"
 #include "JS8_Mode/FrequencyTracker.h"
+#include "JS8_Mode/bp_math.h"
 #include "JS8_Mode/coherent_likelihood.h"
 #include "JS8_Mode/whitening_processor.h"
 #include "decoder_aided_redemod.h"
@@ -820,8 +821,9 @@ constexpr BPEdgeSlots BP_EDGE_SLOTS = [] {
 static_assert(BP_EDGE_SLOTS.valid,
               "every BP edge must occur exactly once in both parity tables");
 
-// Belief Propagation Decoder
-
+/** @brief Decodes bounded channel evidence while retaining failed-word feedback.
+ *  @return Convergence, syndrome and cancellation state for this BP attempt.
+ */
 BPResult bpdecode174(std::array<float, N> const &llr,
                      std::array<int8_t, K> &decoded,
                      std::array<int8_t, N> &cw,
@@ -847,7 +849,7 @@ BPResult bpdecode174(std::array<float, N> const &llr,
 #endif
     std::array<float, N> scaledLlr = {};
     for (int i = 0; i < N; ++i)
-        scaledLlr[i] = llr[i] * options.llrScale;
+        scaledLlr[i] = js8::bp::channelLlr(llr[i] * options.llrScale);
 
     // Initialize messages and variables.
     std::array<std::array<float, BP_MAX_CHECKS>, N> tov = {};
@@ -992,7 +994,7 @@ BPResult bpdecode174(std::array<float, N> const &llr,
 #endif
                             Tmn *= tanhtoc[ichk][k];
                     }
-                    tov[i][j] = 2.0f * std::atanh(-Tmn);
+                    tov[i][j] = js8::bp::checkMessage(Tmn);
                 }
             }
         }
@@ -1005,7 +1007,7 @@ BPResult bpdecode174(std::array<float, N> const &llr,
                         Tmn *= tanhtoc[ichk][k];
                 int const bit = Nm[ichk].neighbors[edge];
                 tov[bit][BP_EDGE_SLOTS.inBit[ichk][edge]] =
-                    2.0f * std::atanh(-Tmn);
+                    js8::bp::checkMessage(Tmn);
             }
         }
 #endif
@@ -1251,9 +1253,6 @@ template <typename Mode> class DecodeMode {
                               7>,
                    3>;
     SyncWaveforms csyncs;
-    // The coarse frequency grid is identical for all timing offsets and
-    // candidates of this mode. Construct each exact pilot reference once.
-    std::array<SyncWaveforms, 2 * NFSRCH + 1> coarseCsyncs;
     alignas(64) std::array<std::complex<float>, Mode::NDOWNSPS> csymb;
     alignas(64) std::array<std::complex<float>, Mode::NMAX> filter;
     alignas(64) std::array<std::complex<float>, Mode::NMAX> cfilt;
@@ -1334,8 +1333,8 @@ template <typename Mode> class DecodeMode {
 
     /** First-pass and aided re-demodulation share these LLR outputs. */
     struct ToneBinLlrs {
-        std::array<float, N> llr0; ///< Normalized LLRs (0-hypothesis vector).
-        std::array<float, N> llr1; ///< Normalized LLRs (1-hypothesis vector).
+        std::array<float, N> llr0; ///< Primary, possibly coherent LLRs.
+        std::array<float, N> llr1; ///< Noncoherent fallback LLRs.
         js8::CoherentLikelihoodTelemetry coherentTelemetry; ///< Coherent path.
     };
 
@@ -1629,35 +1628,14 @@ template <typename Mode> class DecodeMode {
 
         js8_downsample(f1);
 
-        // Jointly search timing and coarse residual frequency. Coherent
-        // integration across seven symbols is much more sensitive to residual
-        // frequency error than the legacy per-symbol metric, so timing cannot
-        // safely be selected at delf=0 alone.
-
         int i0 = static_cast<int>(std::round((xdt + Mode::ASTART) * FS2));
         float smax = 0.0f;
 
         for (int idt = i0 - Mode::NQSYMBOL; idt <= i0 + Mode::NQSYMBOL; ++idt) {
-            for (int ifr = -NFSRCH; ifr <= NFSRCH; ++ifr) {
-                float const delf = ifr * 0.5f;
-#ifdef JS8_BENCHMARK_ORIGINAL_COARSE_SYNC
-                float const candidateSync = syncjs8d(idt, delf);
-#else
-                float const candidateSync = syncjs8d<true>(
-                    idt, delf, &coarseCsyncs[ifr + NFSRCH]);
-#endif
-#ifdef JS8_BENCHMARK_VERIFY_COARSE_SYNC
-                float const originalSync = syncjs8d(idt, delf);
-                if (std::memcmp(&candidateSync, &originalSync,
-                                sizeof(candidateSync)) != 0)
-                    ++benchmarkSyncMismatches;
-#endif
-
-                if (candidateSync > smax) {
-                    smax = candidateSync;
-                    ibest = idt;
-                    delfbest = delf;
-                }
+            float const candidateSync = syncjs8d(idt, 0.0f);
+            if (candidateSync > smax) {
+                smax = candidateSync;
+                ibest = idt;
             }
         }
 
@@ -1665,15 +1643,11 @@ template <typename Mode> class DecodeMode {
 
         float const xdt2 = ibest * DT2;
 
-        // Refine frequency around the best 0.5 Hz grid point with 0.1 Hz
-        // spacing, keeping timing fixed at the jointly selected offset.
-
         i0 = static_cast<int>(std::round(xdt2 * FS2));
-        float const coarseDelf = delfbest;
         smax = 0.0f;
 
-        for (int ifr = -5; ifr <= 5; ++ifr) {
-            float const delf = coarseDelf + ifr * 0.1f;
+        for (int ifr = -NFSRCH; ifr <= NFSRCH; ++ifr) {
+            float const delf = ifr * 0.5f;
             float const candidateSync = syncjs8d(i0, delf);
 
             if (candidateSync > smax) {
@@ -1856,13 +1830,12 @@ template <typename Mode> class DecodeMode {
             if (m_enableCoherentData) {
                 for (int i = 0; i < NROWS; ++i)
                     complexS2[i][k] = csymb[i] / 1000.0f;
-                symbolBaseStarts[k] = i1Base;
-                symbolTimingShifts[k] = i1 - i1Base;
-                symbolTrackerHz[k] = freqTracker.enabled()
-                                         ? static_cast<float>(
-                                               freqTracker.currentHz())
-                                         : 0.0f;
             }
+            symbolBaseStarts[k] = i1Base;
+            symbolTimingShifts[k] = i1 - i1Base;
+            symbolTrackerHz[k] = freqTracker.enabled()
+                                     ? static_cast<float>(freqTracker.currentHz())
+                                     : 0.0f;
 
             if (freqTracker.enabled() || timingTracker.enabled()) {
                 bool const isPilot =
@@ -1915,9 +1888,8 @@ template <typename Mode> class DecodeMode {
         }
 #endif
 
-        // Compute a soft Costas quality metric using all pilot-bin power. Keep
-        // the legacy winner count for UI/debugging, but do not use it as the
-        // acceptance gate.
+        // Normal candidates use master's pilot gate; optional deep candidates
+        // can also qualify on soft pilot power.
 
         int nsync = 0;
         double expectedPower = 0.0;
@@ -1959,11 +1931,13 @@ template <typename Mode> class DecodeMode {
 
         if (decoder_js8().isDebugEnabled()) {
             qCDebug(decoder_js8)
-                << "coherent sync" << sync << "residualHz" << delfbest
+                << "symbol sync" << sync << "residualHz" << delfbest
                 << "nsync" << nsync << "softCostas" << softCostas;
         }
 
-        if (!std::isfinite(softCostas) || softCostas < SOFT_COSTAS_MIN) {
+        if (nsync <= 6 &&
+            (!optionalCandidate || !std::isfinite(softCostas) ||
+             softCostas < SOFT_COSTAS_MIN)) {
             logTracker("sync_fail");
             return std::nullopt;
         }
@@ -2020,9 +1994,7 @@ template <typename Mode> class DecodeMode {
         bool rescueAttempted = false;
 
 #ifndef JS8_BENCHMARK_DISABLE_BP_CACHE
-        // The current two LLR families are identical, so pass 2 often repeats
-        // the same normal BP calls as pass 1. Cache only this candidate's two
-        // first-pass snapshots; do not change the pass schedule or bookkeeping.
+        // Reuse BP only when the fallback input matches a first-pass snapshot.
         struct BPSnapshot {
             std::array<float, N> input{};
             BPOptions options{};
@@ -3238,53 +3210,43 @@ template <typename Mode> class DecodeMode {
     // frequency adjustment. Used to identify the best alignment for further
     // decoding.
 
-    template <bool Cached = false>
-    float syncjs8d(int const i0, float const delf,
-                   SyncWaveforms const *const cached = nullptr) {
+    /** @brief Scores each available Costas symbol independently, as in master.
+     *  @return The summed per-symbol matched-correlation power.
+     */
+    float syncjs8d(int const i0, float const delf) {
 #ifdef JS8_CPU_BENCHMARK
         BenchmarkScope benchmarkScope{benchmarkSyncCalls, benchmarkSyncNanos};
 #endif
-        constexpr float FS2 = 12000.0f / Mode::NDOWN;
-        std::complex<float> freqStep;
-        if constexpr (!Cached) {
-            float const dphi = TAU * delf / FS2;
-            freqStep = std::polar(1.0f, dphi);
+        constexpr float BASE_DPHI = TAU * (1.0f / (12000.0f / Mode::NDOWN));
+        std::array<std::complex<float>, Mode::NDOWNSPS> freqAdjust;
+        if (delf != 0.0f) {
+            float const dphi = BASE_DPHI * delf;
+            float phi = 0.0f;
+            for (int i = 0; i < Mode::NDOWNSPS; ++i) {
+                freqAdjust[i] = std::polar(1.0f, phi);
+                if (phi = std::fmod(phi + dphi, TAU); phi < 0.0f)
+                    phi += TAU;
+            }
+        } else {
+            freqAdjust.fill(std::complex<float>{1.0f, 0.0f});
         }
+
         float syncPower = 0.0f;
-
-        // Correlate coherently across each full 7-symbol Costas block. Reset
-        // the residual-frequency phase between blocks, then combine the three
-        // block powers noncoherently because phase across the intervening data
-        // symbols is not known reliably enough to preserve.
         for (int block = 0; block < 3; ++block) {
-            std::complex<float> blockCorrelation{0.0f, 0.0f};
-            std::complex<float> freqPhase{1.0f, 0.0f};
-            bool complete = true;
-
             for (int symbol = 0; symbol < 7; ++symbol) {
                 int const offset =
                     36 * block * Mode::NDOWNSPS + i0 + symbol * Mode::NDOWNSPS;
 
-                if (offset < 0 || offset + Mode::NDOWNSPS > Mode::NP2) {
-                    complete = false;
-                    break;
-                }
-
-                for (int sample = 0; sample < Mode::NDOWNSPS; ++sample) {
-                    std::complex<float> reference;
-                    if constexpr (Cached)
-                        reference = (*cached)[block][symbol][sample];
-                    else
-                        reference = freqPhase * csyncs[block][symbol][sample];
-                    blockCorrelation +=
-                        cd0[offset + sample] * std::conj(reference);
-                    if constexpr (!Cached)
-                        freqPhase *= freqStep;
+                if (offset >= 0 && offset + Mode::NDOWNSPS <= Mode::NP2) {
+                    syncPower += std::norm(std::transform_reduce(
+                        freqAdjust.begin(), freqAdjust.end(), cd0.begin() + offset,
+                        std::complex<float>{}, std::plus<>{},
+                        [&](auto const &fa, auto const &cd) {
+                            return cd * std::conj(
+                                fa * csyncs[block][symbol][&fa - &freqAdjust[0]]);
+                        }));
                 }
             }
-
-            if (complete)
-                syncPower += std::norm(blockCorrelation);
         }
 
         return syncPower;
@@ -3345,7 +3307,7 @@ template <typename Mode> class DecodeMode {
 #ifdef JS8_CPU_BENCHMARK
         BenchmarkScope benchmarkScope{benchmarkSicCalls, benchmarkSicNanos};
 #endif
-        auto const nstart = static_cast<int>(dt * 12000.0f);
+        auto const nstart = js8::sicStartSample(dt);
         std::size_t const cref_start =
             (nstart < 0) ? static_cast<std::size_t>(-nstart) : 0;
         std::size_t const dd_start =
@@ -3638,24 +3600,6 @@ template <typename Mode> class DecodeMode {
                 phia = std::fmod(phia + dphia, TAU);
                 phib = std::fmod(phib + dphib, TAU);
                 phic = std::fmod(phic + dphic, TAU);
-            }
-        }
-
-        constexpr float FS2 = 12000.0f / Mode::NDOWN;
-        for (int ifr = -NFSRCH; ifr <= NFSRCH; ++ifr) {
-            float const delf = ifr * 0.5f;
-            float const dphi = TAU * delf / FS2;
-            std::complex<float> const freqStep = std::polar(1.0f, dphi);
-            auto &references = coarseCsyncs[ifr + NFSRCH];
-            for (int block = 0; block < 3; ++block) {
-                std::complex<float> phase{1.0f, 0.0f};
-                for (int symbol = 0; symbol < 7; ++symbol) {
-                    for (int sample = 0; sample < Mode::NDOWNSPS; ++sample) {
-                        references[block][symbol][sample] =
-                            phase * csyncs[block][symbol][sample];
-                        phase *= freqStep;
-                    }
-                }
             }
         }
 

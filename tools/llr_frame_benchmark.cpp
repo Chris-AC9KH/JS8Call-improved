@@ -10,6 +10,7 @@
 //   -o /tmp/llr_frame_benchmark
 // Usage: llr_frame_benchmark [trials-per-SNR=200] [first-SNR-dB=4] \
 //                              [last-SNR-dB=10] [step-dB=0.5]
+// Run "llr_frame_benchmark strong" for strong-frame interference regression.
 
 #include <QLoggingCategory>
 #include <algorithm>
@@ -246,9 +247,92 @@ std::vector<Setting> settings(std::string_view selection) {
                 result.push_back({"calibrated", scale, threshold});
     return result;
 }
+
+int strongInterference() {
+    int failures = 0;
+    std::printf("binSnrDb,legacy,new,wrongPayload,trials\n");
+    for (double snr : {10.0, 15.0, 20.0, 30.0}) {
+        int legacyHits = 0, currentHits = 0, wrongPayloads = 0, trials = 0;
+        for (unsigned seed = 0; seed < 32; ++seed) {
+            Frame const clean = synthesize(snr, seed);
+            for (int position : {0, 7, 16, 30, 48, 57}) {
+                for (int mask : {0, 1, 2, 4, 7}) {
+                    Frame frame = clean;
+                    if (mask != 0) {
+                        int const original =
+                            (frame.expected[3 * position] << 2) |
+                            (frame.expected[3 * position + 1] << 1) |
+                            frame.expected[3 * position + 2];
+                        int const other = original ^ mask;
+                        frame.magnitudes[other][position] = 1.2f;
+                        frame.winners[position] = other;
+                    }
+                    auto const result = Processor::process(
+                        frame.magnitudes, frame.winners, 0.0f, false,
+                        std::nullopt, 2.0f);
+                    bool const oldSuccess = decode(
+                        legacy(frame, 0.25f), frame.expected, 0.25f);
+                    bool const success = decode(
+                        {result.llr0, result.llr1}, frame.expected, 0.0f);
+                    legacyHits += oldSuccess;
+                    currentHits += success;
+                    failures += !success;
+                    std::array<int8_t, K> decoded{};
+                    std::array<int8_t, N> cw{};
+                    auto const bp = bpdecode174(result.llr0, decoded, cw);
+                    wrongPayloads += bp.hardErrors >= 0 &&
+                                     checkCRC12(decoded) && cw != frame.expected;
+                    ++trials;
+                }
+            }
+        }
+        failures += wrongPayloads;
+        std::printf("%.0f,%d,%d,%d,%d\n", snr, legacyHits, currentHits,
+                    wrongPayloads, trials);
+    }
+    return failures == 0 ? 0 : 1;
+}
+
+int coherentFallback() {
+    int failures = 0;
+    for (double snr : {10.0, 20.0}) {
+        int baselineHits = 0, blendedHits = 0;
+        for (unsigned trial = 0; trial < 64; ++trial) {
+            Frame frame = synthesize(snr, trial);
+            if (frame.blend) {
+                // A pi data-phase jump reverses the projection, not the pilot fit.
+                double const amplitude2 = frame.blend->amplitude *
+                                          frame.blend->amplitude;
+                for (auto &row : frame.blend->numerators)
+                    for (float &value : row)
+                        value = static_cast<float>(-value - amplitude2);
+            }
+            auto const baseline = Processor::process(
+                frame.magnitudes, frame.winners, 0.0f, false,
+                std::nullopt, 2.0f);
+            auto const blended = Processor::process(
+                frame.magnitudes, frame.winners, 0.0f, false,
+                frame.blend, 2.0f);
+            bool const decodedBaseline = decode(
+                {baseline.llr0, baseline.llr1}, frame.expected, 0.0f);
+            bool const decodedBlended = decode(
+                {blended.llr0, blended.llr1}, frame.expected, 0.0f);
+            baselineHits += decodedBaseline;
+            blendedHits += decodedBlended;
+            failures += decodedBaseline && !decodedBlended;
+        }
+        std::printf("coherent-fallback binSnrDb=%.0f baseline=%d blended=%d "
+                    "trials=64\n", snr, baselineHits, blendedHits);
+    }
+    return failures == 0 ? 0 : 1;
+}
 } // namespace
 
 int main(int argc, char **argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "strong")
+        return strongInterference();
+    if (argc > 1 && std::string_view(argv[1]) == "coherent-fallback")
+        return coherentFallback();
     int const trials = argc > 1 ? std::atoi(argv[1]) : 200;
     double const first = argc > 2 ? std::atof(argv[2]) : 4.0;
     double const last = argc > 3 ? std::atof(argv[3]) : 10.0;
