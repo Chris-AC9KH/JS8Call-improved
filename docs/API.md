@@ -243,6 +243,13 @@ Sets TUNE setting on or off
 
 NOTE: Both the SET_TUNE *and* PTT response messages are triggered. As there is a built-in max time on the tuning, no GET call exists.
 
+> [!NOTE]
+> `API >= 3.1`: refused while TX is off, as the GUI greys out TUNE. The response carries `value` false and an `ERROR`, and no `RIG.PTT` follows.
+
+| Response |
+|----------|
+|{"params":{"ERROR":"Cannot tune while TX is off","_ID":270422213693,"value":false},"type":"RIG.SET_TUNE","value":""}|
+
 
 # RIG.TX_HALT
 `API >= 3.0`

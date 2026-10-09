@@ -83,11 +83,20 @@ void UI_Constructor::networkMessage(Message const &message, bool internal) {
     }
 
     /** @brief RIG.SET_TUNE
-     * Turns TUNE on and off
+     * Turns TUNE on and off; refused while TX is off
      * @note API 2.6+
      */
     if (type == "RIG.SET_TUNE") {
         auto value = QVariant(message.value());
+        // the GUI greys out Tune while TX is off
+        if (value.toBool() && !ui->tuneButton->isEnabled()) {
+            sendNetworkMessage("RIG.SET_TUNE", "", {
+                {"_ID", id},
+                {"value", false},
+                {"ERROR", QString("Cannot tune while TX is off")},
+            });
+            return;
+        }
         UI_Constructor::handleTuneButton_clicked(value.toBool());
           sendNetworkMessage("RIG.SET_TUNE", "", {
             {"_ID", id},
