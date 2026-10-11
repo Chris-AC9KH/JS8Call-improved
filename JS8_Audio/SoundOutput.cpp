@@ -38,6 +38,7 @@ bool SoundOutput::checkStream() const {
             break;
 
         case QtAudio::NoError:
+            default: // Includes the deprecated UnderrunError, which Qt never emits
             result = true;
             break;
         }

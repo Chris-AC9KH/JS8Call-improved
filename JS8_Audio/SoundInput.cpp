@@ -41,6 +41,7 @@ bool SoundInput::audioError() const {
             break;
 
         case QtAudio::NoError:
+            default: // Includes the deprecated UnderrunError, which Qt never emits
             result = false;
             break;
         }
