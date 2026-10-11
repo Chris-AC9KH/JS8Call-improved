@@ -5332,8 +5332,6 @@ void UI_Constructor::updateTextWordCheckerDisplay() {
 }
 
 void UI_Constructor::updateTxButtonDisplay() {
-    // can we transmit at all?
-    bool canTransmit = ensureCanTransmit();
     
     update_dynamic_property(ui->monitorTxButton, "transmitting", m_transmitting);
 
