@@ -71,8 +71,22 @@ set(PROJECT_SUMMARY_DESCRIPTION "${PROJECT_NAME} - Digital Modes for Weak Signal
 set(PROJECT_DESCRIPTION "${PROJECT_SUMMARY_DESCRIPTION}
  ${PROJECT_NAME} is a computer program designed to facilitate amateur radio communication using very weak signals.")
 
-#------------------------------------------------------------------------------#
-# Add our own CMake modules.
+#------------------------------------------------------------------------------
+# CMake find modules
+#
+# We intentionally keep a small set of custom Find modules in CMake/Modules
+# to support our bundled js8lib layout across platforms. These override or
+# augment the default CMake discovery logic when needed.
+#
+# Actively used:
+#   - FindFFTW3.cmake    : Locates FFTW3 (float + threads) in js8lib
+#   - FindHamlib.cmake   : Locates Hamlib 4.x in js8lib (depends on LibFindMacros)
+#   - LibFindMacros.cmake: Helper macros used by custom Find modules
+#   - FindUsb.cmake      : Locates libusb when not provided by the system
+#
+# Removed/unused (historical or replaced by other tooling):
+#   - NSIS.template.in, GetPrerequisites.cmake, GetGitRevisionDescription(.in),
+#     FindGitSubversion.cmake, QtAxMacros.cmake
 #------------------------------------------------------------------------------#
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMake/Modules")
