@@ -20,7 +20,7 @@ Windows 11
 ### Notes On Installation of Qt6
 
 - Recommended location for your Qt install is `C:\Qt`
-- During installation of Qt, select under Additional Libraries to get Qt Multimedia, QtSerialPort, QtWebSockets and get the LLVM-MINGW 17.0.6 toolchain.
+- During installation of Qt, select under Additional Libraries to get Qt Multimedia, QtSerialPort, QtWebSockets and get the LLVM-MinGW 22.1.7 toolchain.
 - At the bottom of the list make sure to get Qt Creator.
 
 ### Files, Directories and Libraries
@@ -41,7 +41,7 @@ Windows 11
 2) Change CMAKE_INSTALL_PREFIX to Program Files (not x86)
 3) Replace the entire CMAKE_PREFIX_PATH with the following
 ```
-%{Qt:QT_INSTALL_PREFIX};C:\development\js8lib\boost-1.88;C:\development\js8lib\hamlib-4.7.1;C:\development\js8lib\fftw3;C:\development\js8lib\libusb-1.0.29
+%{Qt:QT_INSTALL_PREFIX};C:\development\js8lib\boost-1.88;C:\development\js8lib\hamlib-4.7.2;C:\development\js8lib\fftw3;C:\development\js8lib\libusb-1.0.29
 ```
 -  Click on the Run CMake button just below the CMake Settings and you should get a successful configuration for this kit
 
@@ -51,11 +51,11 @@ The Initial Configuration is what the raw CMake run generates. The Current Confi
 
 1) Move down to Build Steps and click on Add Build Step -> Custom Process Step. In the Command enter `cmd.exe`  Remove the entry from the Working directory and leave it blank. Then copy and paste this to the Arguments box
 ```
-cd C:\development\JS8Call-improved\build\Desktop_Qt_6_11_1_llvm_mingw_64_bit-Release && move JS8Call.exe .\JS8Call
+cd C:\development\JS8Call-improved\build\Desktop_Qt_6_12_0_llvm_mingw_64_bit_Release && move JS8Call.exe .\JS8Call
 ```
 2) Add another Build Step and in the Command box enter `cmd.exe` then copy and paste this to the Arguments box
 ```
-cd C:\development\JS8Call-improved\build\Desktop_Qt_6_11_1_llvm_mingw_64_bit-Release && copy C:\development\js8lib\dll\*.dll .\JS8Call
+cd C:\development\JS8Call-improved\build\Desktop_Qt_6_12_0_llvm_mingw_64_bit_Release && copy C:\development\js8lib\dll\*.dll .\JS8Call
 ```
 You can now click on the hammer in the lower left and the JS8Call-improved project should build. After the build completes you will find a folder inside the build -> (kit name) directory called JS8Call-improved. It will contain all the libraries the program needs to run, along with the JS8Call-improved executable. At this point, you can use a Windows Installer package creator like NSIS or Inno Setup to create a Windows installer if you wish. Or if you are building only for your local computer, you can move the JS8Call folder to `C:\Program Files`, create a shortcut to the `JS8Call.exe` executable, and place the shortcut on your desktop to launch the program.
 
