@@ -349,6 +349,7 @@ target_sources(
   JS8_Transceiver/HamlibTransceiver.cpp
   JS8_Transceiver/HRDTransceiver.cpp
   JS8_Transceiver/PollingTransceiver.cpp
+  JS8_Transceiver/TCITransceiver.cpp
   JS8_Transceiver/Transceiver.cpp
   JS8_Transceiver/TransceiverBase.cpp
   JS8_Transceiver/TransceiverFactory.cpp

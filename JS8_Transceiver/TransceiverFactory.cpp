@@ -8,6 +8,7 @@
 #include "EmulateSplitTransceiver.h"
 #include "HRDTransceiver.h"
 #include "HamlibTransceiver.h"
+#include "TCITransceiver.h"
 
 #include <QMetaType>
 
@@ -25,6 +26,7 @@ enum // supported non-hamlib radio interfaces
     NonHamlibBaseId = 9899,
     CommanderId,
     HRDId,
+    TCIId,
 };
 }
 
@@ -33,6 +35,7 @@ TransceiverFactory::TransceiverFactory() {
     DXLabSuiteCommanderTransceiver::register_transceivers(&transceivers_,
                                                           CommanderId);
     HRDTransceiver::register_transceivers(&transceivers_, HRDId);
+    TCITransceiver::register_transceivers(&transceivers_, TCIId);
 }
 
 TransceiverFactory::~TransceiverFactory() {
@@ -112,6 +115,24 @@ TransceiverFactory::create(ParameterPack const &params,
             std::move(basic_transceiver), params.network_port,
             PTT_method_CAT == params.ptt_type, params.audio_source,
             params.poll_interval});
+        if (target_thread) {
+            result->moveToThread(target_thread);
+        }
+    } break;
+
+    case TCIId: {
+        std::unique_ptr<TransceiverBase> basic_transceiver;
+        if (PTT_method_CAT != params.ptt_type) {
+            basic_transceiver.reset(
+                new HamlibTransceiver{params.ptt_type, params.ptt_port});
+            if (target_thread) {
+                basic_transceiver.get()->moveToThread(target_thread);
+            }
+        }
+
+        result.reset(new TCITransceiver{std::move(basic_transceiver),
+                                        params.network_port,
+                                        PTT_method_CAT == params.ptt_type});
         if (target_thread) {
             result->moveToThread(target_thread);
         }
