@@ -109,7 +109,7 @@ auto freqPerDiv(float const fSpan) {
 
 CPlotter::CPlotter(QWidget *parent)
     : QWidget{parent}, m_freqPerPixel{m_binsPerPixel * FFT_BIN_WIDTH},
-      m_scaler1D{m_waterfallAvg, m_binsPerPixel}, m_scaler2D{m_h2},
+      m_scaler1D{m_waterfallAvg, m_binsAveraged}, m_scaler2D{m_h2},
       m_replotTimer{new QTimer(this)}, m_resizeTimer{new QTimer(this)} {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -237,10 +237,12 @@ void CPlotter::drawData(WF::SWide swide, WF::State const state) {
             // supplied value function.
 
             for (auto x = 0; x < m_w; ++x) {
-                auto const first = start + x * m_binsPerPixel;
+                auto const first =
+                    start + static_cast<std::size_t>(
+                                x * m_freqPerPixel / FFT_BIN_WIDTH + 0.5f);
 
-                addPoint(x, value(std::reduce(first, first + m_binsPerPixel) /
-                                  m_binsPerPixel));
+                addPoint(x, value(std::reduce(first, first + m_binsAveraged) /
+                                  m_binsAveraged));
             }
         };
 
@@ -628,9 +630,29 @@ void CPlotter::resize() {
             return pixmap;
         };
 
+        auto const oldWidth = m_w;
+
         m_w = size().width();
         m_h2 = m_percent2D * (size().height() - 30) / 100.0;
         m_h1 = size().height() - m_h2;
+
+        // When the span fits the width, the stored waterfall rows were laid
+        // out for the old width; stretch them to the new one so the history
+        // stays aligned with the scale.
+
+        rescale();
+        if (m_fitSpan && oldWidth > 0 && oldWidth != m_w) {
+            for (auto &&v : m_replot) {
+                if (auto *row = std::get_if<WF::SWide>(&v)) {
+                    auto const old = *row;
+                    auto const last =
+                        std::min(oldWidth, static_cast<int>(old.size())) - 1;
+                    for (auto x = 0;
+                         x < std::min(m_w, static_cast<int>(row->size())); ++x)
+                        (*row)[x] = old[std::min(last, x * oldWidth / m_w)];
+                }
+            }
+        }
 
         // We want our 3 main pixmaps sized to occupy our entire height,
         // and to be completely filled with an opaque color, since we're
@@ -681,6 +703,23 @@ bool CPlotter::shouldDrawSpectrum(WF::State const state) const {
 
     return m_spectrum == Spectrum::Current ? state.testFlag(WF::Sink::Current)
                                            : state.testFlag(WF::Sink::Summary);
+}
+
+// Pixel scale: either a whole number of FFT bins per pixel, or, when the
+// span fits the width, whatever spreads start to end across it, averaging
+// the bins each pixel covers.
+
+void CPlotter::rescale() {
+    if (m_fitSpan && m_w > 0) {
+        m_freqPerPixel =
+            std::max(m_endFreq - m_startFreq, 100) / static_cast<float>(m_w);
+        m_binsAveraged =
+            std::max(1, static_cast<int>(m_freqPerPixel / FFT_BIN_WIDTH));
+    } else {
+        m_freqPerPixel = m_binsPerPixel * FFT_BIN_WIDTH;
+        m_binsAveraged = m_binsPerPixel;
+    }
+    m_scaler1D.rescale();
 }
 
 bool CPlotter::in30MBand() const {
@@ -735,8 +774,7 @@ void CPlotter::mouseReleaseEvent(QMouseEvent *event) {
 void CPlotter::setBinsPerPixel(int const binsPerPixel) {
     if (m_binsPerPixel != binsPerPixel) {
         m_binsPerPixel = std::max(1, binsPerPixel);
-        m_freqPerPixel = m_binsPerPixel * FFT_BIN_WIDTH;
-        m_scaler1D.rescale();
+        rescale();
         drawMetrics();
         drawFilter();
         drawDials();
@@ -748,6 +786,28 @@ void CPlotter::setColors(Colors const &colors) {
     if (m_colors != colors) {
         m_colors = colors;
         replot();
+    }
+}
+
+void CPlotter::setEndFreq(int const endFreq) {
+    if (m_endFreq != endFreq) {
+        m_endFreq = endFreq;
+        rescale();
+        drawMetrics();
+        drawFilter();
+        drawDials();
+        update();
+    }
+}
+
+void CPlotter::setFitSpan(bool const fitSpan) {
+    if (m_fitSpan != fitSpan) {
+        m_fitSpan = fitSpan;
+        rescale();
+        drawMetrics();
+        drawFilter();
+        drawDials();
+        update();
     }
 }
 
@@ -817,6 +877,7 @@ void CPlotter::setPlotZero(int const plotZero) {
 void CPlotter::setStartFreq(int const startFreq) {
     if (m_startFreq != startFreq) {
         m_startFreq = startFreq;
+        rescale();
         drawMetrics();
         drawFilter();
         update();
