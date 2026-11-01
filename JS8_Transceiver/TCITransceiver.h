@@ -27,6 +27,11 @@ class QWebSocket;
  *
  * A wrapped transceiver, when given, supplies PTT by a method other than
  * CAT, as for the other network rig interfaces.
+ *
+ * With TCI audio the receiver audio stream and transmit audio travel over
+ * the same connection, so no sound card is needed. The stream is set up
+ * after READY at 48 kHz, and transmit audio is sent in whatever format and
+ * channel count each TX_CHRONO request asks for.
  */
 class TCITransceiver final : public TransceiverBase {
     Q_OBJECT; // for translation context
@@ -45,11 +50,14 @@ class TCITransceiver final : public TransceiverBase {
      * @param wrapped Transceiver for non-CAT PTT, or null.
      * @param address Server as host, host:port or ws://host:port.
      * @param use_for_ptt Key the radio with TCI TRX commands.
+     * @param tci_audio Carry receive and transmit audio over TCI.
      * @param parent Optional parent QObject.
      */
     explicit TCITransceiver(std::unique_ptr<TransceiverBase> wrapped,
                             QString const &address, bool use_for_ptt,
-                            QObject *parent = nullptr);
+                            bool tci_audio, QObject *parent = nullptr);
+
+    void send_audio(QByteArray const &frames) noexcept override;
 
   private:
     int do_start() override;
@@ -63,16 +71,22 @@ class TCITransceiver final : public TransceiverBase {
     void send(QString const &command);
     void handle_message(QString const &message);
     void handle_command(QString const &name, QStringList const &args);
+    void handle_binary(QByteArray const &data);
     void handle_disconnected();
     void update_vfo_b();
 
     std::unique_ptr<TransceiverBase> wrapped_; // may be null
     bool use_for_ptt_;
+    bool tci_audio_;
     QString server_;
     QWebSocket *socket_;
     QEventLoop *startup_wait_; // non-null while do_start() waits for READY
     bool ready_;
     Frequency vfo_b_;
+    quint32 tx_rate_;     // from the last TX_CHRONO
+    quint32 tx_format_;   // from the last TX_CHRONO
+    quint32 tx_channels_; // from the last TX_CHRONO, 0 before the first
+    quint32 tx_count_;
 };
 
 #endif

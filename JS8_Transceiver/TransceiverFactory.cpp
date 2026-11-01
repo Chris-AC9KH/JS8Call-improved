@@ -70,6 +70,10 @@ bool TransceiverFactory::has_asynchronous_CAT(QString const &name) const {
     return supported_transceivers()[name].asynchronous_;
 }
 
+bool TransceiverFactory::is_TCI(QString const &name) const {
+    return supported_transceivers()[name].model_number_ == TCIId;
+}
+
 std::unique_ptr<Transceiver>
 TransceiverFactory::create(ParameterPack const &params,
                            QThread *target_thread) {
@@ -132,7 +136,8 @@ TransceiverFactory::create(ParameterPack const &params,
 
         result.reset(new TCITransceiver{std::move(basic_transceiver),
                                         params.network_port,
-                                        PTT_method_CAT == params.ptt_type});
+                                        PTT_method_CAT == params.ptt_type,
+                                        params.tci_audio});
         if (target_thread) {
             result->moveToThread(target_thread);
         }

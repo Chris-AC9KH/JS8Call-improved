@@ -154,6 +154,28 @@ class Transceiver : public QObject {
 
     // Ready to be destroyed.
     Q_SIGNAL void finished() const;
+
+    /**
+     * @brief Audio received over the rig interface itself, as with TCI.
+     * @param frames 16-bit mono frames at 48 kHz.
+     */
+    Q_SIGNAL void audio_received(QByteArray const &frames) const;
+
+    /**
+     * @brief The rig interface wants transmit audio, answered by
+     * send_audio().
+     * @param frames Number of 16-bit mono frames at 48 kHz wanted.
+     */
+    Q_SIGNAL void audio_requested(qint64 frames) const;
+
+    /**
+     * @brief Send transmit audio over the rig interface; interfaces
+     * without their own audio ignore it.
+     * @param frames 16-bit mono frames at 48 kHz.
+     */
+    Q_SLOT virtual void send_audio(QByteArray const &frames) noexcept {
+        Q_UNUSED(frames);
+    }
 };
 
 Q_DECLARE_METATYPE(Transceiver::TransceiverState);

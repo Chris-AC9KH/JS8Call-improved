@@ -38,6 +38,9 @@ class EmulateSplitTransceiver final : public Transceiver {
         wrapped_->start(sequence_number);
     }
     void stop() noexcept override { wrapped_->stop(); }
+    void send_audio(QByteArray const &frames) noexcept override {
+        wrapped_->send_audio(frames);
+    }
 
   private:
     void handle_update(TransceiverState const &, unsigned seqeunce_number);

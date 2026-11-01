@@ -1070,6 +1070,8 @@ bool Configuration::is_transceiver_online() const { return m_->rig_active_; }
 
 bool Configuration::is_dummy_rig() const { return m_->rig_is_dummy_; }
 
+bool Configuration::tci_audio() const { return m_->rig_params_.tci_audio; }
+
 bool Configuration::transceiver_online() {
     qCDebug(configuration_js8)
         << "Configuration::transceiver_online: " << m_->cached_rig_state_;
@@ -1564,6 +1566,8 @@ Configuration::impl::impl(Configuration *self, QDir const &temp_directory,
     ui_->PTT_method_button_group->setId(ui_->PTT_RTS_radio_button,
                                         TransceiverFactory::PTT_method_RTS);
 
+    connect(ui_->TCI_audio_check_box, &QCheckBox::toggled, this,
+            &Configuration::impl::set_rig_invariants);
     ui_->TX_audio_source_button_group->setId(
         ui_->TX_source_mic_radio_button,
         TransceiverFactory::TX_audio_source_front);
@@ -1957,6 +1961,9 @@ void Configuration::impl::initialize_models() {
     ui_->TX_audio_source_button_group->button(rig_params_.audio_source)
         ->setChecked(true);
     ui_->CAT_poll_interval_spin_box->setValue(rig_params_.poll_interval);
+    ui_->TCI_audio_check_box->setChecked(
+        rig_params_.tci_audio ||
+        !transceiver_factory_.is_TCI(rig_params_.rig_name));
     ui_->opCallEntry->setText(opCall_);
     ui_->ptt_command_line_edit->setText(ptt_command_);
     ui_->aprs_server_line_edit->setText(aprs_server_name_);
@@ -2428,6 +2435,9 @@ void Configuration::impl::read_settings() {
     }
     TX_messages_ = settings_->value("Tx2QSO", true).toBool();
     rig_params_.poll_interval = settings_->value("Polling", 0).toInt();
+    rig_params_.tci_audio =
+        transceiver_factory_.is_TCI(rig_params_.rig_name) &&
+        settings_->value("TCIAudio", true).toBool();
     rig_params_.split_mode =
         settings_
             ->value("SplitMode",
@@ -2726,6 +2736,9 @@ void Configuration::impl::write_settings() {
     settings_->setValue("TXAudioSource",
                         QVariant::fromValue(rig_params_.audio_source));
     settings_->setValue("Polling", rig_params_.poll_interval);
+    if (transceiver_factory_.is_TCI(rig_params_.rig_name)) {
+        settings_->setValue("TCIAudio", rig_params_.tci_audio);
+    }
     settings_->setValue("SplitMode",
                         QVariant::fromValue(rig_params_.split_mode));
     settings_->setValue("OpCall", opCall_);
@@ -2803,6 +2816,26 @@ void Configuration::impl::set_rig_invariants() {
     ui_->CAT_poll_interval_label->setEnabled(!asynchronous_CAT);
     ui_->CAT_poll_interval_spin_box->setEnabled(!asynchronous_CAT);
 
+    auto const is_TCI = transceiver_factory_.is_TCI(rig);
+    auto const tci_audio = is_TCI && ui_->TCI_audio_check_box->isChecked();
+    ui_->TCI_audio_check_box->setVisible(is_TCI);
+    for (auto *w : QList<QWidget *>{ui_->sound_input_label,
+                                    ui_->sound_input_combo_box,
+                                    ui_->sound_input_channel_combo_box,
+                                    ui_->sound_output_label,
+                                    ui_->sound_output_combo_box,
+                                    ui_->sound_output_channel_combo_box}) {
+        w->setEnabled(!tci_audio);
+    }
+
+    // a TCI server only asks for transmit audio when keyed over TCI
+    if (tci_audio) {
+        ui_->PTT_CAT_radio_button->setChecked(true);
+        ptt_method = TransceiverFactory::PTT_method_CAT;
+    }
+    ui_->PTT_VOX_radio_button->setEnabled(!tci_audio);
+    ui_->PTT_DTR_radio_button->setEnabled(!tci_audio);
+
     auto port_type = transceiver_factory_.CAT_port_type(rig);
 
     bool is_serial_CAT(TransceiverFactory::Capabilities::serial == port_type);
@@ -2833,6 +2866,7 @@ void Configuration::impl::set_rig_invariants() {
         }
     }
     ui_->PTT_RTS_radio_button->setEnabled(
+        !tci_audio &&
         !(is_serial_CAT && ptt_port == cat_port && is_hw_handshake));
 
     if (TransceiverFactory::basic_transceiver_name_ == rig) {
@@ -3021,21 +3055,24 @@ bool Configuration::impl::validate() {
         return false;
     }
 
-    if ((ui_->sound_input_combo_box->currentIndex() < 0) &&
+    auto const tci_audio = gather_rig_data().tci_audio;
+
+    if (!tci_audio && (ui_->sound_input_combo_box->currentIndex() < 0) &&
         next_audio_input_device_.isNull()) {
         find_tab(ui_->sound_input_combo_box);
         JS8MessageBox::critical_message(this, tr("Invalid audio input device"));
         return false;
     }
 
-    if ((ui_->sound_input_channel_combo_box->currentIndex() < 0) &&
+    if (!tci_audio &&
+        (ui_->sound_input_channel_combo_box->currentIndex() < 0) &&
         next_audio_input_device_.isNull()) {
         find_tab(ui_->sound_input_combo_box);
         JS8MessageBox::critical_message(this, tr("Invalid audio input device"));
         return false;
     }
 
-    if ((ui_->sound_output_combo_box->currentIndex() < 0) &&
+    if (!tci_audio && (ui_->sound_output_combo_box->currentIndex() < 0) &&
         next_audio_output_device_.isNull()) {
         find_tab(ui_->sound_output_combo_box);
         JS8MessageBox::information_message(this,
@@ -3144,6 +3181,8 @@ TransceiverFactory::ParameterPack Configuration::impl::gather_rig_data() const {
         ui_->TX_audio_source_button_group->checkedId());
     result.split_mode = static_cast<TransceiverFactory::SplitMode>(
         ui_->split_mode_button_group->checkedId());
+    result.tci_audio = transceiver_factory_.is_TCI(result.rig_name) &&
+                       ui_->TCI_audio_check_box->isChecked();
     return result;
 }
 
@@ -3229,6 +3268,10 @@ void Configuration::impl::accept() {
 
     Q_EMIT self_->colors_changed();
 
+    if (temp_rig_params.tci_audio != rig_params_.tci_audio) {
+        restart_sound_input_device_ = true;
+        restart_sound_output_device_ = true;
+    }
     rig_params_ = temp_rig_params; // now we can go live with the rig
                                    // related configuration parameters
     rig_is_dummy_ =
@@ -4368,6 +4411,20 @@ bool Configuration::impl::open_rig(bool force) {
             rig_connections_
                 << connect(rig.get(), &Transceiver::failure, this,
                            &Configuration::impl::handle_transceiver_failure);
+
+            // audio stays off the GUI thread: these are emitted where the
+            // sender runs and queued on to the audio or rig thread
+            rig_connections_ << connect(
+                rig.get(), &Transceiver::audio_received, self_,
+                &Configuration::transceiver_audio_received,
+                Qt::DirectConnection);
+            rig_connections_ << connect(
+                rig.get(), &Transceiver::audio_requested, self_,
+                &Configuration::transceiver_audio_requested,
+                Qt::DirectConnection);
+            rig_connections_
+                << connect(self_, &Configuration::transceiver_audio_send,
+                           rig.get(), &Transceiver::send_audio);
 
             // setup thread safe startup and close down semantics
             rig_connections_

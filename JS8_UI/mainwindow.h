@@ -6,6 +6,7 @@
 #include "JS8_Audio/NotificationAudio.h"
 #include "JS8_Audio/SoundInput.h"
 #include "JS8_Audio/SoundOutput.h"
+#include "JS8_Audio/TCIAudio.h"
 #include "JS8_Include/EventFilter.h"
 #include "JS8_Include/commons.h"
 #include "JS8_Include/qpriorityqueue.h"
@@ -441,6 +442,7 @@ class UI_Constructor : public QMainWindow {
                    QVariantMap const &additionalFields);
     void on_readFreq_clicked();
     void on_outAttenuation_valueChanged(int);
+    void on_inAttenuation_valueChanged(int);
     void rigOpen();
     void handle_transceiver_update(Transceiver::TransceiverState const &);
     void handle_transceiver_failure(QString const &reason);
@@ -520,9 +522,12 @@ class UI_Constructor : public QMainWindow {
     Q_SIGNAL void startAudioInputStream(QAudioDevice const &,
                                         int framesPerBuffer, AudioDevice *sink,
                                         AudioDevice::Channel) const;
+    Q_SIGNAL void stopAudioInputStream() const;
     Q_SIGNAL void suspendAudioInputStream() const;
     Q_SIGNAL void resumeAudioInputStream() const;
     Q_SIGNAL void startDetector(AudioDevice::Channel) const;
+    Q_SIGNAL void startTciAudio(AudioDevice *sink, AudioDevice *source) const;
+    Q_SIGNAL void stopTciAudio() const;
     Q_SIGNAL void FFTSize(unsigned) const;
     Q_SIGNAL void detectorClose() const;
     Q_SIGNAL void finished() const;
@@ -532,6 +537,7 @@ class UI_Constructor : public QMainWindow {
     Q_SIGNAL void sendMessage(double frequency, int submode, double txDelay,
                               SoundOutput *, AudioDevice::Channel) const;
     Q_SIGNAL void outAttenuationChanged(qreal) const;
+    Q_SIGNAL void inAttenuationChanged(qreal) const;
     Q_SIGNAL void toggleShorthand() const;
     Q_SIGNAL void submodeChanged(Varicode::SubmodeType) const;
 
@@ -607,6 +613,7 @@ class UI_Constructor : public QMainWindow {
     SoundInput *m_soundInput;
     Modulator *m_modulator;
     SoundOutput *m_soundOutput;
+    TCIAudio *m_tciAudio;
     NotificationAudio *m_notification;
 
     // Configuration might one day offer to send a txDelayChanged signal.

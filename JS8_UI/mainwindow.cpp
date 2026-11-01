@@ -295,6 +295,7 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("DialFreq",
                          QVariant::fromValue(m_lastMonitoredFrequency));
     m_settings->setValue("OutAttenuation", ui->outAttenuation->value());
+    m_settings->setValue("InAttenuation", ui->inAttenuation->value());
     m_settings->setValue("pwrBandTxMemory", m_pwrBandTxMemory);
     m_settings->setValue("pwrBandTuneMemory", m_pwrBandTuneMemory);
     m_settings->setValue("SortBy", QVariant(m_sortCache));
@@ -422,6 +423,7 @@ void UI_Constructor::readSettings() {
     ui->outAttenuation->setValue(
         m_settings->value("OutAttenuation", 0).toInt());
     m_block_pwr_tooltip = false;
+    ui->inAttenuation->setValue(m_settings->value("InAttenuation", 0).toInt());
     m_pwrBandTxMemory = m_settings->value("pwrBandTxMemory").toHash();
     m_pwrBandTuneMemory = m_settings->value("pwrBandTuneMemory").toHash();
 
@@ -874,14 +876,25 @@ void UI_Constructor::openSettings(int tab) {
             Q_EMIT pskReporterSendReport(true);
         }
 
-        if (m_config.restart_audio_input() &&
-            !m_config.audio_input_device().isNull()) {
-            Q_EMIT startAudioInputStream(m_config.audio_input_device(),
-                                         m_framesAudioInputBuffered, m_detector,
-                                         m_config.audio_input_channel());
+        for (auto *w : QList<QWidget *>{ui->inAttenuationLabel, ui->inAttenuation,
+                                            ui->outAttenuationLabel}) {
+            w->setVisible(m_config.tci_audio());
+        }
+        if (m_config.tci_audio()) {
+            if (m_config.restart_audio_input()) {
+                Q_EMIT stopAudioInputStream();
+                Q_EMIT startTciAudio(m_detector, m_modulator);
+            }
+        } else if (m_config.restart_audio_input()) {
+            Q_EMIT stopTciAudio();
+            if (!m_config.audio_input_device().isNull()) {
+                Q_EMIT startAudioInputStream(
+                    m_config.audio_input_device(), m_framesAudioInputBuffered,
+                    m_detector, m_config.audio_input_channel());
+            }
         }
 
-        if (m_config.restart_audio_output() &&
+        if (!m_config.tci_audio() && m_config.restart_audio_output() &&
             !m_config.audio_output_device().isNull()) {
             Q_EMIT initializeAudioOutputStream(
                 m_config.audio_output_device(),
@@ -2620,8 +2633,13 @@ void UI_Constructor::startTx() {
 void UI_Constructor::transmit() {
     if (m_modulator->isIdle()) {
         qDebug(mainwindow_js8) << "Asking the modulator to emit audio.";
-        Q_EMIT sendMessage(freq() + m_XIT, m_nSubMode, m_TxDelay, m_soundOutput,
-                           m_config.audio_output_channel());
+        if (m_config.tci_audio()) {
+            Q_EMIT sendMessage(freq() + m_XIT, m_nSubMode, m_TxDelay, nullptr,
+                               AudioDevice::Mono);
+        } else {
+            Q_EMIT sendMessage(freq() + m_XIT, m_nSubMode, m_TxDelay,
+                               m_soundOutput, m_config.audio_output_channel());
+        }
         ui->signal_meter_widget->setValue(0, 0);
     } else {
         qDebug(mainwindow_js8) << "Not asking the modulator to emit audio as "
@@ -5082,6 +5100,10 @@ void UI_Constructor::on_outAttenuation_valueChanged(int const a) {
     // Slider interpreted as dB / 100.
 
     Q_EMIT outAttenuationChanged(a / 10.0);
+}
+
+void UI_Constructor::on_inAttenuation_valueChanged(int const a) {
+    Q_EMIT inAttenuationChanged(a / 10.0);
 }
 
 void UI_Constructor::spotSetLocal() {

@@ -261,6 +261,7 @@ target_sources(
   JS8_Audio/NotificationSoundOutput.cpp
   JS8_Audio/SoundInput.cpp
   JS8_Audio/SoundOutput.cpp
+  JS8_Audio/TCIAudio.cpp
   JS8_JSC/JSC.cpp
   JS8_JSC/JSC_checker.cpp
   JS8_JSC/JSC_list.cpp

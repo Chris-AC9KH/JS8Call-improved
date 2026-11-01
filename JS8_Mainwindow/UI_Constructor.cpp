@@ -37,7 +37,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
       m_detector{new Detector{JS8_RX_SAMPLE_RATE, JS8_NTMAX}},
       m_FFTSize{6912 / 2}, // conservative value to avoid buffer overruns
       m_soundInput{new SoundInput}, m_modulator{new Modulator},
-      m_soundOutput{new SoundOutput}, m_notification{new NotificationAudio},
+      m_soundOutput{new SoundOutput}, m_tciAudio{new TCIAudio},
+      m_notification{new NotificationAudio},
       m_cq_loop{new TxLoop{"CQ calls"}}, m_hb_loop{new TxLoop{"HB calls"}},
       m_decoder{this}, m_secBandChanged{0}, m_freqNominal{0},
       m_freqTxNominal{0}, m_XIT{0}, m_sec0{-1},
@@ -148,6 +149,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     m_modulator->moveToThread(&m_audioThread);
     m_soundInput->moveToThread(&m_audioThread);
     m_detector->moveToThread(&m_audioThread);
+    m_tciAudio->moveToThread(&m_audioThread);
 
     // notification audio operates in its own thread at a lower priority
     m_notification->moveToThread(&m_notificationAudioThread);
@@ -295,6 +297,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     // hook up the audio input stream signals, slots and disposal
     connect(this, &UI_Constructor::startAudioInputStream, m_soundInput,
             &SoundInput::start);
+    connect(this, &UI_Constructor::stopAudioInputStream, m_soundInput,
+            &SoundInput::stop);
     connect(this, &UI_Constructor::suspendAudioInputStream, m_soundInput,
             &SoundInput::suspend);
     connect(this, &UI_Constructor::resumeAudioInputStream, m_soundInput,
@@ -311,6 +315,27 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             &Configuration::invalidate_audio_input_device);
     // connect(m_soundInput, &SoundInput::status, this,
     connect(&m_audioThread, &QThread::finished, m_soundInput,
+            &QObject::deleteLater);
+
+    // audio carried by the rig interface (TCI) instead of a sound card
+    connect(this, &UI_Constructor::startTciAudio, m_tciAudio, &TCIAudio::start);
+    connect(this, &UI_Constructor::stopTciAudio, m_tciAudio, &TCIAudio::stop);
+    connect(this, &UI_Constructor::suspendAudioInputStream, m_tciAudio,
+            &TCIAudio::suspend);
+    connect(this, &UI_Constructor::resumeAudioInputStream, m_tciAudio,
+            &TCIAudio::resume);
+    connect(this, &UI_Constructor::finished, m_tciAudio, &TCIAudio::stop);
+    connect(this, &UI_Constructor::outAttenuationChanged, m_tciAudio,
+            &TCIAudio::setTxAttenuation);
+    connect(this, &UI_Constructor::inAttenuationChanged, m_tciAudio,
+            &TCIAudio::setRxAttenuation);
+    connect(&m_config, &Configuration::transceiver_audio_received, m_tciAudio,
+            &TCIAudio::receive);
+    connect(&m_config, &Configuration::transceiver_audio_requested, m_tciAudio,
+            &TCIAudio::request);
+    connect(m_tciAudio, &TCIAudio::transmit, &m_config,
+            &Configuration::transceiver_audio_send, Qt::DirectConnection);
+    connect(&m_audioThread, &QThread::finished, m_tciAudio,
             &QObject::deleteLater);
 
     connect(this, &UI_Constructor::finished, this, &UI_Constructor::close);
@@ -684,16 +709,24 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     m_notificationAudioThread.start(m_notificationAudioThreadPriority);
     m_decoder.start(m_decoderThreadPriority);
 
-    if (!m_config.audio_input_device().isNull()) {
-        Q_EMIT startAudioInputStream(m_config.audio_input_device(),
-            m_framesAudioInputBuffered, m_detector,
-            m_config.audio_input_channel());
+    for (auto *w : QList<QWidget *>{ui->inAttenuationLabel, ui->inAttenuation,
+                                    ui->outAttenuationLabel}) {
+        w->setVisible(m_config.tci_audio());
     }
-    if (!m_config.audio_output_device().isNull()) {
-        Q_EMIT initializeAudioOutputStream(
-            m_config.audio_output_device(),
-            AudioDevice::Mono == m_config.audio_output_channel() ? 1 : 2,
-            m_msAudioOutputBuffered);
+    if (m_config.tci_audio()) {
+        Q_EMIT startTciAudio(m_detector, m_modulator);
+    } else {
+        if (!m_config.audio_input_device().isNull()) {
+            Q_EMIT startAudioInputStream(m_config.audio_input_device(),
+                m_framesAudioInputBuffered, m_detector,
+                m_config.audio_input_channel());
+        }
+        if (!m_config.audio_output_device().isNull()) {
+            Q_EMIT initializeAudioOutputStream(
+                m_config.audio_output_device(),
+                AudioDevice::Mono == m_config.audio_output_channel() ? 1 : 2,
+                m_msAudioOutputBuffered);
+        }
     }
     if (!m_config.notification_audio_output_device().isNull()) {
         Q_EMIT initializeNotificationAudioOutputStream(
