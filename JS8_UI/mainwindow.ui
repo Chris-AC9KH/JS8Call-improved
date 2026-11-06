@@ -1479,49 +1479,125 @@ background-color: #22ff22;
             </widget>
            </item>
            <item>
-            <widget class="AttenuationSlider" name="outAttenuation">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Fixed" vsizetype="MinimumExpanding">
-               <horstretch>1</horstretch>
-               <verstretch>0</verstretch>
-              </sizepolicy>
+            <layout class="QVBoxLayout" name="inAttenuationLayout">
+             <property name="spacing">
+              <number>0</number>
              </property>
-             <property name="minimumSize">
-              <size>
-               <width>48</width>
-               <height>1</height>
-              </size>
+             <item>
+              <widget class="QLabel" name="inAttenuationLabel">
+               <property name="text">
+                <string>RX</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignmentFlag::AlignCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="AttenuationSlider" name="inAttenuation">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Fixed" vsizetype="MinimumExpanding">
+                 <horstretch>1</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>48</width>
+                 <height>1</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>10</pointsize>
+                </font>
+               </property>
+               <property name="toolTip">
+                <string>Attenuate TCI receive audio</string>
+               </property>
+               <property name="maximum">
+                <number>450</number>
+               </property>
+               <property name="orientation">
+                <enum>Qt::Orientation::Vertical</enum>
+               </property>
+               <property name="invertedAppearance">
+                <bool>true</bool>
+               </property>
+               <property name="invertedControls">
+                <bool>true</bool>
+               </property>
+               <property name="tickPosition">
+                <enum>QSlider::TickPosition::TicksBothSides</enum>
+               </property>
+               <property name="tickInterval">
+                <number>50</number>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QVBoxLayout" name="outAttenuationLayout">
+             <property name="spacing">
+              <number>0</number>
              </property>
-             <property name="font">
-              <font>
-               <pointsize>10</pointsize>
-              </font>
-             </property>
-             <property name="toolTip">
-              <string>Adjust Tx audio level</string>
-             </property>
-             <property name="maximum">
-              <number>450</number>
-             </property>
-             <property name="value">
-              <number>100</number>
-             </property>
-             <property name="orientation">
-              <enum>Qt::Orientation::Vertical</enum>
-             </property>
-             <property name="invertedAppearance">
-              <bool>true</bool>
-             </property>
-             <property name="invertedControls">
-              <bool>true</bool>
-             </property>
-             <property name="tickPosition">
-              <enum>QSlider::TickPosition::TicksBothSides</enum>
-             </property>
-             <property name="tickInterval">
-              <number>50</number>
-             </property>
-            </widget>
+             <item>
+              <widget class="QLabel" name="outAttenuationLabel">
+               <property name="text">
+                <string>TX</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignmentFlag::AlignCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="AttenuationSlider" name="outAttenuation">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Fixed" vsizetype="MinimumExpanding">
+                 <horstretch>1</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>48</width>
+                 <height>1</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>10</pointsize>
+                </font>
+               </property>
+               <property name="toolTip">
+                <string>Adjust Tx audio level</string>
+               </property>
+               <property name="maximum">
+                <number>450</number>
+               </property>
+               <property name="value">
+                <number>100</number>
+               </property>
+               <property name="orientation">
+                <enum>Qt::Orientation::Vertical</enum>
+               </property>
+               <property name="invertedAppearance">
+                <bool>true</bool>
+               </property>
+               <property name="invertedControls">
+                <bool>true</bool>
+               </property>
+               <property name="tickPosition">
+                <enum>QSlider::TickPosition::TicksBothSides</enum>
+               </property>
+               <property name="tickInterval">
+                <number>50</number>
+               </property>
+              </widget>
+             </item>
+            </layout>
            </item>
           </layout>
          </widget>

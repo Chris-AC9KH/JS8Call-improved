@@ -98,6 +98,12 @@ class TransceiverFactory : public QObject {
         const; // Can PTT via CAT port use DTR or RTS
     bool has_asynchronous_CAT(
         QString const &name) const; // CAT asynchronous rather than polled
+    /**
+     * @brief Check if a rig is the TCI interface, which can carry audio.
+     * @param name Rig name from supported_transceivers().
+     * @return true for the TCI interface.
+     */
+    bool is_TCI(QString const &name) const;
 
     struct ParameterPack {
         QString rig_name;     // from supported_transceivers () key
@@ -120,6 +126,8 @@ class TransceiverFactory : public QObject {
                                     // value "CAT"
         int poll_interval;          // in seconds for interfaces that
                                     // require polling for state changes
+        /** @brief Audio is carried over TCI instead of a sound card. */
+        bool tci_audio;
 
         bool operator==(ParameterPack const &rhs) const {
             return rhs.rig_name == rig_name && rhs.serial_port == serial_port &&
@@ -131,7 +139,8 @@ class TransceiverFactory : public QObject {
                    rhs.rts_high == rts_high && rhs.ptt_type == ptt_type &&
                    rhs.audio_source == audio_source &&
                    rhs.split_mode == split_mode && rhs.ptt_port == ptt_port &&
-                   rhs.poll_interval == poll_interval;
+                   rhs.poll_interval == poll_interval &&
+                   rhs.tci_audio == tci_audio;
         }
     };
 

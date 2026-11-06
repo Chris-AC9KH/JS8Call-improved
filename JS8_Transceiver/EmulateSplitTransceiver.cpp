@@ -26,6 +26,10 @@ EmulateSplitTransceiver::EmulateSplitTransceiver(
     connect(wrapped_.get(), &Transceiver::finished, this,
             &Transceiver::finished);
     connect(wrapped_.get(), &Transceiver::failure, this, &Transceiver::failure);
+    connect(wrapped_.get(), &Transceiver::audio_received, this,
+            &Transceiver::audio_received);
+    connect(wrapped_.get(), &Transceiver::audio_requested, this,
+            &Transceiver::audio_requested);
 }
 
 void EmulateSplitTransceiver::set(TransceiverState const &s,

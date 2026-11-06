@@ -296,6 +296,13 @@ class Configuration final : public QObject {
     // check if a real rig is configured
     bool is_dummy_rig() const;
 
+    /**
+     * @brief Check if the rig interface carries the audio, so no sound card
+     * is used.
+     * @return true while TCI audio is selected.
+     */
+    bool tci_audio() const;
+
     // Frequency resolution of the rig
     //
     //  0 - 1Hz
@@ -419,6 +426,27 @@ class Configuration final : public QObject {
     // re-established with a call to transceiver_online(true) assuming
     // the fault condition has been rectified or is transient.
     Q_SIGNAL void transceiver_failure(QString const &reason) const;
+
+    /**
+     * @brief Audio received over the rig interface while tci_audio() is
+     * true. Emitted on the rig's thread.
+     * @param frames 16-bit mono frames at 48 kHz.
+     */
+    Q_SIGNAL void transceiver_audio_received(QByteArray const &frames) const;
+
+    /**
+     * @brief The rig interface wants transmit audio, answered with
+     * transceiver_audio_send(). Emitted on the rig's thread.
+     * @param frames Number of 16-bit mono frames at 48 kHz wanted.
+     */
+    Q_SIGNAL void transceiver_audio_requested(qint64 frames) const;
+
+    /**
+     * @brief Emit with the transmit audio answering
+     * transceiver_audio_requested(); it is queued to the rig's thread.
+     * @param frames 16-bit mono frames at 48 kHz.
+     */
+    Q_SIGNAL void transceiver_audio_send(QByteArray const &frames) const;
 
     // signal announces audio devices are being enumerated
     //

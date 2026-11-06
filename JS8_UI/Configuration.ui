@@ -1109,6 +1109,20 @@ radio interface behave as expected.</string>
                 </layout>
                </item>
                <item>
+                <widget class="QCheckBox" name="TCI_audio_check_box">
+                 <property name="toolTip">
+                  <string>Receive and transmit audio over the TCI connection,
+so no sound card or virtual audio cable is needed.</string>
+                 </property>
+                 <property name="text">
+                  <string>Audio over TCI</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
                 <widget class="QGroupBox" name="CAT_serial_port_parameters_group_box">
                  <property name="title">
                   <string>Parameters</string>
