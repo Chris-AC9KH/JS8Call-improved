@@ -194,6 +194,10 @@ WideGraph::WideGraph(QSettings *settings, QWidget *parent)
         ui->zero2dSlider->setValue(ui->widePlot->plot2dZero());
         ui->cbFlatten->setChecked(ui->widePlot->flatten());
         ui->bppSpinBox->setValue(ui->widePlot->binsPerPixel());
+        ui->widePlot->setEndFreq(m_settings->value("EndFreq", 3000).toInt());
+        ui->fEndSpinBox->setValue(ui->widePlot->endFreq());
+        ui->fitSpanCheckBox->setChecked(
+            m_settings->value("FitSpan", false).toBool());
         ui->sbPercent2dPlot->setValue(ui->widePlot->percent2D());
         m_nsmo = m_settings->value("SmoothYellow", 1).toInt();
         ui->smoSpinBox->setValue(m_nsmo);
@@ -331,6 +335,8 @@ void WideGraph::saveSettings() // saveSettings
                          QVariant::fromValue(ui->widePlot->spectrum()));
     m_settings->setValue("BinsPerPixel", ui->widePlot->binsPerPixel());
     m_settings->setValue("StartFreq", ui->widePlot->startFreq());
+    m_settings->setValue("EndFreq", ui->widePlot->endFreq());
+    m_settings->setValue("FitSpan", ui->widePlot->fitSpan());
     m_settings->setValue("WaterfallPalette", m_waterfallPalette);
     m_settings->setValue("UserPalette",
                          QVariant::fromValue(m_userPalette.colours()));
@@ -496,21 +502,24 @@ void WideGraph::dataSink(WF::SPlot const &s, float const df3) {
         // Fortunately, we can manage that in a single pass, and can work
         // only on the data to be displayed, rather than all of it.
 
-        auto const bpp = ui->widePlot->binsPerPixel();
-        auto sit = m_splot.begin() +
-                   static_cast<int>(ui->widePlot->startFreq() / df3 + 0.5f);
-        auto it = m_swide.begin();
-        auto const end =
-            it + std::min(m_swide.size(),
-                          static_cast<std::size_t>(5000.0f / (bpp * df3)));
+        auto const bins = ui->widePlot->binsAveraged();
+        auto const fpp = ui->widePlot->freqPerPixel();
+        auto const start =
+            m_splot.begin() +
+            static_cast<int>(ui->widePlot->startFreq() / df3 + 0.5f);
+        auto const pixels = std::min(
+            m_swide.size(),
+            static_cast<std::size_t>(
+                std::max(0.0f, 5000.0f - ui->widePlot->startFreq()) / fpp));
         auto const avg = [runs = m_waterfallNow](auto const value) {
             return value / runs;
         };
 
-        for (; it != end; ++it, sit += bpp) {
-            *it = 10.0f *
-                  std::log10(bpp * std::transform_reduce(sit, sit + bpp, 0.0f,
-                                                         std::plus<>{}, avg));
+        for (std::size_t x = 0; x < pixels; ++x) {
+            auto const sit = start + static_cast<int>(x * fpp / df3 + 0.5f);
+            m_swide[x] = 10.0f * std::log10(bins * std::transform_reduce(
+                                                       sit, sit + bins, 0.0f,
+                                                       std::plus<>{}, avg));
         }
 
         // Next round, we'll need a fresh picture, and we've now progressed
@@ -685,6 +694,17 @@ void WideGraph::setBand(QString const &band) {
 
 void WideGraph::on_fStartSpinBox_valueChanged(int const n) {
     ui->widePlot->setStartFreq(n);
+    ui->fEndSpinBox->setMinimum(n + 100);
+}
+
+void WideGraph::on_fEndSpinBox_valueChanged(int const n) {
+    ui->widePlot->setEndFreq(n);
+}
+
+void WideGraph::on_fitSpanCheckBox_toggled(bool const checked) {
+    ui->widePlot->setFitSpan(checked);
+    ui->bppSpinBox->setEnabled(!checked);
+    ui->fEndSpinBox->setEnabled(checked);
 }
 
 void WideGraph::readPalette() {

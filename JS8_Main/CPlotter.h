@@ -118,9 +118,17 @@ class CPlotter final : public QWidget {
 
     // Inline accessors
 
+    /** @brief FFT bins averaged into each pixel. @return Bin count. */
+    int binsAveraged() const { return m_binsAveraged; }
     int binsPerPixel() const { return m_binsPerPixel; }
+    /** @brief Frequency at the right edge when fitting. @return Hz. */
+    int endFreq() const { return m_endFreq; }
+    /** @brief Whether the span fits the width. @return true if fitting. */
+    bool fitSpan() const { return m_fitSpan; }
     int flatten() const { return m_flatten.live(); }
     int freq() const { return m_freq; }
+    /** @brief Frequency covered by one pixel. @return Hz per pixel. */
+    float freqPerPixel() const { return m_freqPerPixel; }
     int percent2D() const { return m_percent2D; }
     int plot2dGain() const { return m_scaler2D.gain(); }
     int plot2dZero() const { return m_scaler2D.zero(); }
@@ -149,6 +157,10 @@ class CPlotter final : public QWidget {
     void setBinsPerPixel(int);
     void setColors(Colors const &);
     void setDialFreq(float);
+    /** @brief Set the frequency at the right edge when fitting. */
+    void setEndFreq(int);
+    /** @brief Fit the start-to-end span to the width, or not. */
+    void setFitSpan(bool);
     void setFilter(int, int);
     void setFilterEnabled(bool);
     void setFilterOpacity(int);
@@ -196,6 +208,7 @@ class CPlotter final : public QWidget {
     void drawFilter();
     void drawDials();
     void replot();
+    void rescale();
     void resize();
 
     // Data members ** ORDER DEPENDENCY **
@@ -207,6 +220,9 @@ class CPlotter final : public QWidget {
     int m_filterOpacity = 127;
     int m_percent2D = 0;
     int m_binsPerPixel = 2;
+    int m_binsAveraged = 2;
+    int m_endFreq = 3000;
+    bool m_fitSpan = false;
     int m_waterfallAvg = 1;
     int m_lastMouseX = -1;
     int m_line = std::numeric_limits<int>::max();
