@@ -6,6 +6,7 @@
  */
 
 #include "JS8_UI/mainwindow.h"
+#include "JS8_Mode/RxPeriodContinuity.h"
 
 /**
  * Emulation of the Fortran 'flat1' subroutine.
@@ -86,6 +87,9 @@ void UI_Constructor::dataSink(qint64 frames) {
     static int k0 = 999999999;
     static WF::SPlot ssum = {};
     static WF::SPlot s = {};
+    // Waterfall FFT history must span the decoder's UTC minute rollover.
+    static std::array<std::int16_t, nfft3> previousFftTail = {};
+    static bool havePreviousTail = false;
 
     int k(frames);
     if (k0 == 999999999) {
@@ -117,6 +121,15 @@ void UI_Constructor::dataSink(qint64 frames) {
 
     if (k >= 2048 && k <= NMAX) {
         if (k < k0) {
+            // The previous minute's last samples are still in d2 here.
+            // Copy them before clearing d2 for the new decoder period.
+            if (k0 > 0 && k0 <= NMAX) {
+                const auto count = std::min(k0, nfft3);
+                previousFftTail.fill(0);
+                std::copy_n(std::begin(dec_data.d2) + k0 - count, count,
+                            previousFftTail.end() - count);
+                havePreviousTail = true;
+            }
             // Start a new data block
             ja = 0;
             ssum.fill(0.0f);
@@ -182,12 +195,12 @@ void UI_Constructor::dataSink(qint64 frames) {
             }
         }
 
-        // Copy data and apply the window, then execute the FFT.
-
-        for (int i = 0; i < nfft3; ++i) {
-            if (int j = ja + i - nfft3; j >= 0 && j < NMAX)
-                fftw_real[i] = 0.1f * dec_data.d2[j];
-        }
+        // Build the FFT window with continuous history across UTC rollover.
+        // Unavailable samples at startup are explicitly zero-filled.
+        RxPeriodContinuity::fillFftInput(
+            fftw_real, nfft3, std::begin(dec_data.d2),
+            static_cast<std::size_t>(k), static_cast<std::size_t>(ja),
+            previousFftTail.data(), havePreviousTail);
 
         ++m_ihsym;
 

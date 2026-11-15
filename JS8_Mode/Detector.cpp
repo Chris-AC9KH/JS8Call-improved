@@ -5,6 +5,7 @@
  */
 
 #include "Detector.h"
+#include "RxPeriodContinuity.h"
 #include "JS8_Include/commons.h"
 #include "JS8_Main/DriftingDateTime.h"
 
@@ -162,12 +163,30 @@ void Detector::resetBufferContent() {
 qint64 Detector::writeData(char const *const data, qint64 const maxSize) {
     QMutexLocker mutex(&m_lock);
 
-    // When ns has wrapped around to zero, restart the buffers.
+    // At the UTC period boundary, finish the pending old-period audio
+    // before moving the decoder's write position to the next minute.
 
     int const ns = secondInPeriod();
     if (ns < m_ns) {
+        const std::size_t kin = static_cast<std::size_t>(dec_data.params.kin);
+        constexpr std::size_t capacity = JS8_RX_SAMPLE_SIZE;
+        const std::size_t available = kin < capacity ? capacity - kin : 0;
+        const auto flushed = RxPeriodContinuity::flushPartial(
+            m_buffer.data(), m_bufferPos, Filter::NDOWN,
+            dec_data.d2 + std::min(kin, capacity), available,
+            [this](short const *samples) { return m_filter.downSample(samples); });
+        dec_data.params.kin += static_cast<int>(flushed.outputSamples);
+        if (flushed.outputSamples)
+            Q_EMIT framesWritten(dec_data.params.kin);
+
+        // Retain only the last partial (0..3) 48-kHz input samples.
+        // Complete groups that do not fit the old decoder minute are dropped
+        // rather than placed at the start of the new decoder minute.
+        const auto remainder = m_bufferPos % Filter::NDOWN;
+        std::move(m_buffer.begin() + m_bufferPos - remainder,
+                  m_buffer.begin() + m_bufferPos, m_buffer.begin());
+        m_bufferPos = remainder;
         dec_data.params.kin = 0;
-        m_bufferPos = 0;
     }
     m_ns = ns;
 
