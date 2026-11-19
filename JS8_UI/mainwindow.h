@@ -478,6 +478,7 @@ class UI_Constructor : public QMainWindow {
     Q_SIGNAL void apiSetServer(QString host, quint16 port);
     Q_SIGNAL void apiStartServer();
     Q_SIGNAL void apiStopServer();
+    Q_SIGNAL void apiSendMessage(Message const &message);
 
     Q_SIGNAL void aprsClientEnqueueSpot(QString by_call, QString from_call,
                                         QString grid, QString comment);

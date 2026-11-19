@@ -6234,7 +6234,7 @@ void UI_Constructor::sendNetworkMessage(QString const &type,
     }
 
     if (m_config.tcpEnabled()) {
-        m_messageServer->send(m);
+        Q_EMIT apiSendMessage(m);
     }
 }
 
@@ -6252,7 +6252,7 @@ void UI_Constructor::sendNetworkMessage(QString const &type,
     }
 
     if (m_config.tcpEnabled()) {
-        m_messageServer->send(m);
+        Q_EMIT apiSendMessage(m);
     }
 }
 

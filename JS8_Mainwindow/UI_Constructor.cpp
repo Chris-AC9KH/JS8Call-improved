@@ -171,6 +171,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             &MessageServer::start);
     connect(this, &UI_Constructor::apiStopServer, m_messageServer,
             &MessageServer::stop);
+    connect(this, &UI_Constructor::apiSendMessage, m_messageServer,
+            &MessageServer::send, Qt::QueuedConnection);
     connect(&m_config, &Configuration::tcp_server_changed, m_messageServer,
             &MessageServer::setServerHost);
     connect(&m_config, &Configuration::tcp_server_port_changed, m_messageServer,
