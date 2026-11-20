@@ -185,8 +185,8 @@ QString JSC::decompress(Codeword const &bitvec) {
             break;
         }
 
-        // map is in latin1 format, not utf-8
-        auto word = QLatin1String(JSC::map[j].str);
+        // map is in latin1 format, not utf-8; size is what the compressor consumed
+        auto word = QLatin1String(JSC::map[j].str, JSC::map[j].size);
 
         out.append(word);
         if (!separators.isEmpty() && separators.first() == start + k) {
