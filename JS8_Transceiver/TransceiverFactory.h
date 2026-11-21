@@ -2,6 +2,7 @@
 #define TRANSCEIVER_FACTORY_HPP__
 
 #include "JS8_Main/qt_helpers.h"
+#include "JS8_Network/TCISession.h"
 #include "Transceiver.h"
 
 #include <QMap>
@@ -77,7 +78,7 @@ class TransceiverFactory : public QObject {
     enum SplitMode { split_mode_none, split_mode_rig, split_mode_emulate };
     Q_ENUM(SplitMode)
 
-    TransceiverFactory();
+    explicit TransceiverFactory(TCISession *tci_session = nullptr);
     ~TransceiverFactory();
 
     static char const
@@ -87,6 +88,8 @@ class TransceiverFactory : public QObject {
     // fetch all supported rigs as a list of name and model id
     //
     Transceivers const &supported_transceivers() const;
+
+    void set_tci_session(TCISession *session);
 
     // supported model queries
     Capabilities::PortType
@@ -147,8 +150,19 @@ class TransceiverFactory : public QObject {
     std::unique_ptr<Transceiver> create(ParameterPack const &,
                                         QThread *target_thread = nullptr);
 
+  protected:
+    //
+    // Error exception which is thrown to signal unexpected errors.
+    //
+    struct error : public std::runtime_error {
+        explicit error(char const *const msg) : std::runtime_error(msg) {}
+        explicit error(QString const &msg)
+            : std::runtime_error(msg.toStdString()) {}
+    };
+
   private:
     Transceivers transceivers_;
+    TCISession *tci_session_ = nullptr;
 };
 
 inline bool operator!=(TransceiverFactory::ParameterPack const &lhs,

@@ -7,6 +7,8 @@
 
 #include "mainwindow.h"
 
+#include "JS8_Audio/TCIAudioOutput.h"
+#include <QMessageBox>
 #include "moc_mainwindow.cpp"
 
 static char message[29];
@@ -295,6 +297,7 @@ void UI_Constructor::writeSettings() {
     m_settings->setValue("DialFreq",
                          QVariant::fromValue(m_lastMonitoredFrequency));
     m_settings->setValue("OutAttenuation", ui->outAttenuation->value());
+    m_settings->setValue("TciRxAttenuation", ui->inAttenuation->value());
     m_settings->setValue("pwrBandTxMemory", m_pwrBandTxMemory);
     m_settings->setValue("pwrBandTuneMemory", m_pwrBandTuneMemory);
     m_settings->setValue("SortBy", QVariant(m_sortCache));
@@ -422,6 +425,8 @@ void UI_Constructor::readSettings() {
     ui->outAttenuation->setValue(
         m_settings->value("OutAttenuation", 0).toInt());
     m_block_pwr_tooltip = false;
+    ui->inAttenuation->setValue(
+        m_settings->value("TciRxAttenuation", 0).toInt());
     m_pwrBandTxMemory = m_settings->value("pwrBandTxMemory").toHash();
     m_pwrBandTuneMemory = m_settings->value("pwrBandTuneMemory").toHash();
 
@@ -853,7 +858,14 @@ void UI_Constructor::openSettings(int tab) {
     auto callsign = m_config.my_callsign();
     auto my_grid = m_config.my_grid();
     auto spot_on = m_config.spot_to_reporting_networks();
+    // A rig change can implicitly switch the audio backend even when the
+    // selected physical audio device hasn't changed.
+    const auto previousInput = m_config.audio_input_device();
+    const auto previousOutput = m_config.audio_output_device();
     if (QDialog::Accepted == m_config.exec()) {
+        const bool isTci = m_config.is_tci_rig_selected();
+        ui->inAttenuation->setVisible(isTci);
+        ui->rxAttenuationLabel->setVisible(isTci);
         if (m_config.my_callsign() != callsign) {
             m_baseCall = Radio::base_callsign(m_config.my_callsign());
         }
@@ -874,17 +886,31 @@ void UI_Constructor::openSettings(int tab) {
             Q_EMIT pskReporterSendReport(true);
         }
 
-        if (m_config.restart_audio_input() &&
-            !m_config.audio_input_device().isNull()) {
-            Q_EMIT startAudioInputStream(m_config.audio_input_device(),
+        const auto currentInput = m_config.audio_input_device();
+        const auto currentOutput = m_config.audio_output_device();
+        const bool inputBackendChanged =
+            previousInput.backendType() != currentInput.backendType() ||
+            (currentInput.isTCIAudio() &&
+             previousInput.tciUrl() != currentInput.tciUrl());
+        const bool outputBackendChanged =
+            previousOutput.backendType() != currentOutput.backendType() ||
+            (currentOutput.isTCIAudio() &&
+             previousOutput.tciUrl() != currentOutput.tciUrl());
+
+        if (previousInput.isTCIAudio() && !currentInput.isTCIAudio())
+            m_tciSession->disconnectFromServer();
+
+        if ((m_config.restart_audio_input() || inputBackendChanged) &&
+            !currentInput.isNull()) {
+            Q_EMIT startAudioInputStream(currentInput,
                                          m_framesAudioInputBuffered, m_detector,
                                          m_config.audio_input_channel());
         }
 
-        if (m_config.restart_audio_output() &&
-            !m_config.audio_output_device().isNull()) {
+        if ((m_config.restart_audio_output() || outputBackendChanged) &&
+            !currentOutput.isNull()) {
             Q_EMIT initializeAudioOutputStream(
-                m_config.audio_output_device(),
+                currentOutput,
                 AudioDevice::Mono == m_config.audio_output_channel() ? 1 : 2,
                 m_msAudioOutputBuffered);
         }
@@ -2620,8 +2646,13 @@ void UI_Constructor::startTx() {
 void UI_Constructor::transmit() {
     if (m_modulator->isIdle()) {
         qDebug(mainwindow_js8) << "Asking the modulator to emit audio.";
-        Q_EMIT sendMessage(freq() + m_XIT, m_nSubMode, m_TxDelay, m_soundOutput,
-                           m_config.audio_output_channel());
+
+        AudioOutputStream *stream = m_audioOutput;
+        AudioDevice::Channel channel = m_config.audio_output_channel();
+
+        Q_EMIT sendMessage(freq() + m_XIT, m_nSubMode, m_TxDelay, stream,
+                           channel);
+
         ui->signal_meter_widget->setValue(0, 0);
     } else {
         qDebug(mainwindow_js8) << "Not asking the modulator to emit audio as "
@@ -5022,8 +5053,10 @@ void UI_Constructor::handle_transceiver_update(
     // discards it via the !state.isValid() guard below.
     updateCurrentBand();
     displayDialFrequency();
-    update_dynamic_property(ui->readFreq, "state", "ok");
-    ui->readFreq->setEnabled(false);
+    update_dynamic_property(
+        ui->readFreq, "state",
+        new_rig_state.online() ? "ok" : "error");
+    ui->readFreq->setEnabled(!new_rig_state.online());
     ui->readFreq->setText(new_rig_state.split() ? "CAT/S" : "CAT");
 }
 
@@ -5031,6 +5064,24 @@ void UI_Constructor::handle_transceiver_failure(QString const &reason) {
     update_dynamic_property(ui->readFreq, "state", "error");
     ui->readFreq->setEnabled(true);
     on_stopTxButton_clicked();
+
+    if (m_config.is_tci_rig_selected() &&
+        reason.startsWith(QStringLiteral("TCI connection lost:"))) {
+        // The configuration controller is already retrying. Do not call
+        // rigFailure(), whose own retry/dialog actions would compete with it.
+        // An asynchronous dialog allows reconnect while the alert is shown.
+        auto *alert = new QMessageBox{
+            QMessageBox::Warning,
+            tr("TCI connection lost"),
+            tr("%1\n\nJS8Call will attempt to reconnect automatically.")
+                .arg(reason),
+            QMessageBox::Ok,
+            this};
+        alert->setAttribute(Qt::WA_DeleteOnClose);
+        alert->open();
+        return;
+    }
+
     rigFailure(reason);
 }
 

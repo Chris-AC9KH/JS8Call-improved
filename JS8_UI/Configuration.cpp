@@ -203,6 +203,8 @@
 
 #include "moc_Configuration.cpp"
 
+#include <hamlib/rig.h>
+
 namespace {
 const QRegularExpression message_alphabet{"[^\\x00-\\x1F]*"};
 
@@ -460,6 +462,7 @@ class Configuration::impl final : public QDialog {
                (rig_params_.split_mode != TransceiverFactory::split_mode_none);
     }
     void set_cached_mode();
+
     bool open_rig(bool force = false);
     // bool set_mode ();
     void close_rig();
@@ -557,6 +560,8 @@ class Configuration::impl final : public QDialog {
     QThread *transceiver_thread_;
     TransceiverFactory transceiver_factory_;
     QList<QMetaObject::Connection> rig_connections_;
+    QTimer *tci_retry_timer_ = nullptr;
+    bool tci_retrying_ = false;
 
     QScopedPointer<Ui::configuration_dialog> ui_;
 
@@ -801,15 +806,51 @@ void Configuration::select_tab(int index) {
 }
 int Configuration::exec() { return m_->exec(); }
 bool Configuration::is_active() const { return m_->isVisible(); }
+bool Configuration::is_tci_rig_selected() const
+{
+    /*
+     * Literal is ugly here, but do we want to include TCITransceiver
+     * just so we can
+     * return rig_name() == TCITransceiver::transceiver_name_;
+     */
+    return rig_name() == QStringLiteral("TCI");
+}
+QUrl Configuration::tci_url() const
+{
+    QString endpoint = m_->rig_params_.network_port.trimmed();
 
-QAudioDevice const &Configuration::audio_input_device() const {
-    return m_->audio_input_device_;
+    if (endpoint.isEmpty())
+        endpoint = QStringLiteral("127.0.0.1:40001");
+
+    if (endpoint.startsWith(QStringLiteral("ws://"), Qt::CaseInsensitive) ||
+        endpoint.startsWith(QStringLiteral("wss://"), Qt::CaseInsensitive)) {
+        return QUrl(endpoint);
+        }
+
+    return QUrl(QStringLiteral("ws://%1").arg(endpoint));
+}
+void Configuration::set_tci_session(TCISession *session)
+{
+    m_->transceiver_factory_.set_tci_session(session);
+}
+AudioInputDevice Configuration::audio_input_device() const
+{
+    if (is_tci_rig_selected()) {
+        return AudioInputDevice::tci(tci_url());
+    }
+
+    return AudioInputDevice::system(m_->audio_input_device_);
 }
 AudioDevice::Channel Configuration::audio_input_channel() const {
     return m_->audio_input_channel_;
 }
-QAudioDevice const &Configuration::audio_output_device() const {
-    return m_->audio_output_device_;
+AudioOutputDevice Configuration::audio_output_device() const
+{
+    if (is_tci_rig_selected()) {
+        return AudioOutputDevice::tci(tci_url());
+    }
+
+    return AudioOutputDevice::system(m_->audio_output_device_);
 }
 AudioDevice::Channel Configuration::audio_output_channel() const {
     return m_->audio_output_channel_;
@@ -1801,6 +1842,19 @@ Configuration::impl::impl(Configuration *self, QDir const &temp_directory,
 
     transceiver_thread_ = new QThread{this};
     transceiver_thread_->start();
+
+    // A failed startup is shut down by TransceiverBase and Configuration.
+    // Retry by creating a fresh transceiver, not by reviving the stopped one.
+    tci_retry_timer_ = new QTimer{this};
+    tci_retry_timer_->setSingleShot(true);
+    connect(tci_retry_timer_, &QTimer::timeout, this, [this]() {
+        if (!tci_retrying_ ||
+            gather_rig_data().rig_name != QStringLiteral("TCI"))
+            return;
+
+        qCInfo(configuration_js8) << "Retrying TCI transceiver startup";
+        open_rig(true);
+    });
 }
 
 Configuration::impl::~impl() {
@@ -2784,6 +2838,17 @@ void Configuration::impl::write_settings() {
 
 void Configuration::impl::set_rig_invariants() {
     auto const &rig = ui_->rig_combo_box->currentText();
+
+    // TCI carries RX and TX audio over the WebSocket connection.
+    // Local audio devices and channel selections are not applicable.
+    const bool use_local_audio = rig != QStringLiteral("TCI");
+
+    ui_->sound_input_combo_box->setEnabled(use_local_audio);
+    ui_->sound_input_channel_combo_box->setEnabled(use_local_audio);
+
+    ui_->sound_output_combo_box->setEnabled(use_local_audio);
+    ui_->sound_output_channel_combo_box->setEnabled(use_local_audio);
+
     auto const &ptt_port = ui_->PTT_port_combo_box->currentText();
     auto ptt_method = static_cast<TransceiverFactory::PTTMethod>(
         ui_->PTT_method_button_group->checkedId());
@@ -4339,6 +4404,11 @@ bool Configuration::impl::open_rig(bool force) {
     auto result = false;
 
     auto const rig_data = gather_rig_data();
+    if (rig_data.rig_name != QStringLiteral("TCI")) {
+        tci_retrying_ = false;
+        if (tci_retry_timer_)
+            tci_retry_timer_->stop();
+    }
     if (force || !rig_active_ || rig_data != saved_rig_params_) {
         try {
             close_rig();
@@ -4490,6 +4560,13 @@ void Configuration::impl::handle_transceiver_update(
         << "Configuration::handle_transceiver_update: Transceiver State #:"
         << sequence_number << state;
 
+    if (state.online() && tci_retrying_) {
+        qCInfo(configuration_js8) << "TCI transceiver startup recovered";
+        tci_retrying_ = false;
+        if (tci_retry_timer_)
+            tci_retry_timer_->stop();
+    }
+
     // only follow rig on some information, ignore other stuff
     cached_rig_state_.online(state.online());
     cached_rig_state_.frequency(state.frequency());
@@ -4513,7 +4590,9 @@ void Configuration::impl::handle_transceiver_update(
                 TransceiverFactory::PTT_method_DTR == ptt_method ||
                 TransceiverFactory::PTT_method_RTS == ptt_method);
         }
-    } else {
+    } else if (!tci_retrying_) {
+        // A failed TCI startup has already been closed. Do not cancel its
+        // pending retry when the base class publishes its offline state.
         close_rig();
     }
 
@@ -4537,8 +4616,24 @@ void Configuration::impl::handle_transceiver_update(
 void Configuration::impl::handle_transceiver_failure(QString const &reason) {
     qCDebug(configuration_js8)
         << "Configuration::handle_transceiver_failure: reason:" << reason;
+    // A TCI startup failure closes the transceiver and disconnects all of
+    // its signals. Only Configuration can create and start its replacement.
+    const bool is_tci = saved_rig_params_.rig_name == QStringLiteral("TCI");
+    const bool first_failure = !tci_retrying_;
     close_rig();
     ui_->test_PTT_push_button->setChecked(false);
+
+    if (is_tci) {
+        tci_retrying_ = true;
+        qCWarning(configuration_js8)
+            << "TCI unavailable; retrying startup in 3 seconds:" << reason;
+        tci_retry_timer_->start(3000);
+        // Preserve the initial failure notification, without spamming the
+        // UI on each subsequent unsuccessful retry.
+        if (first_failure && !isVisible())
+            Q_EMIT self_->transceiver_failure(reason);
+        return;
+    }
 
     if (isVisible()) {
         JS8MessageBox::critical_message(this, tr("Rig failure"), reason);
@@ -4549,6 +4644,8 @@ void Configuration::impl::handle_transceiver_failure(QString const &reason) {
 }
 
 void Configuration::impl::close_rig() {
+    if (tci_retry_timer_)
+        tci_retry_timer_->stop();
     ui_->test_PTT_push_button->setEnabled(false);
 
     // revert to no rig configured

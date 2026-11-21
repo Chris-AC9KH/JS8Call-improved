@@ -8,6 +8,7 @@
 #include "EmulateSplitTransceiver.h"
 #include "HRDTransceiver.h"
 #include "HamlibTransceiver.h"
+#include "TCITransceiver.h"
 
 #include <QMetaType>
 
@@ -25,14 +26,29 @@ enum // supported non-hamlib radio interfaces
     NonHamlibBaseId = 9899,
     CommanderId,
     HRDId,
+    TCIId,
+    OmniRigOneId,
+    OmniRigTwoId
 };
 }
 
-TransceiverFactory::TransceiverFactory() {
+TransceiverFactory::TransceiverFactory(TCISession *tci_session)
+    : tci_session_{tci_session}
+{
     HamlibTransceiver::register_transceivers(&transceivers_);
     DXLabSuiteCommanderTransceiver::register_transceivers(&transceivers_,
                                                           CommanderId);
     HRDTransceiver::register_transceivers(&transceivers_, HRDId);
+
+    transceivers_[TCITransceiver::transceiver_name_] =
+        Capabilities{
+            TCIId,                 // model_number
+            Capabilities::network, //port_type
+            true,                  // has_CAT_PTT
+            false,                 // has_CAT_PTT_mic_data
+            false,                 // has_CAT_indirect_serial_PTT
+            false                  // asynchronous (PollingTransceiver for now)
+        };
 }
 
 TransceiverFactory::~TransceiverFactory() {
@@ -67,9 +83,20 @@ bool TransceiverFactory::has_asynchronous_CAT(QString const &name) const {
     return supported_transceivers()[name].asynchronous_;
 }
 
+void TransceiverFactory::set_tci_session(TCISession *session)
+{
+    tci_session_ = session;
+}
+
 std::unique_ptr<Transceiver>
 TransceiverFactory::create(ParameterPack const &params,
                            QThread *target_thread) {
+    qWarning() << "TransceiverFactory TCI create"
+           << "factory=" << this
+           << "tci_session=" << tci_session_
+           << "target_thread=" << target_thread
+           << "network_port=" << params.network_port;
+
     std::unique_ptr<Transceiver> result;
     switch (supported_transceivers()[params.rig_name].model_number_) {
     case CommanderId: {
@@ -112,6 +139,19 @@ TransceiverFactory::create(ParameterPack const &params,
             std::move(basic_transceiver), params.network_port,
             PTT_method_CAT == params.ptt_type, params.audio_source,
             params.poll_interval});
+        if (target_thread) {
+            result->moveToThread(target_thread);
+        }
+    } break;
+
+    case TCIId: {
+        if (!tci_session_) {
+            throw error{
+                tr("TCI session is not available. TCI cannot be tested from this context.")
+            };
+        }
+
+        result.reset(new TCITransceiver{params, tci_session_});
         if (target_thread) {
             result->moveToThread(target_thread);
         }

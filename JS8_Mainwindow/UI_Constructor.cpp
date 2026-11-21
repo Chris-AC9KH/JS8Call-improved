@@ -4,6 +4,7 @@
  *   constructs and connects UI elements to the JS8 "engine"
  */
 
+#include "JS8_Audio/AudioOutputManager.h"
 #include "JS8_Main/MsgNotifyDB.h"
 #include "JS8_UI/mainwindow.h"
 #include "JS8_UI/styles.h"
@@ -36,8 +37,8 @@ UI_Constructor::UI_Constructor(QString const &program_info,
       m_lastDialFreq{0},
       m_detector{new Detector{JS8_RX_SAMPLE_RATE, JS8_NTMAX}},
       m_FFTSize{6912 / 2}, // conservative value to avoid buffer overruns
-      m_soundInput{new SoundInput}, m_modulator{new Modulator},
-      m_soundOutput{new SoundOutput}, m_notification{new NotificationAudio},
+      m_audioInput{new AudioInputManager}, m_modulator{new Modulator},
+      m_audioOutput{new AudioOutputManager}, m_notification{new NotificationAudio},
       m_cq_loop{new TxLoop{"CQ calls"}}, m_hb_loop{new TxLoop{"HB calls"}},
       m_decoder{this}, m_secBandChanged{0}, m_freqNominal{0},
       m_freqTxNominal{0}, m_XIT{0}, m_sec0{-1},
@@ -69,8 +70,13 @@ UI_Constructor::UI_Constructor(QString const &program_info,
       m_pskReporter{new PSKReporter{&m_config, program_info}}, // UR
       m_spotClient{new SpotClient{"spot.js8call.com", 50000, program_info}},
       m_aprsClient{new APRSISClient{"rotate.aprs2.net", 14580}},
-      m_aprsInboundRelay{nullptr} {
+      m_tciSession{new TCISession},
+      m_aprsInboundRelay{nullptr}
+    {
     ui->setupUi(this);
+    const bool isTci = m_config.is_tci_rig_selected();
+    ui->inAttenuation->setVisible(isTci);
+    ui->rxAttenuationLabel->setVisible(isTci);
 
     // Per-band persistent activity storage (activity.db3) - issue #267.
     // Built as soon as the panes exist, because readSettings() below runs
@@ -144,10 +150,15 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     // start audio thread and hook up slots & signals for shutdown management
     // these objects need to be in the audio thread so that invoking
     // their slots is done in a thread safe way
-    m_soundOutput->moveToThread(&m_audioThread);
+    m_audioOutput->moveToThread(&m_audioThread);
     m_modulator->moveToThread(&m_audioThread);
-    m_soundInput->moveToThread(&m_audioThread);
+    m_audioInput->moveToThread(&m_audioThread);
+    m_tciSession->moveToThread(&m_audioThread);
     m_detector->moveToThread(&m_audioThread);
+
+    m_audioInput->setTciSession(m_tciSession);
+    m_audioOutput->setTciSession(m_tciSession);
+    m_config.set_tci_session(m_tciSession);
 
     // notification audio operates in its own thread at a lower priority
     m_notification->moveToThread(&m_notificationAudioThread);
@@ -258,21 +269,49 @@ UI_Constructor::UI_Constructor(QString const &program_info,
     connect(&m_networkThread, &QThread::finished, m_spotClient,
             &QObject::deleteLater);
 
-    // hook up sound output stream slots & signals and disposal
-    connect(this, &UI_Constructor::initializeAudioOutputStream, m_soundOutput,
-            &SoundOutput::setFormat);
-    connect(m_soundOutput, &SoundOutput::error, this,
+    // hook up audio output stream slots & signals and disposal
+    connect(this, &UI_Constructor::initializeAudioOutputStream, m_audioOutput,
+            &AudioOutputManager::setDevice);
+
+    connect(m_audioOutput, &AudioOutputManager::error, this,
             [this](QString const &errorMsg) {
                 if (m_config.audio_output_device().isNull() || m_config.is_active()) {
                     return; // nothing configured yet, or user is fixing it in Settings
                 }
                 showSoundOutError(errorMsg);
             });
-    connect(m_soundOutput, &SoundOutput::error, &m_config,
+
+    connect(m_audioOutput, &AudioOutputManager::error,
+          this,
+          [this](QString const &message) {
+              Q_UNUSED(message)
+
+              if (!m_transmitting && !m_tune)
+                return;
+
+            qCWarning(mainwindow_js8)
+                << "Aborting transmit because audio output failed:"
+                << message;
+
+            Q_EMIT endTransmitMessage(true);
+
+            if (m_tune)
+              Q_EMIT tune(false);
+
+          stopTx();
+      },
+      Qt::QueuedConnection);
+
+    connect(m_audioOutput, &AudioOutputManager::error, &m_config,
             &Configuration::invalidate_audio_output_device);
-    connect(this, &UI_Constructor::outAttenuationChanged, m_soundOutput,
-            &SoundOutput::setAttenuation);
-    connect(&m_audioThread, &QThread::finished, m_soundOutput,
+
+    connect(this, &UI_Constructor::outAttenuationChanged, m_audioOutput,
+            &AudioOutputManager::setAttenuation);
+
+    connect(this, &UI_Constructor::finished, m_audioOutput,
+            &AudioOutputManager::stop);
+
+    connect(&m_audioThread, &QThread::finished, m_audioOutput,
             &QObject::deleteLater);
 
     connect(this, &UI_Constructor::initializeNotificationAudioOutputStream,
@@ -291,28 +330,46 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             &Modulator::stop);
     connect(this, &UI_Constructor::tune, m_modulator, &Modulator::tune);
     connect(this, &UI_Constructor::sendMessage, m_modulator, &Modulator::start);
+    connect(this, &UI_Constructor::finished, m_modulator,
+          [this]() {
+              m_modulator->stop(true);
+          });
     connect(&m_audioThread, &QThread::finished, m_modulator,
             &QObject::deleteLater);
 
     // hook up the audio input stream signals, slots and disposal
-    connect(this, &UI_Constructor::startAudioInputStream, m_soundInput,
-            &SoundInput::start);
-    connect(this, &UI_Constructor::suspendAudioInputStream, m_soundInput,
-            &SoundInput::suspend);
-    connect(this, &UI_Constructor::resumeAudioInputStream, m_soundInput,
-            &SoundInput::resume);
-    connect(this, &UI_Constructor::finished, m_soundInput, &SoundInput::stop);
-    connect(m_soundInput, &SoundInput::error, this,
+    connect(this, &UI_Constructor::startAudioInputStream, m_audioInput,
+            &AudioInputManager::start);
+    // The receiver is on the audio thread, so AutoConnection queues
+    // slider changes without racing incoming audio callbacks.
+    connect(ui->inAttenuation, &QSlider::valueChanged, m_audioInput,
+            [this](int value) {
+                m_audioInput->setTciRxAttenuation(value / 10.0);
+            });
+    connect(this, &UI_Constructor::suspendAudioInputStream, m_audioInput,
+            &AudioInputManager::suspend);
+
+    connect(this, &UI_Constructor::resumeAudioInputStream, m_audioInput,
+            &AudioInputManager::resume);
+
+    connect(this, &UI_Constructor::finished, m_audioInput,
+            &AudioInputManager::stop);
+
+    connect(m_audioInput, &AudioInputManager::error, this,
         [this](QString const &errorMsg) {
             if (m_config.audio_input_device().isNull() || m_config.is_active()) {
                 return;
             }
             showSoundInError(errorMsg);
         });
-    connect(m_soundInput, &SoundInput::error, &m_config,
+
+    connect(m_audioInput, &AudioInputManager::systemAudioError, &m_config,
             &Configuration::invalidate_audio_input_device);
-    // connect(m_soundInput, &SoundInput::status, this,
-    connect(&m_audioThread, &QThread::finished, m_soundInput,
+
+    // connect(m_audioInput, &AudioInputManager::status, this,
+
+
+    connect(&m_audioThread, &QThread::finished, m_audioInput,
             &QObject::deleteLater);
 
     connect(this, &UI_Constructor::finished, this, &UI_Constructor::close);
@@ -1162,7 +1219,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
 
         displayActivity(true);
     });
-          
+
     auto blockStation =
         new QAction(QString("Block This Station"), ui->tableWidgetCalls);
     connect(blockStation, &QAction::triggered, this, [this]() {
@@ -1282,7 +1339,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
             ui->tableWidgetCalls, &QTableWidget::customContextMenuRequested, this,
             [this, logAction, historyAction, localMessageAction, clearAction4,
              clearActionAll, addStation, removeStation, blockStation](QPoint const &point) {
-                
+
             QMenu *menu = new QMenu(ui->tableWidgetCalls);
 
             // clear the selection of the call widget on right click
@@ -1381,7 +1438,7 @@ UI_Constructor::UI_Constructor(QString const &program_info,
                                        ? "Remove This Group"
                                        : "Remove This Station");
             menu->addAction(removeStation);
-            
+
             blockStation->setDisabled(missingCallsign || isAllCall ||
                                       selectedCall.startsWith("@"));
 

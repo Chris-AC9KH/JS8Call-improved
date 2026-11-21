@@ -6,6 +6,8 @@
 #ifndef SOUNDOUT_H__
 #define SOUNDOUT_H__
 
+#include "JS8_Audio/AudioOutputStream.h"
+
 #include <QAudioDevice>
 #include <QAudioFormat>
 #include <QAudioSink>
@@ -21,14 +23,15 @@
  * `setFormat()` or `setDeviceFormat()` and then `restart()` with a
  * prepared `QIODevice` for streaming audio.
  */
-class SoundOutput : public QObject {
+class SoundOutput : public AudioOutputStream {
     Q_OBJECT;
 
   public:
     /**
      * @brief Default-construct a SoundOutput helper.
      */
-    SoundOutput() = default;
+    explicit SoundOutput(QObject *parent = nullptr)
+    : AudioOutputStream(parent) {}
 
     /**
      * @brief Current attenuation (volume multiplier).
@@ -65,27 +68,27 @@ class SoundOutput : public QObject {
      * @brief Restart output streaming from the given `QIODevice` source.
      * @param source The device providing audio samples for playback.
      */
-    void restart(QIODevice *source);
+    void restart(QIODevice *) override;
 
     /**
      * @brief Temporarily suspend output streaming.
      */
-    void suspend();
+    void suspend() override;
 
     /**
      * @brief Resume output after a suspend.
      */
-    void resume();
+    void resume() override;
 
     /**
      * @brief Reset internal state and stop any active stream.
      */
-    void reset();
+    void reset() override;
 
     /**
      * @brief Stop playback immediately.
      */
-    void stop();
+    void stop() override;
 
     /**
      * @brief Set attenuation (volume multiplier) for playback.

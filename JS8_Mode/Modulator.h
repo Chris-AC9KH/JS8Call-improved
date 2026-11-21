@@ -11,7 +11,7 @@
 #include <QAudio>
 #include <QPointer>
 
-class SoundOutput;
+class AudioOutputStream;
 
 /**
  * @class Modulator
@@ -62,11 +62,11 @@ class Modulator final : public AudioDevice {
 
     // Slots
 
-    /**
+  /**
      * @brief Start transmission with the given parameters.
      */
     Q_SLOT void start(double audioFrequency, int submode, double tx_delay,
-                      SoundOutput *stream, Channel channel);
+                AudioOutputStream *stream, Channel channel);
 
     /**
      * @brief Stop transmission.
@@ -106,7 +106,7 @@ class Modulator final : public AudioDevice {
   private:
     // Data members
 
-    QPointer<SoundOutput> m_stream;
+    QPointer<AudioOutputStream> m_stream;
     std::atomic<State> m_state = State::Idle;
     bool m_quickClose = false;
     bool m_tuning = false;

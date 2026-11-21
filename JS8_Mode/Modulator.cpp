@@ -4,7 +4,7 @@
  */
 #include "Modulator.h"
 #include "JS8Submode.h"
-#include "JS8_Audio/SoundOutput.h"
+#include "JS8_Audio/AudioOutputStream.h"
 #include "JS8_Include/commons.h"
 #include "JS8_Main/DriftingDateTime.h"
 #include "JS8_UI/mainwindow.h"
@@ -36,7 +36,7 @@ constexpr auto MS_PER_SEC = 1000;
  * @param channel
  */
 void Modulator::start(double const frequency, int const submode,
-                      double const txDelay, SoundOutput *const stream,
+                      double const txDelay, AudioOutputStream *const stream,
                       Channel const channel) {
     Q_ASSERT(stream);
 

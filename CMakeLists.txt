@@ -256,11 +256,19 @@ target_sources(
   ${TARGET} PRIVATE
   vendor/sqlite3/sqlite3.c
   JS8_Audio/AudioDevice.cpp
+  JS8_Audio/AudioInputDevice.h
+  JS8_Audio/AudioInputSource.h
+  JS8_Audio/AudioOutputStream.h
+  JS8_Audio/AudioInputManager.cpp
+  JS8_Audio/AudioOutputDevice.h
+  JS8_Audio/AudioOutputManager.cpp
   JS8_Audio/BWFFile.cpp
   JS8_Audio/NotificationAudio.cpp
   JS8_Audio/NotificationSoundOutput.cpp
   JS8_Audio/SoundInput.cpp
   JS8_Audio/SoundOutput.cpp
+  JS8_Audio/TCIAudioInput.cpp
+  JS8_Audio/TCIAudioOutput.cpp
   JS8_JSC/JSC.cpp
   JS8_JSC/JSC_checker.cpp
   JS8_JSC/JSC_list.cpp
@@ -343,12 +351,18 @@ target_sources(
   JS8_Network/NetworkServerLookup.cpp
   JS8_Network/PSKReporter.cpp
   JS8_Network/SpotClient.cpp
+  JS8_Network/TCIClient.cpp
+  JS8_Network/TciAudioPcm.cpp
+  JS8_Network/TciProtocolHandler.cpp
+  JS8_Network/TCIStreamFrame.cpp
   JS8_Network/TCPClient.cpp
+  JS8_Network/TCISession.cpp
   JS8_Transceiver/DXLabSuiteCommanderTransceiver.cpp
   JS8_Transceiver/EmulateSplitTransceiver.cpp
   JS8_Transceiver/HamlibTransceiver.cpp
   JS8_Transceiver/HRDTransceiver.cpp
   JS8_Transceiver/PollingTransceiver.cpp
+  JS8_Transceiver/TCITransceiver.cpp
   JS8_Transceiver/Transceiver.cpp
   JS8_Transceiver/TransceiverBase.cpp
   JS8_Transceiver/TransceiverFactory.cpp
@@ -378,8 +392,8 @@ target_link_libraries(
   Qt::Multimedia
   Qt::Network
   Qt::SerialPort
-  Qt::Widgets
   Qt::WebSockets
+  Qt::Widgets
 )
 
 #------------------------------------------------------------------------------#

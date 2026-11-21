@@ -2,6 +2,8 @@
 #define CONFIGURATION_HPP_
 
 #include "JS8_Audio/AudioDevice.h"
+#include "JS8_Audio/AudioInputDevice.h"
+#include "JS8_Audio/AudioOutputDevice.h"
 #include "JS8_Include/pimpl_h.h"
 #include "JS8_Main/IARURegions.h"
 #include "JS8_Main/Radio.h"
@@ -25,6 +27,7 @@ class FrequencyList_v3;
 class StationList;
 class QStringListModel;
 class QHostAddress;
+class TCISession;
 
 //
 // Class Configuration
@@ -79,9 +82,9 @@ class Configuration final : public QObject {
     QDir temp_dir() const;
     QDir writeable_data_dir() const;
 
-    QAudioDevice const &audio_input_device() const;
+    AudioInputDevice audio_input_device() const;
     AudioDevice::Channel audio_input_channel() const;
-    QAudioDevice const &audio_output_device() const;
+    AudioOutputDevice audio_output_device() const;
     AudioDevice::Channel audio_output_channel() const;
     QAudioDevice const &notification_audio_output_device() const;
 
@@ -160,6 +163,8 @@ class Configuration final : public QObject {
     int watchdog() const;
     bool TX_messages() const;
     bool split_mode() const;
+    bool is_tci_rig_selected() const;
+    QUrl tci_url() const;
     QString opCall() const;
     QString ptt_command() const;
     QString aprs_server_name() const;
@@ -295,6 +300,8 @@ class Configuration final : public QObject {
 
     // check if a real rig is configured
     bool is_dummy_rig() const;
+
+    void set_tci_session(TCISession *session);
 
     // Frequency resolution of the rig
     //

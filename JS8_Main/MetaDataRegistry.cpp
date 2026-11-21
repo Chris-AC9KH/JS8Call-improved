@@ -8,6 +8,7 @@
 #include "FrequencyList.h"
 #include "IARURegions.h"
 #include "JS8_Audio/AudioDevice.h"
+#include "JS8_Network/TciProtocolHandler.h"
 #include "JS8_Transceiver/Transceiver.h"
 #include "JS8_Transceiver/TransceiverFactory.h"
 #include "JS8_UI/Configuration.h"
@@ -47,8 +48,10 @@ void register_types() {
     qRegisterMetaType<FrequencyList_v3::Item>("Item_v3");
     qRegisterMetaType<FrequencyList_v3::FrequencyItems>("FrequencyItems_v3");
 
-    // Audio device
+    // Audio devices
     qRegisterMetaType<AudioDevice::Channel>("AudioDevice::Channel");
+    qRegisterMetaType<AudioInputDevice>("AudioInputDevice");
+    qRegisterMetaType<AudioOutputDevice>("AudioOutputDevice");
 
     // Configuration
     qRegisterMetaType<Configuration::DataMode>("Configuration::DataMode");
@@ -75,6 +78,9 @@ void register_types() {
         "TransceiverFactory::TXAudioSource");
     qRegisterMetaType<TransceiverFactory::SplitMode>(
         "TransceiverFactory::SplitMode");
+
+    // TCI
+    qRegisterMetaType<TciTxAudioPolicy>("TciTxAudioPolicy");
 
     // Waterfall
     qRegisterMetaType<WF::Spectrum>("Spectrum");
