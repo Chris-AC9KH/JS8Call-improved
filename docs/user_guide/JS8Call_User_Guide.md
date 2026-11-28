@@ -527,8 +527,9 @@ Most operators testing the application can be found +/- 4-8kHz from the standard
 
 | **Band** | **Frequency** | **Spacing** | **Above/below** | **Mode** |
 |--------:|-----------|----------|---------|------|
-| 160M | 1.842MHz | 2kHZ | above | FT8 |
+| 160M | 1.8435MHz | 3.5kHZ | above | FT8 |
 |  80M | 3.578MHz | 5kHz | above | FT8 |
+|  60m | 5.353MHz | 4kHz | below | FT8 |
 |  40M | 7.078MHz | 4kHz | above | FT8 |
 |  30M | 10.130MHz |  6kHz | below | FT8 |
 |  20M | 14.078MHz | 4kHz | above | FT8 |
