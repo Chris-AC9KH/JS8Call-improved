@@ -93,6 +93,8 @@ class WideGraph : public QWidget {
     void on_bppSpinBox_valueChanged(int arg1);
     void on_spec2dComboBox_currentIndexChanged(int);
     void on_fStartSpinBox_valueChanged(int n);
+    void on_fEndSpinBox_valueChanged(int n);
+    void on_fitSpanCheckBox_toggled(bool checked);
     void on_paletteComboBox_activated(int);
     void on_cbFlatten_toggled(bool b);
     void on_adjust_palette_push_button_clicked(bool);
